@@ -844,6 +844,18 @@ export class Game {
     return this.chat?.socket?.id ?? "";
   }
 
+  getMyTeam() {
+    const myId = this.getMySocketId();
+    const fromLobby = this.lobbyState.players.find((player) => String(player?.id ?? "") === myId);
+    const team = fromLobby?.team ?? this.lobbyState.selectedTeam ?? null;
+    return team === "alpha" || team === "bravo" ? team : null;
+  }
+
+  isEnemyTeam(team) {
+    const myTeam = this.getMyTeam();
+    return Boolean(myTeam && team && team !== myTeam);
+  }
+
   getTeamColor(team) {
     if (team === "alpha") {
       return 0x63b9ff;
@@ -860,6 +872,8 @@ export class Game {
     canvas.height = 128;
     const ctx = canvas.getContext("2d");
     const safeName = String(name ?? "PLAYER").slice(0, 16);
+    const teamLabel = team === "alpha" ? "ALPHA" : team === "bravo" ? "BRAVO" : "NEUTRAL";
+    const displayName = `[${teamLabel}] ${safeName}`;
 
     if (ctx) {
       const teamColor = this.getTeamColor(team);
@@ -877,7 +891,7 @@ export class Game {
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillStyle = "rgba(225, 242, 255, 0.98)";
-      ctx.fillText(safeName, canvas.width * 0.5, canvas.height * 0.5 + 2);
+      ctx.fillText(displayName, canvas.width * 0.5, canvas.height * 0.5 + 2);
     }
 
     const texture = new THREE.CanvasTexture(canvas);
@@ -1122,7 +1136,8 @@ export class Game {
       const distance = this._toRemote.length();
 
       if (remote.nameTag) {
-        remote.nameTag.visible = distance <= REMOTE_NAME_TAG_DISTANCE;
+        const hideEnemyName = this.isEnemyTeam(remote.team);
+        remote.nameTag.visible = !hideEnemyName && distance <= REMOTE_NAME_TAG_DISTANCE;
       }
     }
   }
