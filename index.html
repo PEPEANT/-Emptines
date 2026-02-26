@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RECLAIM FPS</title>
+    <link rel="stylesheet" href="./src/styles/main.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./node_modules/three/build/three.module.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <div id="hud">
+      <div class="hud-left">
+        <div>HP <span id="hud-health">100</span></div>
+        <div>SCORE <span id="hud-score">0</span></div>
+      </div>
+      <div class="hud-right">
+        <div>
+          AMMO <span id="hud-ammo">30</span>/<span id="hud-reserve">150</span>
+        </div>
+        <div id="hud-status">준비</div>
+      </div>
+    </div>
+
+    <div id="crosshair" aria-hidden="true"></div>
+    <div id="hitmarker" aria-hidden="true"></div>
+    <div id="damage-overlay" aria-hidden="true"></div>
+
+    <div id="start-overlay" class="overlay show overlay-start">
+      <section class="start-panel">
+        <img
+          class="start-emblem"
+          src="/assets/graphics/ui/logo.svg"
+          alt="RECLAIM logo"
+          loading="eager"
+          decoding="async"
+        />
+        <p class="start-kicker">OPERATION FRONTLINE RECOVERY</p>
+        <h1>RECLAIM FPS</h1>
+        <p class="start-desc">
+          붕괴된 구역을 탈환하고 점수를 쌓아 생존하세요.
+        </p>
+        <div class="start-controls">
+          <span>WASD 이동</span>
+          <span>SHIFT 달리기</span>
+          <span>SPACE 점프</span>
+          <span>마우스 조준</span>
+          <span>좌클릭 사격</span>
+          <span>R 재장전</span>
+        </div>
+        <button id="start-button" class="btn-deploy" type="button">DEPLOY NOW</button>
+      </section>
+    </div>
+
+    <div id="pause-overlay" class="overlay overlay-pause">
+      <h2>일시정지</h2>
+      <p>화면 클릭 후 플레이를 계속하세요</p>
+    </div>
+
+    <div id="gameover-overlay" class="overlay overlay-gameover">
+      <h2>GAME OVER</h2>
+      <p>최종 점수: <span id="final-score">0</span></p>
+      <button id="restart-button" type="button">다시 시작</button>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
