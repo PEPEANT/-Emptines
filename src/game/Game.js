@@ -22,6 +22,8 @@ const ONLINE_ROOM_CODE = "GLOBAL";
 const ONLINE_MAX_PLAYERS = 50;
 const REMOTE_SYNC_INTERVAL = 1 / 12;
 const REMOTE_NAME_TAG_DISTANCE = 72;
+const PVP_HIT_SCORE = 10;
+const PVP_KILL_SCORE = 100;
 
 function isLikelyTouchDevice() {
   if (typeof window === "undefined" || typeof navigator === "undefined") {
@@ -215,6 +217,10 @@ export class Game {
     this.remoteSyncClock = 0;
     this._toRemote = new THREE.Vector3();
     this._remoteHead = new THREE.Vector3();
+    this._pvpBox = new THREE.Box3();
+    this._pvpBoxMin = new THREE.Vector3();
+    this._pvpBoxMax = new THREE.Vector3();
+    this._pvpHitPoint = new THREE.Vector3();
 
     this.objective = {
       alphaBase: new THREE.Vector3(),
@@ -1218,6 +1224,120 @@ export class Game {
     });
   }
 
+  findOnlineShotTarget(maxDistance) {
+    if (this.activeMatchMode !== "online" || this.remotePlayers.size === 0) {
+      return null;
+    }
+
+    const myTeam = this.getMyTeam();
+    if (!myTeam) {
+      return null;
+    }
+
+    let best = null;
+    let bestDistance = Number.isFinite(maxDistance) ? maxDistance : Infinity;
+
+    for (const remote of this.remotePlayers.values()) {
+      if (!this.isEnemyTeam(remote.team)) {
+        continue;
+      }
+
+      const base = remote.group.position;
+      this._pvpBoxMin.set(base.x - 0.38, base.y + 0.02, base.z - 0.38);
+      this._pvpBoxMax.set(base.x + 0.38, base.y + PLAYER_HEIGHT + 0.28, base.z + 0.38);
+      this._pvpBox.set(this._pvpBoxMin, this._pvpBoxMax);
+
+      const hitPoint = this.raycaster.ray.intersectBox(this._pvpBox, this._pvpHitPoint);
+      if (!hitPoint) {
+        continue;
+      }
+
+      const distance = hitPoint.distanceTo(this.camera.position);
+      if (distance > bestDistance) {
+        continue;
+      }
+
+      bestDistance = distance;
+      best = {
+        id: remote.id,
+        distance,
+        point: hitPoint.clone()
+      };
+    }
+
+    return best;
+  }
+
+  emitPvpShot(targetId) {
+    if (!targetId || this.activeMatchMode !== "online") {
+      return;
+    }
+
+    const socket = this.chat?.socket;
+    if (!socket?.connected || !this.lobbyState.roomCode) {
+      return;
+    }
+
+    socket.emit("pvp:shoot", { targetId });
+  }
+
+  handlePvpDamage(payload = {}) {
+    if (this.activeMatchMode !== "online") {
+      return;
+    }
+
+    const attackerId = String(payload.attackerId ?? "");
+    const victimId = String(payload.victimId ?? "");
+    const damage = Math.max(0, Number(payload.damage ?? 0));
+    const killed = Boolean(payload.killed);
+    const victimHealth = Number(payload.victimHealth);
+    const myId = this.getMySocketId();
+
+    if (!myId) {
+      return;
+    }
+
+    if (attackerId === myId) {
+      if (killed) {
+        this.state.kills += 1;
+        this.state.score += PVP_KILL_SCORE;
+        this.hud.pulseHitmarker();
+        this.hud.setStatus(`+${PVP_KILL_SCORE} 처치`, false, 0.55);
+
+        const now = this.clock.getElapsedTime();
+        if (now - this.state.lastKillTime < 4.0) {
+          this.state.killStreak += 1;
+        } else {
+          this.state.killStreak = 1;
+        }
+        this.state.lastKillTime = now;
+        this.hud.setKillStreak(this.state.killStreak);
+      } else if (damage > 0) {
+        this.state.score += PVP_HIT_SCORE;
+        this.hud.pulseHitmarker();
+      }
+    }
+
+    if (victimId === myId) {
+      this.hud.flashDamage();
+
+      if (killed) {
+        this.state.health = 100;
+        this.state.killStreak = 0;
+        this.hud.setKillStreak(0);
+        this.hud.setStatus("사망 - 리스폰", true, 0.9);
+        this.setOnlineSpawnFromLobby();
+        this.emitLocalPlayerSync(REMOTE_SYNC_INTERVAL, true);
+      } else {
+        const nextHealth = Number.isFinite(victimHealth)
+          ? victimHealth
+          : Math.max(0, this.state.health - damage);
+        this.state.health = Math.max(0, Math.min(100, nextHealth));
+        this.hud.setStatus(`피해 -${damage}`, true, 0.35);
+      }
+    }
+  }
+
   handleLocalBlockChanged(change) {
     if (this.activeMatchMode !== "online") {
       return;
@@ -2168,6 +2288,29 @@ export class Game {
     this.raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
     const blockHit = this.voxelWorld.raycast(this.raycaster, 120);
     const maxEnemyDistance = blockHit ? Math.max(0, blockHit.distance - 0.001) : Infinity;
+
+    if (this.activeMatchMode === "online") {
+      if (!this.getMyTeam()) {
+        this.hud.setStatus("팀 선택 후 공격 가능", true, 0.7);
+        if (blockHit?.point) {
+          this.spawnHitSpark(blockHit.point);
+        }
+        return;
+      }
+
+      const remoteHit = this.findOnlineShotTarget(maxEnemyDistance);
+      if (!remoteHit) {
+        if (blockHit?.point) {
+          this.spawnHitSpark(blockHit.point);
+        }
+        return;
+      }
+
+      this.spawnHitSpark(remoteHit.point);
+      this.emitPvpShot(remoteHit.id);
+      return;
+    }
+
     const result = this.enemyManager.handleShot(this.raycaster, maxEnemyDistance);
 
     if (!result.didHit) {
@@ -2712,6 +2855,10 @@ export class Game {
 
     socket.on("block:update", (payload) => {
       this.applyRemoteBlockUpdate(payload);
+    });
+
+    socket.on("pvp:damage", (payload) => {
+      this.handlePvpDamage(payload);
     });
 
     socket.on("room:started", ({ code }) => {

@@ -46,6 +46,7 @@ async function probeExistingServer(port) {
 
 const DEFAULT_ROOM_CODE = "GLOBAL";
 const MAX_ROOM_PLAYERS = 50;
+const PVP_DAMAGE = 34;
 
 const rooms = new Map();
 let playerCount = 0;
@@ -129,6 +130,14 @@ function sanitizeBlockPayload(raw = {}) {
   return payload;
 }
 
+function sanitizeShootPayload(raw = {}) {
+  const targetId = String(raw.targetId ?? "").trim();
+  if (!targetId) {
+    return null;
+  }
+  return { targetId };
+}
+
 function serializeRoom(room) {
   pruneRoomPlayers(room);
   return {
@@ -138,7 +147,8 @@ function serializeRoom(room) {
       id: player.id,
       name: player.name,
       team: player.team ?? null,
-      state: player.state ?? null
+      state: player.state ?? null,
+      hp: Number(player.hp ?? 100)
     }))
   };
 }
@@ -246,7 +256,10 @@ function joinDefaultRoom(socket, nameOverride = null) {
     id: socket.id,
     name,
     team: null,
-    state: sanitizePlayerState()
+    state: sanitizePlayerState(),
+    hp: 100,
+    kills: 0,
+    deaths: 0
   });
 
   updateHost(room);
@@ -363,6 +376,60 @@ io.on("connection", (socket) => {
     socket.to(room.code).emit("block:update", {
       id: socket.id,
       ...sanitized
+    });
+  });
+
+  socket.on("pvp:shoot", (payload = {}) => {
+    const roomCode = socket.data.roomCode;
+    const room = roomCode ? rooms.get(roomCode) : null;
+    if (!room) {
+      return;
+    }
+
+    const shooter = room.players.get(socket.id);
+    if (!shooter) {
+      return;
+    }
+
+    const sanitized = sanitizeShootPayload(payload);
+    if (!sanitized) {
+      return;
+    }
+
+    const target = room.players.get(sanitized.targetId);
+    if (!target || target.id === shooter.id) {
+      return;
+    }
+
+    const shooterTeam = shooter.team ?? null;
+    const targetTeam = target.team ?? null;
+    const validTeamFight =
+      (shooterTeam === "alpha" || shooterTeam === "bravo") &&
+      (targetTeam === "alpha" || targetTeam === "bravo") &&
+      shooterTeam !== targetTeam;
+
+    if (!validTeamFight) {
+      return;
+    }
+
+    const currentHp = Number.isFinite(target.hp) ? target.hp : 100;
+    const nextHp = Math.max(0, currentHp - PVP_DAMAGE);
+    const killed = nextHp <= 0;
+
+    target.hp = killed ? 100 : nextHp;
+    if (killed) {
+      shooter.kills = (Number(shooter.kills) || 0) + 1;
+      target.deaths = (Number(target.deaths) || 0) + 1;
+    }
+
+    io.to(room.code).emit("pvp:damage", {
+      attackerId: shooter.id,
+      victimId: target.id,
+      damage: PVP_DAMAGE,
+      victimHealth: target.hp,
+      killed,
+      attackerKills: shooter.kills ?? 0,
+      victimDeaths: target.deaths ?? 0
     });
   });
 
