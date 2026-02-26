@@ -1,3 +1,17 @@
+﻿const THREAT_LABELS = ["", "낮음", "주의", "높음", "위험", "극한"];
+
+function setText(el, value) {
+  if (el) {
+    el.textContent = value;
+  }
+}
+
+function toggleClass(el, className, enabled) {
+  if (el) {
+    el.classList.toggle(className, enabled);
+  }
+}
+
 export class HUD {
   constructor() {
     this.healthEl = document.getElementById("hud-health");
@@ -5,6 +19,15 @@ export class HUD {
     this.ammoEl = document.getElementById("hud-ammo");
     this.reserveEl = document.getElementById("hud-reserve");
     this.statusEl = document.getElementById("hud-status");
+
+    this.healthBarEl = document.getElementById("hud-health-bar");
+    this.killsEl = document.getElementById("hud-kills");
+    this.enemiesEl = document.getElementById("hud-enemies");
+    this.capturesEl = document.getElementById("hud-captures");
+    this.controlEl = document.getElementById("hud-control");
+    this.objectiveEl = document.getElementById("hud-objective");
+    this.threatEl = document.getElementById("hud-threat");
+    this.streakEl = document.getElementById("hud-streak");
 
     this.crosshairEl = document.getElementById("crosshair");
     this.hitmarkerEl = document.getElementById("hitmarker");
@@ -21,52 +44,91 @@ export class HUD {
   }
 
   update(delta, state) {
-    this.healthEl.textContent = `${state.health}`;
-    this.scoreEl.textContent = `${state.score}`;
-    this.ammoEl.textContent = `${state.ammo}`;
-    this.reserveEl.textContent = `${state.reserve}`;
+    setText(this.healthEl, `${state.health}`);
+    setText(this.scoreEl, `${state.score}`);
+    setText(this.ammoEl, `${state.ammo}`);
+    setText(this.reserveEl, `${state.reserve}`);
+    setText(this.killsEl, `${state.kills ?? 0}`);
+    setText(this.enemiesEl, `${state.enemyCount ?? 0}`);
+    setText(this.capturesEl, `${state.captures ?? 0}`);
+
+    const controlPercent = Math.max(0, Math.min(100, Number(state.controlPercent ?? 0)));
+    const controlOwner = state.controlOwner ?? "neutral";
+    const controlText = controlOwner === "alpha" ? `확보 ${controlPercent}%` : `${controlPercent}%`;
+    setText(this.controlEl, controlText);
+
+    setText(this.objectiveEl, `${state.objectiveText ?? "목표: 적 깃발을 확보하세요"}`);
+
+    const hp = Math.max(0, Math.min(100, state.health));
+    if (this.healthBarEl) {
+      this.healthBarEl.style.width = `${hp}%`;
+      if (hp <= 25) {
+        this.healthBarEl.style.background = "#ff4444";
+      } else if (hp <= 50) {
+        this.healthBarEl.style.background = "var(--ui-alert)";
+      } else {
+        this.healthBarEl.style.background = "var(--ui-ok)";
+      }
+    }
+
+    const threat = Math.min(5, Math.floor((state.score ?? 0) / 500) + 1);
+    setText(this.threatEl, `위협 단계 ${THREAT_LABELS[threat]}`);
 
     if (state.reloading) {
-      this.statusEl.textContent = "재장전 중...";
-      this.statusEl.classList.add("is-alert");
+      setText(this.statusEl, "재장전 중...");
+      this.statusEl?.classList.add("is-alert");
     } else if (this.statusTimer <= 0) {
-      this.statusEl.textContent = "전투 중";
-      this.statusEl.classList.remove("is-alert");
+      setText(this.statusEl, "전투 중");
+      this.statusEl?.classList.remove("is-alert");
     }
 
     this.statusTimer = Math.max(0, this.statusTimer - delta);
   }
 
   setStatus(text, isAlert = false, duration = 0.5) {
-    this.statusEl.textContent = text;
-    this.statusEl.classList.toggle("is-alert", isAlert);
+    setText(this.statusEl, text);
+    toggleClass(this.statusEl, "is-alert", isAlert);
     this.statusTimer = duration;
   }
 
+  setKillStreak(streak) {
+    if (streak >= 3) {
+      setText(this.streakEl, `${streak}연속 처치`);
+    } else {
+      setText(this.streakEl, "");
+    }
+  }
+
   showStartOverlay(visible) {
-    this.startOverlayEl.classList.toggle("show", visible);
+    toggleClass(this.startOverlayEl, "show", visible);
   }
 
   showPauseOverlay(visible) {
-    this.pauseOverlayEl.classList.toggle("show", visible);
+    toggleClass(this.pauseOverlayEl, "show", visible);
   }
 
   showGameOver(score) {
-    this.finalScoreEl.textContent = `${score}`;
-    this.gameOverOverlayEl.classList.add("show");
+    setText(this.finalScoreEl, `${score}`);
+    this.gameOverOverlayEl?.classList.add("show");
   }
 
   hideGameOver() {
-    this.gameOverOverlayEl.classList.remove("show");
+    this.gameOverOverlayEl?.classList.remove("show");
   }
 
   pulseCrosshair() {
+    if (!this.crosshairEl) {
+      return;
+    }
     this.crosshairEl.classList.remove("pulse");
     this.crosshairEl.offsetWidth;
     this.crosshairEl.classList.add("pulse");
   }
 
   pulseHitmarker() {
+    if (!this.hitmarkerEl) {
+      return;
+    }
     this.hitmarkerEl.classList.remove("show");
     this.hitmarkerEl.offsetWidth;
     this.hitmarkerEl.classList.add("show");
@@ -75,12 +137,15 @@ export class HUD {
       window.clearTimeout(this.hitmarkerTimeout);
     }
     this.hitmarkerTimeout = window.setTimeout(() => {
-      this.hitmarkerEl.classList.remove("show");
+      this.hitmarkerEl?.classList.remove("show");
       this.hitmarkerTimeout = null;
     }, 160);
   }
 
   flashDamage() {
+    if (!this.damageOverlayEl) {
+      return;
+    }
     this.damageOverlayEl.classList.remove("show");
     this.damageOverlayEl.offsetWidth;
     this.damageOverlayEl.classList.add("show");
@@ -89,7 +154,7 @@ export class HUD {
       window.clearTimeout(this.damageOverlayTimeout);
     }
     this.damageOverlayTimeout = window.setTimeout(() => {
-      this.damageOverlayEl.classList.remove("show");
+      this.damageOverlayEl?.classList.remove("show");
       this.damageOverlayTimeout = null;
     }, 120);
   }

@@ -1,85 +1,170 @@
-# RECLAIM FPS
+﻿# RECLAIM FPS
 
-Three.js 기반의 웹 3D FPS 미니게임입니다.
-그래픽 에셋은 빌드 안전성을 위해 `public/assets/graphics`로 분리되어 있습니다.
+Web FPS prototype built with Three.js + Vite.
+Includes voxel build mode, online lobby/chat (Socket.io), and survival combat.
 
-## 실행 방법
+## Quick Start
+
+Install dependencies:
 
 ```bash
 npm install
+```
+
+Run client:
+
+```bash
 npm run dev
 ```
 
-브라우저에서 `http://localhost:5173` 접속 후 화면 클릭으로 시작합니다.
+Run socket server:
 
-## 조작
+```bash
+npm run dev:server
+```
 
-- `WASD`: 이동
-- `Shift`: 달리기
-- `Space`: 점프
-- `Mouse`: 시점 조작
-- `Click`: 발사
-- `R`: 재장전
+Run both together:
 
-## 폴더 구조
+```bash
+npm run dev:all
+```
+
+Run production-style 24/7 processes with PM2:
+
+```bash
+npm run prod:start
+npm run prod:status
+```
+
+Stop:
+
+```bash
+npm run prod:stop
+```
+
+Run environment doctor (startup sanity check):
+
+```bash
+npm run doctor
+```
+
+Important local run note:
+
+- Use Vite (`npm run dev` or `npm run dev:all`).
+- Do not open the root `index.html` with generic static Live Server (`127.0.0.1:5500`), because ESM dependencies are Vite-resolved.
+
+## Verification
+
+Full verification (syntax + build + weapon/voxel/socket smoke):
+
+```bash
+npm run check
+```
+
+Fast verification (no build):
+
+```bash
+npm run check:smoke
+```
+
+## Build
+
+```bash
+npm run build
+npm run preview
+```
+
+## Controls
+
+- `W A S D`: Move
+- `Shift`: Sprint
+- `Space`: Jump
+- `Mouse`: Look
+- `LMB`: Fire / Place block
+- `RMB`: Aim / Remove block
+- `R`: Reload
+- `Q`: Toggle weapon/build mode
+- `1..8` or `Numpad1..8`: Block slot
+- `T` or `Enter`: Open chat
+
+## Environment
+
+Copy `.env.example` to `.env` when needed.
+
+- `VITE_CHAT_SERVER`
+  - Client-side socket server URL.
+  - Local default is `http://localhost:3001`.
+  - In production, set this to your deployed socket server origin if client/server are split.
+
+- `CORS_ORIGIN` (server env)
+  - Optional comma-separated allow-list for Socket.io CORS.
+  - If unset, server allows all origins.
+
+## Deploy Notes
+
+Client and socket server are separate concerns.
+
+1. Deploy static client (`dist`) to Netlify/Vercel/etc.
+2. Deploy `server.js` to a Node host (Render/Railway/Fly/VM).
+3. Set `VITE_CHAT_SERVER` on the client build to point to the deployed socket server.
+4. Optionally set `CORS_ORIGIN` on the socket server.
+
+Socket server health endpoints:
+
+- `GET /health`
+- `GET /status`
+
+## 24/7 Local Runtime (PM2)
+
+This repo includes `ecosystem.config.cjs` with two apps:
+
+- `reclaim-fps-client` (Vite preview on `5173`)
+- `reclaim-fps-chat` (Socket server on `3001`)
+
+Commands:
+
+```bash
+npm run prod:start
+npm run prod:status
+npm run prod:logs
+npm run prod:save
+```
+
+Auto-start after reboot (one-time):
+
+```bash
+npx pm2 startup
+```
+
+Execution docs:
+
+- `docs/interface-contract.md`
+- `docs/execution-plan-a-f.md`
+
+## Project Layout
 
 ```text
 .
-├─ index.html
-├─ netlify.toml
-├─ public
-│  └─ assets
-│     └─ graphics
-│        ├─ ui
-│        │  ├─ logo.svg
-│        │  ├─ menu-bg.svg
-│        │  ├─ panel.svg
-│        │  ├─ crosshair.svg
-│        │  ├─ hitmarker.svg
-│        │  └─ icons
-│        │     ├─ play.svg
-│        │     ├─ pause.svg
-│        │     └─ reload.svg
-│        └─ world
-│           ├─ textures
-│           │  ├─ ground.svg
-│           │  ├─ concrete.svg
-│           │  └─ metal.svg
-│           ├─ sprites
-│           │  ├─ muzzleflash.svg
-│           │  └─ spark.svg
-│           └─ sky
-│              └─ sky.svg
-├─ vercel.json
-├─ vite.config.js
-└─ src
-   ├─ main.js
-   ├─ game
-   │  ├─ EnemyManager.js
-   │  ├─ Game.js
-   │  ├─ HUD.js
-   │  └─ WeaponSystem.js
-   └─ styles
-      └─ main.css
+|- index.html
+|- server.js
+|- src/
+|  |- main.js
+|  |- styles/main.css
+|  `- game/
+|     |- Game.js
+|     |- HUD.js
+|     |- Chat.js
+|     |- EnemyManager.js
+|     |- WeaponSystem.js
+|     |- audio/SoundSystem.js
+|     `- build/
+|        |- BuildSystem.js
+|        |- VoxelWorld.js
+|        `- BlockPalette.js
+|- public/assets/
+|  |- graphics/
+|  `- audio/
+`- docs/
+   |- third-party-attribution.md
+   `- voxel-fps-integration-checklist.md
 ```
-
-## 그래픽 반영 내용
-
-- 시작 화면: `menu-bg/logo/panel` 적용 + 프리로드
-- HUD: `crosshair/hitmarker` 적용
-- 월드: `ground/concrete/metal` 텍스처 + sky + fog + 조명 프리셋
-- 전투 피드백: muzzle flash, hit spark, hitmarker 적용
-
-## 온라인 호스팅
-
-### Vercel
-1. 저장소를 Vercel에 연결
-2. Build Command: `npm run build`
-3. Output Directory: `dist`
-4. `vercel.json`에 SPA rewrite 포함되어 바로 동작
-
-### Netlify
-1. 저장소를 Netlify에 연결
-2. Build command: `npm run build`
-3. Publish directory: `dist`
-4. `netlify.toml`에 SPA redirect 포함되어 바로 동작
