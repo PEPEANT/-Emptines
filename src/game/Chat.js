@@ -1,5 +1,7 @@
 import { io } from "socket.io-client";
 
+const PROD_CHAT_FALLBACK_URL = "https://reclaim-fps-chat.onrender.com";
+
 function resolveDefaultServerUrl() {
   if (typeof window === "undefined") {
     return "http://localhost:3001";
@@ -15,6 +17,11 @@ function resolveDefaultServerUrl() {
 
   if (isLocalHost || isPrivateIpv4 || isDevPort) {
     return `${protocol}//${hostname}:3001`;
+  }
+
+  // Static hosting domains do not run the Socket.IO backend.
+  if (hostname.endsWith(".netlify.app") || hostname.endsWith(".vercel.app")) {
+    return PROD_CHAT_FALLBACK_URL;
   }
 
   return origin;
@@ -73,6 +80,10 @@ export class Chat {
     return !!this.socket?.connected;
   }
 
+  isConnecting() {
+    return !!this.socket?.active && !this.socket?.connected;
+  }
+
   notifyFocusChanged() {
     this.focusChangeHandler?.(this.isInputFocused);
   }
@@ -86,9 +97,10 @@ export class Chat {
       autoConnect: true,
       transports: ["websocket", "polling"],
       reconnection: true,
-      reconnectionAttempts: 8,
-      reconnectionDelay: 120,
-      timeout: 5000
+      reconnectionAttempts: Number.MAX_SAFE_INTEGER,
+      reconnectionDelay: 900,
+      reconnectionDelayMax: 5000,
+      timeout: 20000
     });
 
     this.socket.on("connect", () => {

@@ -2537,6 +2537,7 @@ export class Game {
 
   updateLobbyControls() {
     const connected = !!this.chat?.isConnected?.();
+    const connecting = !!this.chat?.isConnecting?.();
     const inRoom = !!this.lobbyState.roomCode;
     const canStart = connected && inRoom;
 
@@ -2554,7 +2555,9 @@ export class Game {
     }
     if (this.mpStartBtn) {
       this.mpStartBtn.disabled = !canStart;
-      if (!connected) {
+      if (!connected && connecting) {
+        this.mpStartBtn.textContent = "Server connecting...";
+      } else if (!connected) {
         this.mpStartBtn.textContent = "Server offline";
       } else if (!inRoom) {
         this.mpStartBtn.textContent = "Auto-joining room...";
@@ -2589,6 +2592,13 @@ export class Game {
 
     if (!this.chat) {
       this.mpStatusEl.textContent = "Server: chat module missing";
+      this.mpStatusEl.dataset.state = "offline";
+      this.updateLobbyControls();
+      return;
+    }
+
+    if (this.chat.isConnecting()) {
+      this.mpStatusEl.textContent = "Server: connecting (waking up)...";
       this.mpStatusEl.dataset.state = "offline";
       this.updateLobbyControls();
       return;
