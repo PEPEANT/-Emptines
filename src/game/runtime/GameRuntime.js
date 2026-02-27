@@ -193,19 +193,54 @@ export class GameRuntime {
     const maxAnisotropy = this.renderer.capabilities.getMaxAnisotropy();
     const anisotropy = this.mobileEnabled ? Math.min(4, maxAnisotropy) : maxAnisotropy;
     const ground = world.ground;
-    const groundMap = this.textureLoader.load(ground.textureUrl);
-    groundMap.wrapS = THREE.RepeatWrapping;
-    groundMap.wrapT = THREE.RepeatWrapping;
-    groundMap.repeat.set(ground.repeatX, ground.repeatY);
-    groundMap.colorSpace = THREE.SRGBColorSpace;
-    groundMap.anisotropy = anisotropy;
+    const configureGroundTexture = (texture, colorSpace = null) => {
+      if (!texture) {
+        return null;
+      }
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      texture.repeat.set(ground.repeatX, ground.repeatY);
+      if (colorSpace) {
+        texture.colorSpace = colorSpace;
+      }
+      texture.anisotropy = anisotropy;
+      return texture;
+    };
+
+    const loadGroundTexture = (url, colorSpace = null) => {
+      if (!url) {
+        return null;
+      }
+      return configureGroundTexture(this.textureLoader.load(url), colorSpace);
+    };
+
+    const groundMap = loadGroundTexture(ground.textureUrl, THREE.SRGBColorSpace);
+    const groundNormalMap = loadGroundTexture(ground.normalTextureUrl);
+    const groundRoughnessMap = loadGroundTexture(ground.roughnessTextureUrl);
+    const groundAoMap = loadGroundTexture(ground.aoTextureUrl);
 
     const groundGeometry = new THREE.PlaneGeometry(ground.size, ground.size, 1, 1);
+    const uv = groundGeometry.getAttribute("uv");
+    if (uv) {
+      groundGeometry.setAttribute("uv2", new THREE.Float32BufferAttribute(Array.from(uv.array), 2));
+    }
+
+    const normalScale = Array.isArray(ground.normalScale)
+      ? new THREE.Vector2(
+          Number(ground.normalScale[0]) || 1,
+          Number(ground.normalScale[1]) || Number(ground.normalScale[0]) || 1
+        )
+      : new THREE.Vector2(1, 1);
     this.ground = new THREE.Mesh(
       groundGeometry,
       new THREE.MeshStandardMaterial({
         color: ground.color,
-        map: groundMap,
+        map: groundMap ?? null,
+        normalMap: groundNormalMap ?? null,
+        normalScale,
+        roughnessMap: groundRoughnessMap ?? null,
+        aoMap: groundAoMap ?? null,
+        aoMapIntensity: Number(ground.aoIntensity) || 0.5,
         roughness: ground.roughness,
         metalness: ground.metalness,
         side: THREE.FrontSide,
@@ -221,7 +256,7 @@ export class GameRuntime {
       groundGeometry.clone(),
       new THREE.MeshStandardMaterial({
         color: ground.undersideColor ?? ground.color,
-        map: groundMap,
+        map: groundMap ?? null,
         roughness: 1,
         metalness: 0,
         side: THREE.BackSide,

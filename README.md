@@ -88,6 +88,12 @@ Socket server health endpoints:
 - `GET /health`
 - `GET /status`
 
+## Asset Credits
+
+- Grass PBR textures: ambientCG `Grass001` (CC0)
+  - Source: https://ambientcg.com/view?id=Grass001
+  - License: https://docs.ambientcg.com/license/
+
 ## Project Layout
 
 ```text
