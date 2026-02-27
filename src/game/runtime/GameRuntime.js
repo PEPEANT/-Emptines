@@ -82,6 +82,8 @@ export class GameRuntime {
     this.moveForwardVec = new THREE.Vector3();
     this.moveRightVec = new THREE.Vector3();
     this.moveVec = new THREE.Vector3();
+    this.playerCollisionRadius = RUNTIME_TUNING.PLAYER_COLLISION_RADIUS;
+    this.playerBoundsHalfExtent = Math.max(4, GAME_CONSTANTS.WORLD_LIMIT - this.playerCollisionRadius);
 
     this.skyDome = null;
     this.skyBackgroundTexture = null;
@@ -94,6 +96,20 @@ export class GameRuntime {
     this.ground = null;
     this.groundUnderside = null;
     this.boundaryGroup = null;
+    this.chalkLayer = null;
+    this.chalkStampGeometry = null;
+    this.chalkStampTexture = null;
+    this.chalkMaterials = new Map();
+    this.chalkMarks = [];
+    this.chalkPointer = new THREE.Vector2(0, 0);
+    this.chalkRaycaster = new THREE.Raycaster();
+    this.chalkGroundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    this.chalkHitPoint = new THREE.Vector3();
+    this.chalkLastStamp = null;
+    this.chalkDrawingActive = false;
+    this.chalkPalette = [];
+    this.selectedChalkColor = "#f5f7ff";
+    this.activeTool = "move";
     this.beach = null;
     this.shoreFoam = null;
     this.shoreWetBand = null;
@@ -132,12 +148,15 @@ export class GameRuntime {
     this.chatBubbleLifetimeMs = 4200;
     this.chatLogMaxEntries = RUNTIME_TUNING.CHAT_LOG_MAX_ENTRIES;
     this.chatLogEl = document.getElementById("chat-log");
+    this.chatControlsEl = document.getElementById("chat-controls");
     this.chatInputEl = document.getElementById("chat-input");
-    this.chatSendEl = document.getElementById("chat-send");
+    this.toolHotbarEl = document.getElementById("tool-hotbar");
+    this.chalkColorsEl = document.getElementById("chalk-colors");
+    this.chalkColorButtons = [];
+    this.toolButtons = [];
+    this.chatOpen = false;
     this.lastLocalChatEcho = "";
     this.lastLocalChatEchoAt = 0;
-    this.lastSystemChatNotice = "";
-    this.lastSystemChatNoticeAt = 0;
 
     this._initialized = false;
   }
@@ -154,6 +173,8 @@ export class GameRuntime {
     this.mount.appendChild(this.renderer.domElement);
     this.scene.add(this.camera);
     this.resolveUiElements();
+    this.setupToolState();
+    this.setChatOpen(false);
 
     this.setupWorld();
     this.setupPostProcessing();
@@ -170,7 +191,6 @@ export class GameRuntime {
       z: this.playerPosition.z,
       fps: 0
     });
-    this.appendSystemNotice("chat-ready", "Chat ready");
 
     this.loop();
   }
@@ -293,6 +313,7 @@ export class GameRuntime {
     this.scene.add(this.groundUnderside);
 
     this.setupBoundaryWalls(world.boundary);
+    this.setupChalkLayer(world.chalk);
     this.setupBeachLayer(world.beach, world.ocean);
     this.setupOceanLayer(world.ocean);
 
@@ -548,12 +569,17 @@ export class GameRuntime {
   setupBoundaryWalls(config = {}) {
     this.clearBoundaryWalls();
     if (!config?.enabled) {
+      this.playerBoundsHalfExtent = Math.max(
+        4,
+        GAME_CONSTANTS.WORLD_LIMIT - this.playerCollisionRadius
+      );
       return;
     }
 
     const halfExtent = Math.max(20, Number(config.halfExtent) || GAME_CONSTANTS.WORLD_LIMIT);
     const height = Math.max(4, Number(config.height) || 14);
     const thickness = Math.max(0.4, Number(config.thickness) || 2.2);
+    this.playerBoundsHalfExtent = Math.max(4, halfExtent - thickness - this.playerCollisionRadius);
     const span = halfExtent * 2 + thickness * 2;
 
     const material = new THREE.MeshStandardMaterial({
@@ -588,6 +614,170 @@ export class GameRuntime {
     group.renderOrder = 5;
     this.boundaryGroup = group;
     this.scene.add(this.boundaryGroup);
+  }
+
+  clearChalkLayer() {
+    if (this.chalkLayer) {
+      this.scene.remove(this.chalkLayer);
+      this.chalkLayer.clear();
+      this.chalkLayer = null;
+    }
+    for (const material of this.chalkMaterials.values()) {
+      material.dispose?.();
+    }
+    this.chalkMaterials.clear();
+    this.chalkStampGeometry?.dispose?.();
+    this.chalkStampGeometry = null;
+    this.chalkStampTexture?.dispose?.();
+    this.chalkStampTexture = null;
+    this.chalkMarks.length = 0;
+    this.chalkDrawingActive = false;
+    this.chalkLastStamp = null;
+  }
+
+  setupChalkLayer(config = {}) {
+    this.clearChalkLayer();
+    if (!config?.enabled) {
+      return;
+    }
+
+    this.chalkLayer = new THREE.Group();
+    this.chalkLayer.renderOrder = 6;
+    this.scene.add(this.chalkLayer);
+
+    const textureUrl = String(
+      config.textureUrl ?? "/assets/graphics/world/textures/oss-chalk/disc.png"
+    ).trim();
+    if (textureUrl) {
+      this.chalkStampTexture = this.textureLoader.load(textureUrl);
+      this.chalkStampTexture.wrapS = THREE.ClampToEdgeWrapping;
+      this.chalkStampTexture.wrapT = THREE.ClampToEdgeWrapping;
+    }
+    this.chalkStampGeometry = new THREE.CircleGeometry(1, this.mobileEnabled ? 10 : 14);
+  }
+
+  getChalkMaterial(color, opacity) {
+    const key = `${String(color).toLowerCase()}|${Number(opacity).toFixed(2)}`;
+    if (this.chalkMaterials.has(key)) {
+      return this.chalkMaterials.get(key);
+    }
+    const material = new THREE.MeshBasicMaterial({
+      color,
+      alphaMap: this.chalkStampTexture ?? null,
+      transparent: true,
+      opacity,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -1
+    });
+    material.toneMapped = false;
+    this.chalkMaterials.set(key, material);
+    return material;
+  }
+
+  canDrawChalk() {
+    if (this.activeTool !== "chalk") {
+      return false;
+    }
+    if (!this.worldContent?.chalk?.enabled || !this.chalkLayer || !this.chalkStampGeometry) {
+      return false;
+    }
+    if (this.chatOpen) {
+      return false;
+    }
+    if (!this.mobileEnabled && !this.pointerLocked) {
+      return false;
+    }
+    return true;
+  }
+
+  tryDrawChalkMark() {
+    if (!this.canDrawChalk()) {
+      return false;
+    }
+
+    this.chalkRaycaster.setFromCamera(this.chalkPointer, this.camera);
+    if (!this.chalkRaycaster.ray.intersectPlane(this.chalkGroundPlane, this.chalkHitPoint)) {
+      return false;
+    }
+
+    const limit = this.playerBoundsHalfExtent;
+    if (Math.abs(this.chalkHitPoint.x) > limit || Math.abs(this.chalkHitPoint.z) > limit) {
+      return false;
+    }
+
+    const chalkConfig = this.worldContent?.chalk ?? {};
+    const minDistance = Math.max(
+      0.02,
+      Number(chalkConfig.minDistance) || RUNTIME_TUNING.CHALK_MIN_STAMP_DISTANCE
+    );
+    if (
+      this.chalkLastStamp &&
+      this.chalkLastStamp.distanceToSquared(this.chalkHitPoint) < minDistance * minDistance
+    ) {
+      return false;
+    }
+
+    const sizeMin = Math.max(
+      0.04,
+      Number(chalkConfig.markSizeMin) || RUNTIME_TUNING.CHALK_MARK_SIZE_MIN
+    );
+    const sizeMax = Math.max(
+      sizeMin,
+      Number(chalkConfig.markSizeMax) || RUNTIME_TUNING.CHALK_MARK_SIZE_MAX
+    );
+    const size = sizeMin + Math.random() * Math.max(0.001, sizeMax - sizeMin);
+
+    const markHeight =
+      Number(chalkConfig.markHeight) || RUNTIME_TUNING.CHALK_MARK_HEIGHT;
+    const markOpacity = THREE.MathUtils.clamp(
+      Number(chalkConfig.markOpacity) || RUNTIME_TUNING.CHALK_MARK_OPACITY,
+      0.1,
+      1
+    );
+
+    const mark = new THREE.Mesh(
+      this.chalkStampGeometry,
+      this.getChalkMaterial(this.selectedChalkColor, markOpacity)
+    );
+    mark.rotation.x = -Math.PI / 2;
+    mark.rotation.z = Math.random() * Math.PI * 2;
+    mark.position.set(
+      this.chalkHitPoint.x,
+      markHeight + Math.random() * 0.0015,
+      this.chalkHitPoint.z
+    );
+    mark.scale.set(size, size, 1);
+    mark.frustumCulled = false;
+    mark.renderOrder = 6;
+
+    this.chalkLayer.add(mark);
+    this.chalkMarks.push(mark);
+
+    const maxMarks = Math.max(
+      40,
+      Number(chalkConfig.maxMarks) || RUNTIME_TUNING.CHALK_MAX_MARKS
+    );
+    while (this.chalkMarks.length > maxMarks) {
+      const oldest = this.chalkMarks.shift();
+      if (oldest) {
+        this.chalkLayer.remove(oldest);
+      }
+    }
+
+    if (!this.chalkLastStamp) {
+      this.chalkLastStamp = new THREE.Vector3();
+    }
+    this.chalkLastStamp.copy(this.chalkHitPoint);
+    return true;
+  }
+
+  updateChalkDrawing() {
+    if (!this.chalkDrawingActive) {
+      return;
+    }
+    this.tryDrawChalkMark();
   }
 
   clearBeachLayer() {
@@ -999,14 +1189,27 @@ export class GameRuntime {
     window.addEventListener("keydown", (event) => {
       if (this.isTextInputTarget(event.target)) {
         if (event.code === "Escape") {
+          this.setChatOpen(false);
           event.target.blur?.();
         }
         return;
       }
 
-      if (event.code === "Enter" && this.chatInputEl) {
+      if (event.code === RUNTIME_TUNING.CHAT_OPEN_KEY && this.chatInputEl) {
         event.preventDefault();
         this.focusChatInput();
+        return;
+      }
+
+      if (event.code === "KeyB") {
+        event.preventDefault();
+        this.setActiveTool(this.activeTool === "chalk" ? "move" : "chalk");
+        return;
+      }
+
+      const colorIndex = this.getColorDigitIndex(event.code);
+      if (colorIndex >= 0) {
+        this.setChalkColorByIndex(colorIndex);
         return;
       }
 
@@ -1030,15 +1233,35 @@ export class GameRuntime {
 
     window.addEventListener("blur", () => {
       this.keys.clear();
+      this.chalkDrawingActive = false;
     });
 
     this.renderer.domElement.addEventListener("click", () => {
       this.tryPointerLock();
     });
+    this.renderer.domElement.addEventListener("mousedown", (event) => {
+      if (event.button !== 0 || !this.canDrawChalk()) {
+        return;
+      }
+      this.chalkDrawingActive = true;
+      this.chalkLastStamp = null;
+      this.tryDrawChalkMark();
+    });
+    window.addEventListener("mouseup", (event) => {
+      if (event.button !== 0) {
+        return;
+      }
+      this.chalkDrawingActive = false;
+      this.chalkLastStamp = null;
+    });
 
     document.addEventListener("pointerlockchange", () => {
       this.pointerLocked = document.pointerLockElement === this.renderer.domElement;
       this.hud.setStatus(this.getStatusText());
+      if (!this.pointerLocked) {
+        this.chalkDrawingActive = false;
+        this.chalkLastStamp = null;
+      }
     });
 
     window.addEventListener(
@@ -1059,6 +1282,7 @@ export class GameRuntime {
     if (this.chatInputEl) {
       this.chatInputEl.addEventListener("focus", () => {
         this.keys.clear();
+        this.setChatOpen(true);
       });
       this.chatInputEl.addEventListener("keydown", (event) => {
         if (event.code === "Enter") {
@@ -1068,14 +1292,32 @@ export class GameRuntime {
         }
         if (event.code === "Escape") {
           event.preventDefault();
+          this.setChatOpen(false);
           this.chatInputEl.blur();
         }
       });
+      this.chatInputEl.addEventListener("blur", () => {
+        this.setChatOpen(false);
+      });
     }
 
-    if (this.chatSendEl) {
-      this.chatSendEl.addEventListener("click", () => {
-        this.sendChatMessage();
+    if (this.toolHotbarEl) {
+      this.toolHotbarEl.addEventListener("click", (event) => {
+        const button = event.target?.closest?.(".tool-slot[data-tool]");
+        if (!button) {
+          return;
+        }
+        this.setActiveTool(String(button.dataset.tool || "move"));
+      });
+    }
+
+    if (this.chalkColorsEl) {
+      this.chalkColorsEl.addEventListener("click", (event) => {
+        const button = event.target?.closest?.(".chalk-color[data-color]");
+        if (!button) {
+          return;
+        }
+        this.setChalkColor(String(button.dataset.color || this.selectedChalkColor));
       });
     }
   }
@@ -1084,11 +1326,125 @@ export class GameRuntime {
     if (!this.chatLogEl) {
       this.chatLogEl = document.getElementById("chat-log");
     }
+    if (!this.chatControlsEl) {
+      this.chatControlsEl = document.getElementById("chat-controls");
+    }
     if (!this.chatInputEl) {
       this.chatInputEl = document.getElementById("chat-input");
     }
-    if (!this.chatSendEl) {
-      this.chatSendEl = document.getElementById("chat-send");
+    if (!this.toolHotbarEl) {
+      this.toolHotbarEl = document.getElementById("tool-hotbar");
+    }
+    if (!this.chalkColorsEl) {
+      this.chalkColorsEl = document.getElementById("chalk-colors");
+    }
+    this.chalkColorButtons = Array.from(document.querySelectorAll(".chalk-color[data-color]"));
+    this.toolButtons = Array.from(document.querySelectorAll(".tool-slot[data-tool]"));
+  }
+
+  setupToolState() {
+    const chalkConfig = this.worldContent?.chalk ?? {};
+    const fallbackColors = ["#f5f7ff", "#ffd86a", "#7ec9ff", "#ff9cc5", "#a9f89f"];
+    const configColors = Array.isArray(chalkConfig.colors) ? chalkConfig.colors : [];
+    const sourceColors = configColors.length > 0 ? configColors : fallbackColors;
+    this.chalkPalette = sourceColors
+      .map((color) => {
+        try {
+          return `#${new THREE.Color(color).getHexString()}`;
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+    if (this.chalkPalette.length === 0) {
+      this.chalkPalette = [...fallbackColors];
+    }
+    this.selectedChalkColor = this.chalkPalette[0] ?? fallbackColors[0];
+    this.buildChalkPaletteButtons();
+    this.setActiveTool("move");
+    this.setChalkColor(this.selectedChalkColor);
+  }
+
+  buildChalkPaletteButtons() {
+    if (!this.chalkColorsEl) {
+      return;
+    }
+
+    this.chalkColorsEl.innerHTML = "";
+    for (let index = 0; index < this.chalkPalette.length; index += 1) {
+      const normalized = this.chalkPalette[index];
+
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "chalk-color";
+      button.dataset.color = normalized;
+      button.style.setProperty("--swatch", normalized);
+      button.title = `${index + 1} ${normalized.toUpperCase()}`;
+      this.chalkColorsEl.appendChild(button);
+    }
+
+    this.chalkColorButtons = Array.from(
+      this.chalkColorsEl.querySelectorAll(".chalk-color[data-color]")
+    );
+  }
+
+  setChatOpen(open) {
+    this.chatOpen = Boolean(open);
+    if (this.chatControlsEl) {
+      this.chatControlsEl.classList.toggle("hidden", !this.chatOpen);
+    }
+    if (this.chatOpen) {
+      this.chalkDrawingActive = false;
+      this.chalkLastStamp = null;
+    }
+  }
+
+  setActiveTool(tool) {
+    const nextTool = tool === "chalk" ? "chalk" : "move";
+    this.activeTool = nextTool;
+    for (const button of this.toolButtons) {
+      const isActive = String(button?.dataset?.tool ?? "") === nextTool;
+      button.classList.toggle("active", isActive);
+    }
+    if (this.chalkColorsEl) {
+      this.chalkColorsEl.classList.toggle("hidden", nextTool !== "chalk");
+    }
+    if (nextTool !== "chalk") {
+      this.chalkDrawingActive = false;
+      this.chalkLastStamp = null;
+    }
+  }
+
+  getColorDigitIndex(code) {
+    if (!code || !code.startsWith("Digit")) {
+      return -1;
+    }
+    const digit = Number(code.slice(5));
+    if (!Number.isInteger(digit) || digit < 1) {
+      return -1;
+    }
+    return digit - 1;
+  }
+
+  setChalkColorByIndex(index) {
+    if (!Number.isInteger(index) || index < 0 || index >= this.chalkPalette.length) {
+      return;
+    }
+    this.setActiveTool("chalk");
+    this.setChalkColor(this.chalkPalette[index]);
+  }
+
+  setChalkColor(rawColor) {
+    let normalized = "#f5f7ff";
+    try {
+      normalized = `#${new THREE.Color(rawColor).getHexString()}`;
+    } catch {
+      return;
+    }
+    this.selectedChalkColor = normalized;
+    for (const button of this.chalkColorButtons) {
+      const buttonColor = String(button?.dataset?.color ?? "").toLowerCase();
+      button.classList.toggle("active", buttonColor === normalized.toLowerCase());
     }
   }
 
@@ -1110,10 +1466,6 @@ export class GameRuntime {
     if (!endpoint) {
       this.networkConnected = false;
       this.hud.setStatus(this.getStatusText());
-      this.appendSystemNotice(
-        "server-missing",
-        "Realtime server not set. Local chat only."
-      );
       return;
     }
 
@@ -1131,7 +1483,6 @@ export class GameRuntime {
       this.networkConnected = true;
       this.localPlayerId = socket.id;
       this.hud.setStatus(this.getStatusText());
-      this.appendSystemNotice("server-connected", "Realtime server connected.");
     });
 
     socket.on("disconnect", () => {
@@ -1140,13 +1491,11 @@ export class GameRuntime {
       this.clearRemotePlayers();
       this.hud.setStatus(this.getStatusText());
       this.hud.setPlayers(1);
-      this.appendSystemNotice("server-disconnected", "Realtime server disconnected.");
     });
 
     socket.on("connect_error", () => {
       this.networkConnected = false;
       this.hud.setStatus(this.getStatusText());
-      this.appendSystemNotice("server-connect-error", "Realtime server connection failed.");
     });
 
     socket.on("room:update", (room) => {
@@ -1341,6 +1690,7 @@ export class GameRuntime {
 
   tick(delta) {
     this.updateMovement(delta);
+    this.updateChalkDrawing();
     this.updateCloudLayer(delta);
     this.updateOcean(delta);
     this.updateRemotePlayers(delta);
@@ -1377,15 +1727,16 @@ export class GameRuntime {
       }
 
       const moveStep = speed * delta;
+      const worldLimit = Math.max(4, Number(this.playerBoundsHalfExtent) || GAME_CONSTANTS.WORLD_LIMIT);
       this.playerPosition.x = THREE.MathUtils.clamp(
         this.playerPosition.x + this.moveVec.x * moveStep,
-        -GAME_CONSTANTS.WORLD_LIMIT,
-        GAME_CONSTANTS.WORLD_LIMIT
+        -worldLimit,
+        worldLimit
       );
       this.playerPosition.z = THREE.MathUtils.clamp(
         this.playerPosition.z + this.moveVec.z * moveStep,
-        -GAME_CONSTANTS.WORLD_LIMIT,
-        GAME_CONSTANTS.WORLD_LIMIT
+        -worldLimit,
+        worldLimit
       );
     }
 
@@ -1469,22 +1820,6 @@ export class GameRuntime {
     remote.chatExpireAt = performance.now() + this.chatBubbleLifetimeMs;
   }
 
-  appendSystemNotice(key, text) {
-    const now = performance.now();
-    if (
-      this.lastSystemChatNotice === key &&
-      now - this.lastSystemChatNoticeAt < RUNTIME_TUNING.CHAT_SYSTEM_DEDUP_MS
-    ) {
-      return false;
-    }
-    const appended = this.appendChatLine("", text, "system");
-    if (appended) {
-      this.lastSystemChatNotice = key;
-      this.lastSystemChatNoticeAt = now;
-    }
-    return appended;
-  }
-
   appendChatLine(name, text, type = "remote") {
     this.resolveUiElements();
     if (!this.chatLogEl) {
@@ -1548,6 +1883,7 @@ export class GameRuntime {
     }
 
     this.chatInputEl.value = "";
+    this.setChatOpen(false);
     this.chatInputEl.blur();
   }
 
@@ -1556,6 +1892,7 @@ export class GameRuntime {
     if (!this.chatInputEl) {
       return;
     }
+    this.setChatOpen(true);
     this.keys.clear();
     if (document.pointerLockElement === this.renderer.domElement) {
       document.exitPointerLock?.();

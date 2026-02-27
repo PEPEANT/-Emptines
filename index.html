@@ -8,17 +8,30 @@
   <body>
     <div id="app"></div>
 
+    <div id="tool-ui" aria-label="tools">
+      <div id="tool-hotbar">
+        <button class="tool-slot active" data-tool="move" type="button" title="Move (B)">
+          <span class="tool-key">B</span>
+          <span class="tool-label">MOVE</span>
+        </button>
+        <button class="tool-slot" data-tool="chalk" type="button" title="Chalk tool">
+          <img src="/assets/graphics/ui/oss-icons/tabler-pencil.svg" alt="" />
+          <span class="tool-label">CHALK</span>
+        </button>
+      </div>
+      <div id="chalk-colors" class="hidden" aria-label="chalk colors"></div>
+    </div>
+
     <div id="chat-ui" aria-label="chat">
       <div id="chat-log" role="log" aria-live="polite" aria-relevant="additions text"></div>
-      <div id="chat-controls">
+      <div id="chat-controls" class="hidden">
         <input
           id="chat-input"
           type="text"
           maxlength="120"
-          placeholder="Type chat (Enter)"
+          placeholder="Type message and press Enter"
           autocomplete="off"
         />
-        <button id="chat-send" type="button">Send</button>
       </div>
     </div>
 

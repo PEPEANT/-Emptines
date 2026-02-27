@@ -89,6 +89,16 @@ export const BASE_VOID_PACK = {
       emissive: 0x20252a,
       emissiveIntensity: 0.09
     },
+    chalk: {
+      enabled: true,
+      maxMarks: 2800,
+      minDistance: 0.17,
+      markSizeMin: 0.14,
+      markSizeMax: 0.22,
+      markHeight: 0.032,
+      markOpacity: 0.82,
+      colors: ["#f5f7ff", "#ffd86a", "#7ec9ff", "#ff9cc5", "#a9f89f"]
+    },
     ocean: {
       enabled: true,
       width: 700,

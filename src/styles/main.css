@@ -9,6 +9,10 @@
   box-sizing: border-box;
 }
 
+.hidden {
+  display: none !important;
+}
+
 html,
 body {
   margin: 0;
@@ -31,40 +35,90 @@ canvas {
   touch-action: none;
 }
 
-#hud {
+#tool-ui {
   position: fixed;
-  top: 14px;
-  left: 14px;
-  z-index: 20;
-  min-width: 220px;
+  left: 50%;
+  bottom: 16px;
+  z-index: 35;
+  transform: translateX(-50%);
   display: grid;
-  gap: 6px;
-  padding: 12px 14px;
-  border: 1px solid var(--hud-border);
-  border-radius: 10px;
-  background:
-    linear-gradient(155deg, rgba(76, 118, 162, 0.2), rgba(13, 27, 42, 0.46)),
-    var(--hud-bg);
-  box-shadow:
-    inset 0 0 0 1px rgba(226, 239, 255, 0.14),
-    0 10px 30px rgba(0, 0, 0, 0.35);
-  letter-spacing: 0.08em;
-  font-size: 0.75rem;
-  font-weight: 700;
-  pointer-events: none;
-  user-select: none;
-  backdrop-filter: blur(6px);
+  gap: 8px;
+  min-width: 320px;
+  justify-items: center;
+  pointer-events: auto;
 }
 
-.hud-line {
+#tool-hotbar {
   display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  white-space: nowrap;
+  gap: 8px;
+  align-items: stretch;
 }
 
-.hud-line span {
-  color: #d0e6ff;
+.tool-slot {
+  min-width: 110px;
+  height: 44px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(170, 201, 233, 0.56);
+  border-radius: 10px;
+  background: rgba(10, 23, 37, 0.8);
+  color: #d8edff;
+  font: 700 0.73rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  backdrop-filter: blur(5px);
+}
+
+.tool-slot img {
+  width: 16px;
+  height: 16px;
+  opacity: 0.9;
+  filter: invert(87%) sepia(20%) saturate(466%) hue-rotate(178deg) brightness(102%) contrast(98%);
+}
+
+.tool-slot.active {
+  border-color: rgba(201, 226, 250, 0.92);
+  box-shadow: 0 0 0 2px rgba(141, 181, 220, 0.24);
+  background: rgba(16, 38, 58, 0.9);
+}
+
+.tool-key {
+  min-width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(174, 205, 234, 0.48);
+  border-radius: 5px;
+  font-size: 0.64rem;
+  color: #9ec8ed;
+}
+
+#chalk-colors {
+  display: flex;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid rgba(168, 197, 225, 0.52);
+  border-radius: 999px;
+  background: rgba(9, 20, 31, 0.84);
+  backdrop-filter: blur(5px);
+}
+
+.chalk-color {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid rgba(198, 219, 241, 0.68);
+  background: var(--swatch, #f5f7ff);
+  cursor: pointer;
+}
+
+.chalk-color.active {
+  box-shadow:
+    0 0 0 2px rgba(225, 240, 255, 0.92),
+    0 0 0 5px rgba(124, 172, 216, 0.35);
 }
 
 #chat-ui {
@@ -97,7 +151,7 @@ canvas {
 
 #chat-controls {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
 }
 
@@ -127,7 +181,7 @@ canvas {
 
 #chat-input {
   flex: 1;
-  min-width: 0;
+  width: 100%;
   height: 36px;
   padding: 0 11px;
   border: 1px solid rgba(177, 210, 240, 0.64);
@@ -147,22 +201,6 @@ canvas {
   box-shadow: 0 0 0 2px rgba(149, 187, 228, 0.26);
 }
 
-#chat-send {
-  height: 36px;
-  padding: 0 14px;
-  border: 1px solid rgba(193, 220, 246, 0.74);
-  border-radius: 8px;
-  background: linear-gradient(135deg, #e4f0ff, #a7ccf2);
-  color: #112840;
-  font: 700 0.78rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
-  letter-spacing: 0.06em;
-  cursor: pointer;
-}
-
-#chat-send:active {
-  transform: translateY(1px);
-}
-
 #boot-error {
   position: fixed;
   inset: 0;
@@ -177,17 +215,31 @@ canvas {
 }
 
 @media (max-width: 640px) {
-  #hud {
-    top: 10px;
-    left: 10px;
-    right: 10px;
+  #tool-ui {
     min-width: 0;
+    width: calc(100vw - 20px);
+    bottom: 10px;
+    gap: 6px;
+  }
+
+  #tool-hotbar {
+    width: 100%;
+  }
+
+  .tool-slot {
+    flex: 1;
+    min-width: 0;
+  }
+
+  #chalk-colors {
+    gap: 6px;
+    padding: 6px 8px;
   }
 
   #chat-ui {
     left: 10px;
     right: 10px;
-    bottom: 10px;
+    bottom: 110px;
     width: auto;
   }
 

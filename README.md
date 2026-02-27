@@ -72,6 +72,11 @@ npm run preview
 - `W A S D` or arrow keys: move
 - `Shift`: sprint
 - `Space`: jump
+- `T`: open chat input
+- `Enter`: send chat (while input is open)
+- `B`: toggle chalk tool
+- `1..5`: switch chalk color
+- `Left Mouse`: draw on ground (chalk tool)
 
 ## Environment
 
@@ -105,6 +110,12 @@ Socket server health endpoints:
 - Water normal map: three.js examples `waternormals.jpg` (MIT)
   - Source: https://github.com/mrdoob/three.js/blob/dev/examples/textures/waternormals.jpg
   - License: https://github.com/mrdoob/three.js/blob/dev/LICENSE
+- Chalk stamp texture: three.js examples `disc.png` (MIT)
+  - Source: https://github.com/mrdoob/three.js/blob/dev/examples/textures/sprites/disc.png
+  - License: https://github.com/mrdoob/three.js/blob/dev/LICENSE
+- Chalk tool icon: Tabler Icons `pencil.svg` (MIT)
+  - Source: https://github.com/tabler/tabler-icons/blob/master/icons/outline/pencil.svg
+  - License: https://github.com/tabler/tabler-icons/blob/master/LICENSE
 - Sky HDR map: three.js examples `venice_sunset_1k.hdr` (MIT, Poly Haven source)
   - Source: https://github.com/mrdoob/three.js/blob/dev/examples/textures/equirectangular/venice_sunset_1k.hdr
   - three.js license: https://github.com/mrdoob/three.js/blob/dev/LICENSE
@@ -140,6 +151,12 @@ Socket server health endpoints:
 |        |- device.js
 |        |- math.js
 |        `- threeUtils.js
+|- public/assets/graphics/ui/oss-icons/
+|  |- tabler-pencil.svg
+|  `- SOURCE.txt
+|- public/assets/graphics/world/textures/oss-chalk/
+|  |- disc.png
+|  `- SOURCE.txt
 `- scripts/
    |- verify.mjs
    `- doctor.mjs

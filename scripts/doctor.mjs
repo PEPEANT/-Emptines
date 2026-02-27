@@ -91,6 +91,8 @@ async function main() {
   checkFile("src/game/content/packs/base-void/pack.js");
   checkFile("src/game/content/packs/template/pack.template.js");
   checkFile("public/assets/graphics/ui/logo.svg");
+  checkFile("public/assets/graphics/ui/oss-icons/tabler-pencil.svg");
+  checkFile("public/assets/graphics/ui/oss-icons/SOURCE.txt");
   checkFile("public/assets/graphics/world/textures/ground.svg");
   checkFile("public/assets/graphics/world/textures/cc0-grass/grass_color.jpg");
   checkFile("public/assets/graphics/world/textures/cc0-grass/grass_normal_gl.jpg");
@@ -103,6 +105,8 @@ async function main() {
   checkFile("public/assets/graphics/world/textures/cc0-sand/SOURCE.txt");
   checkFile("public/assets/graphics/world/textures/oss-water/waternormals.jpg");
   checkFile("public/assets/graphics/world/textures/oss-water/SOURCE.txt");
+  checkFile("public/assets/graphics/world/textures/oss-chalk/disc.png");
+  checkFile("public/assets/graphics/world/textures/oss-chalk/SOURCE.txt");
   checkFile("public/assets/graphics/world/sky/oss-sky/venice_sunset_1k.hdr");
   checkFile("public/assets/graphics/world/sky/oss-sky/SOURCE.txt");
   checkIndexEntry();
