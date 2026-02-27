@@ -4,25 +4,38 @@ export const BASE_VOID_PACK = {
   id: "base-void",
   name: "Base Void",
   world: {
-    skyColor: 0xa2d9ff,
+    skyColor: 0x73c2ff,
     fogNear: 550,
     fogFar: 4200,
     sky: {
       scale: 450000,
-      turbidity: 2.9,
-      rayleigh: 2.4,
+      turbidity: 2.7,
+      rayleigh: 2.55,
       mieCoefficient: 0.005,
-      mieDirectionalG: 0.79
+      mieDirectionalG: 0.78
+    },
+    clouds: {
+      enabled: true,
+      count: 26,
+      area: 9000,
+      minHeight: 120,
+      maxHeight: 260,
+      minScale: 28,
+      maxScale: 66,
+      color: 0xffffff,
+      opacity: 0.86,
+      driftMin: 0.4,
+      driftMax: 1.1
     },
     lights: {
       hemisphere: {
-        skyColor: 0xbce7ff,
-        groundColor: 0x75b160,
-        intensity: 1.22
+        skyColor: 0xc8ebff,
+        groundColor: 0x6bb255,
+        intensity: 1.26
       },
       sun: {
         color: 0xffffff,
-        intensity: 1.26,
+        intensity: 1.3,
         position: [70, 130, 44],
         shadowMobileSize: 1024,
         shadowDesktopSize: 1536,
@@ -33,8 +46,8 @@ export const BASE_VOID_PACK = {
         shadowNormalBias: 0.02
       },
       fill: {
-        color: 0xb9e6ff,
-        intensity: 0.42,
+        color: 0xc7ebff,
+        intensity: 0.5,
         position: [-72, 56, -32]
       }
     },
@@ -43,11 +56,11 @@ export const BASE_VOID_PACK = {
       repeatX: 600,
       repeatY: 600,
       size: 200000,
-      color: 0x8ecf7f,
+      color: 0x4cbc55,
       roughness: 0.97,
       metalness: 0,
-      emissive: 0x1d5f31,
-      emissiveIntensity: 0.09
+      emissive: 0x1f7b32,
+      emissiveIntensity: 0.12
     },
     originMarker: {
       radiusTop: 0.4,
@@ -66,23 +79,31 @@ export const BASE_VOID_PACK = {
   },
   hands: {
     skin: {
-      color: 0xbcc6d6,
-      roughness: 0.4,
-      metalness: 0.05,
-      emissive: 0x2f425e,
-      emissiveIntensity: 0.16
+      color: 0xe4bda0,
+      roughness: 0.46,
+      metalness: 0.03,
+      emissive: 0x6e5040,
+      emissiveIntensity: 0.05
     },
     sleeve: {
-      color: 0x4e6889,
-      roughness: 0.55,
+      color: 0x4e6f8e,
+      roughness: 0.62,
       metalness: 0.08,
-      emissive: 0x1e2c3f,
-      emissiveIntensity: 0.2
+      emissive: 0x1f3347,
+      emissiveIntensity: 0.13
     },
-    rightPalmPosition: [0.24, -0.34, -0.46],
-    rightSleevePosition: [0.26, -0.27, -0.58],
-    leftPalmPosition: [-0.24, -0.34, -0.46],
-    leftSleevePosition: [-0.26, -0.27, -0.58],
+    pose: {
+      shoulderX: 0.24,
+      shoulderY: -0.2,
+      shoulderZ: -0.58,
+      elbowY: -0.3,
+      elbowZ: -0.45,
+      handY: -0.4,
+      handZ: -0.33,
+      upperArmRoll: 0.42,
+      forearmRoll: 0.22,
+      bendX: 0.16
+    },
     groupRotationX: -0.03,
     swayAmplitude: 0.012,
     swayFrequency: 0.0042

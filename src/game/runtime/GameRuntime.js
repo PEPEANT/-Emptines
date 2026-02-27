@@ -78,6 +78,8 @@ export class GameRuntime {
 
     this.skyDome = null;
     this.skySun = new THREE.Vector3();
+    this.cloudLayer = null;
+    this.cloudParticles = [];
     this.sunLight = null;
     this.ground = null;
     this.handView = null;
@@ -175,6 +177,7 @@ export class GameRuntime {
     this.scene.add(fill);
 
     this.setupSky(sun.position.clone().normalize());
+    this.setupCloudLayer();
 
     const maxAnisotropy = this.renderer.capabilities.getMaxAnisotropy();
     const anisotropy = this.mobileEnabled ? Math.min(4, maxAnisotropy) : maxAnisotropy;
@@ -245,8 +248,119 @@ export class GameRuntime {
     this.scene.add(this.skyDome);
   }
 
+  setupCloudLayer() {
+    if (this.cloudLayer) {
+      this.scene.remove(this.cloudLayer);
+      disposeMeshTree(this.cloudLayer);
+      this.cloudLayer = null;
+    }
+    this.cloudParticles.length = 0;
+
+    const cloudConfig = this.worldContent.clouds;
+    if (!cloudConfig?.enabled) {
+      return;
+    }
+
+    const group = new THREE.Group();
+    const puffGeometry = new THREE.SphereGeometry(1, 10, 8);
+    const puffMaterial = new THREE.MeshStandardMaterial({
+      color: cloudConfig.color,
+      roughness: 1,
+      metalness: 0,
+      transparent: true,
+      opacity: cloudConfig.opacity,
+      depthWrite: false
+    });
+
+    const count = Math.max(1, Math.trunc(cloudConfig.count));
+    const area = Math.max(1000, Number(cloudConfig.area) || 9000);
+    const halfArea = area * 0.5;
+    const minScale = Number(cloudConfig.minScale) || 28;
+    const maxScale = Number(cloudConfig.maxScale) || 66;
+    const minHeight = Number(cloudConfig.minHeight) || 120;
+    const maxHeight = Number(cloudConfig.maxHeight) || 260;
+    const driftMin = Number(cloudConfig.driftMin) || 0.4;
+    const driftMax = Number(cloudConfig.driftMax) || 1.1;
+
+    for (let i = 0; i < count; i += 1) {
+      const cloud = new THREE.Group();
+      const puffCount = 3 + Math.floor(Math.random() * 2);
+
+      for (let p = 0; p < puffCount; p += 1) {
+        const puff = new THREE.Mesh(puffGeometry, puffMaterial);
+        const offsetX = (p - (puffCount - 1) * 0.5) * (0.95 + Math.random() * 0.4);
+        const offsetY = (Math.random() - 0.5) * 0.25;
+        const offsetZ = (Math.random() - 0.5) * 0.55;
+        puff.position.set(offsetX, offsetY, offsetZ);
+        puff.scale.set(
+          0.9 + Math.random() * 0.45,
+          0.45 + Math.random() * 0.25,
+          0.7 + Math.random() * 0.45
+        );
+        cloud.add(puff);
+      }
+
+      const cloudScale = minScale + Math.random() * Math.max(1, maxScale - minScale);
+      cloud.scale.set(cloudScale, cloudScale * 0.44, cloudScale * 0.8);
+      cloud.position.set(
+        (Math.random() * 2 - 1) * halfArea,
+        minHeight + Math.random() * Math.max(1, maxHeight - minHeight),
+        (Math.random() * 2 - 1) * halfArea
+      );
+
+      group.add(cloud);
+
+      const driftSpeed = driftMin + Math.random() * Math.max(0.05, driftMax - driftMin);
+      const driftAngle = Math.random() * Math.PI * 2;
+      this.cloudParticles.push({
+        mesh: cloud,
+        driftX: Math.cos(driftAngle) * driftSpeed,
+        driftZ: Math.sin(driftAngle) * driftSpeed,
+        halfArea
+      });
+    }
+
+    this.cloudLayer = group;
+    this.scene.add(this.cloudLayer);
+  }
+
+  updateCloudLayer(delta) {
+    if (this.cloudParticles.length === 0) {
+      return;
+    }
+
+    for (const cloud of this.cloudParticles) {
+      cloud.mesh.position.x += cloud.driftX * delta;
+      cloud.mesh.position.z += cloud.driftZ * delta;
+
+      if (cloud.mesh.position.x > cloud.halfArea) {
+        cloud.mesh.position.x = -cloud.halfArea;
+      } else if (cloud.mesh.position.x < -cloud.halfArea) {
+        cloud.mesh.position.x = cloud.halfArea;
+      }
+
+      if (cloud.mesh.position.z > cloud.halfArea) {
+        cloud.mesh.position.z = -cloud.halfArea;
+      } else if (cloud.mesh.position.z < -cloud.halfArea) {
+        cloud.mesh.position.z = cloud.halfArea;
+      }
+    }
+  }
+
   setupHands() {
     const hands = this.handContent;
+    const pose = hands.pose ?? {};
+    const shoulderX = Number(pose.shoulderX ?? 0.24);
+    const shoulderY = Number(pose.shoulderY ?? -0.2);
+    const shoulderZ = Number(pose.shoulderZ ?? -0.58);
+    const elbowY = Number(pose.elbowY ?? -0.3);
+    const elbowZ = Number(pose.elbowZ ?? -0.45);
+    const handY = Number(pose.handY ?? -0.4);
+    const handZ = Number(pose.handZ ?? -0.33);
+    const upperArmRoll = Number(pose.upperArmRoll ?? 0.42);
+    const forearmRoll = Number(pose.forearmRoll ?? 0.22);
+    const bendX = Number(pose.bendX ?? 0.16);
+
     const group = new THREE.Group();
 
     const skin = new THREE.MeshStandardMaterial({
@@ -265,23 +379,60 @@ export class GameRuntime {
       emissiveIntensity: hands.sleeve.emissiveIntensity
     });
 
-    const rightPalm = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.11, 0.2), skin);
-    rightPalm.position.fromArray(hands.rightPalmPosition);
-    rightPalm.castShadow = true;
+    const upperArmGeometry = new THREE.CapsuleGeometry(0.055, 0.2, 6, 10);
+    const forearmGeometry = new THREE.CapsuleGeometry(0.05, 0.2, 6, 10);
+    const palmGeometry = new THREE.SphereGeometry(0.078, 10, 8);
+    const fingerGeometry = new THREE.CapsuleGeometry(0.016, 0.07, 4, 6);
+    const thumbGeometry = new THREE.CapsuleGeometry(0.02, 0.075, 4, 6);
 
-    const rightSleeve = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.15, 0.24), sleeve);
-    rightSleeve.position.fromArray(hands.rightSleevePosition);
-    rightSleeve.castShadow = true;
+    const buildArm = (side) => {
+      const upperArm = new THREE.Mesh(upperArmGeometry, sleeve);
+      upperArm.position.set(side * shoulderX, shoulderY, shoulderZ);
+      upperArm.rotation.x = bendX;
+      upperArm.rotation.z = -side * upperArmRoll;
+      upperArm.castShadow = true;
 
-    const leftPalm = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.11, 0.2), skin);
-    leftPalm.position.fromArray(hands.leftPalmPosition);
-    leftPalm.castShadow = true;
+      const forearm = new THREE.Mesh(forearmGeometry, sleeve);
+      forearm.position.set(side * (shoulderX + 0.03), elbowY, elbowZ);
+      forearm.rotation.x = bendX + 0.05;
+      forearm.rotation.z = -side * forearmRoll;
+      forearm.castShadow = true;
 
-    const leftSleeve = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.15, 0.24), sleeve);
-    leftSleeve.position.fromArray(hands.leftSleevePosition);
-    leftSleeve.castShadow = true;
+      const palm = new THREE.Mesh(palmGeometry, skin);
+      palm.position.set(side * (shoulderX + 0.05), handY, handZ);
+      palm.scale.set(1.12, 0.76, 1.26);
+      palm.rotation.x = bendX + 0.09;
+      palm.castShadow = true;
 
-    group.add(rightPalm, rightSleeve, leftPalm, leftSleeve);
+      const thumb = new THREE.Mesh(thumbGeometry, skin);
+      thumb.position.set(side * (shoulderX + 0.1), handY - 0.005, handZ - 0.01);
+      thumb.rotation.x = 0.52;
+      thumb.rotation.z = -side * 0.86;
+      thumb.castShadow = true;
+
+      const fingerOffsets = [
+        [0.03, 0.026],
+        [0.012, 0.04],
+        [-0.008, 0.048]
+      ];
+      const fingers = fingerOffsets.map((offset) => {
+        const finger = new THREE.Mesh(fingerGeometry, skin);
+        finger.position.set(
+          side * (shoulderX + offset[0]),
+          handY - 0.022,
+          handZ + offset[1]
+        );
+        finger.rotation.x = 0.36;
+        finger.rotation.z = -side * 0.15;
+        finger.castShadow = true;
+        return finger;
+      });
+
+      group.add(upperArm, forearm, palm, thumb, ...fingers);
+    };
+
+    buildArm(1);
+    buildArm(-1);
     group.position.set(0, 0, 0);
     group.rotation.x = hands.groupRotationX;
 
@@ -531,6 +682,7 @@ export class GameRuntime {
 
   tick(delta) {
     this.updateMovement(delta);
+    this.updateCloudLayer(delta);
     this.updateRemotePlayers(delta);
     this.emitLocalSync(delta);
     this.updateDynamicResolution(delta);
