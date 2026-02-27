@@ -13,7 +13,10 @@ export const BASE_VOID_PACK = {
       turbidity: 2.2,
       rayleigh: 2.65,
       mieCoefficient: 0.0042,
-      mieDirectionalG: 0.82
+      mieDirectionalG: 0.82,
+      textureUrl: "/assets/graphics/world/sky/oss-sky/venice_sunset_1k.hdr",
+      textureBackgroundIntensity: 0.82,
+      textureEnvironmentIntensity: 0.5
     },
     clouds: {
       enabled: true,
@@ -79,7 +82,7 @@ export const BASE_VOID_PACK = {
       enabled: true,
       width: 120000,
       depth: 220000,
-      positionX: 60000,
+      shorelineX: 12000,
       positionY: 0.05,
       positionZ: 0,
       normalTextureUrl: "/assets/graphics/world/textures/oss-water/waternormals.jpg",
@@ -89,7 +92,30 @@ export const BASE_VOID_PACK = {
       sunColor: 0xffffff,
       opacity: 0.82,
       distortionScale: 2.2,
-      timeScale: 0.33
+      timeScale: 0.33,
+      bobAmplitude: 0.03,
+      bobFrequency: 0.35
+    },
+    beach: {
+      enabled: true,
+      textureUrl: "/assets/graphics/world/textures/cc0-sand/sand_color.jpg",
+      normalTextureUrl: "/assets/graphics/world/textures/cc0-sand/sand_normal_gl.jpg",
+      roughnessTextureUrl: "/assets/graphics/world/textures/cc0-sand/sand_roughness.jpg",
+      aoTextureUrl: "/assets/graphics/world/textures/cc0-sand/sand_ao.jpg",
+      shorelineX: 12000,
+      width: 7800,
+      depth: 220000,
+      positionY: 0.025,
+      repeatX: 56,
+      repeatY: 950,
+      color: 0xd9c08a,
+      roughness: 0.93,
+      metalness: 0,
+      normalScale: [0.65, 0.65],
+      aoIntensity: 0.32,
+      foamWidth: 220,
+      foamOpacity: 0.46,
+      foamColor: 0xe8f7ff
     },
     originMarker: {
       radiusTop: 0.4,
@@ -106,7 +132,7 @@ export const BASE_VOID_PACK = {
       }
     },
     postProcessing: {
-      exposure: 0.96,
+      exposure: 0.88,
       bloom: {
         enabled: true,
         mobileEnabled: false,

@@ -94,8 +94,15 @@ async function main() {
   checkFile("public/assets/graphics/world/textures/cc0-grass/grass_normal_gl.jpg");
   checkFile("public/assets/graphics/world/textures/cc0-grass/grass_roughness.jpg");
   checkFile("public/assets/graphics/world/textures/cc0-grass/grass_ao.jpg");
+  checkFile("public/assets/graphics/world/textures/cc0-sand/sand_color.jpg");
+  checkFile("public/assets/graphics/world/textures/cc0-sand/sand_normal_gl.jpg");
+  checkFile("public/assets/graphics/world/textures/cc0-sand/sand_roughness.jpg");
+  checkFile("public/assets/graphics/world/textures/cc0-sand/sand_ao.jpg");
+  checkFile("public/assets/graphics/world/textures/cc0-sand/SOURCE.txt");
   checkFile("public/assets/graphics/world/textures/oss-water/waternormals.jpg");
   checkFile("public/assets/graphics/world/textures/oss-water/SOURCE.txt");
+  checkFile("public/assets/graphics/world/sky/oss-sky/venice_sunset_1k.hdr");
+  checkFile("public/assets/graphics/world/sky/oss-sky/SOURCE.txt");
   checkIndexEntry();
 
   const chatUp = await pingLocalServer("http://localhost:3001/health");

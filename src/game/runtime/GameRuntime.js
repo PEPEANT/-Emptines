@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { io } from "socket.io-client";
 import { Sky } from "three/addons/objects/Sky.js";
 import { Water } from "three/addons/objects/Water.js";
+import { RGBELoader } from "three/addons/loaders/RGBELoader.js";
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
@@ -82,12 +83,16 @@ export class GameRuntime {
     this.moveVec = new THREE.Vector3();
 
     this.skyDome = null;
+    this.skyBackgroundTexture = null;
+    this.skyEnvironmentTexture = null;
     this.skySun = new THREE.Vector3();
     this.cloudLayer = null;
     this.cloudParticles = [];
     this.sunLight = null;
     this.ground = null;
     this.groundUnderside = null;
+    this.beach = null;
+    this.shoreFoam = null;
     this.ocean = null;
     this.handView = null;
     this.handSwayAmplitude = Number(this.handContent.swayAmplitude) || 0.012;
@@ -273,6 +278,7 @@ export class GameRuntime {
     this.groundUnderside.receiveShadow = false;
     this.scene.add(this.groundUnderside);
 
+    this.setupBeachLayer(world.beach, world.ocean);
     this.setupOceanLayer(world.ocean);
 
     const marker = world.originMarker;
@@ -304,6 +310,12 @@ export class GameRuntime {
     }
 
     const skyConfig = this.worldContent.sky;
+    if (skyConfig?.textureUrl) {
+      this.setupSkyTexture(skyConfig, sunDirection);
+      return;
+    }
+
+    this.clearSkyTexture();
     const sky = new Sky();
     sky.scale.setScalar(skyConfig.scale);
     const uniforms = sky.material.uniforms;
@@ -317,6 +329,75 @@ export class GameRuntime {
 
     this.skyDome = sky;
     this.scene.add(this.skyDome);
+  }
+
+  setupSkyTexture(skyConfig, sunDirection) {
+    this.clearSkyTexture();
+
+    const url = String(skyConfig?.textureUrl ?? "").trim();
+    if (!url) {
+      this.setupSky(sunDirection);
+      return;
+    }
+
+    const loader = new RGBELoader();
+    loader.load(
+      url,
+      (hdrTexture) => {
+        const pmrem = new THREE.PMREMGenerator(this.renderer);
+        const envRT = pmrem.fromEquirectangular(hdrTexture);
+        pmrem.dispose();
+
+        hdrTexture.mapping = THREE.EquirectangularReflectionMapping;
+        const backgroundIntensity = Number(skyConfig.textureBackgroundIntensity);
+        if (Number.isFinite(backgroundIntensity)) {
+          hdrTexture.colorSpace = THREE.LinearSRGBColorSpace;
+        }
+
+        this.skyBackgroundTexture = hdrTexture;
+        this.skyEnvironmentTexture = envRT.texture;
+
+        this.scene.background = this.skyBackgroundTexture;
+        this.scene.environment = this.skyEnvironmentTexture;
+        if (Number.isFinite(backgroundIntensity)) {
+          this.scene.backgroundIntensity = backgroundIntensity;
+        }
+        const environmentIntensity = Number(skyConfig.textureEnvironmentIntensity);
+        this.scene.environmentIntensity = Number.isFinite(environmentIntensity)
+          ? environmentIntensity
+          : 1;
+      },
+      undefined,
+      () => {
+        this.clearSkyTexture();
+        const sky = new Sky();
+        sky.scale.setScalar(skyConfig.scale);
+        const uniforms = sky.material.uniforms;
+        uniforms.turbidity.value = skyConfig.turbidity;
+        uniforms.rayleigh.value = skyConfig.rayleigh;
+        uniforms.mieCoefficient.value = skyConfig.mieCoefficient;
+        uniforms.mieDirectionalG.value = skyConfig.mieDirectionalG;
+        this.skySun.copy(sunDirection).multiplyScalar(skyConfig.scale);
+        uniforms.sunPosition.value.copy(this.skySun);
+        this.skyDome = sky;
+        this.scene.add(this.skyDome);
+      }
+    );
+  }
+
+  clearSkyTexture() {
+    if (this.scene.background === this.skyBackgroundTexture) {
+      this.scene.background = new THREE.Color(this.worldContent.skyColor);
+      this.scene.backgroundIntensity = 1;
+    }
+    if (this.scene.environment === this.skyEnvironmentTexture) {
+      this.scene.environment = null;
+      this.scene.environmentIntensity = 1;
+    }
+    this.skyBackgroundTexture?.dispose?.();
+    this.skyEnvironmentTexture?.dispose?.();
+    this.skyBackgroundTexture = null;
+    this.skyEnvironmentTexture = null;
   }
 
   setupCloudLayer() {
@@ -428,6 +509,115 @@ export class GameRuntime {
     }
   }
 
+  clearBeachLayer() {
+    if (this.beach) {
+      this.scene.remove(this.beach);
+      this.beach.geometry?.dispose?.();
+      this.beach.material?.map?.dispose?.();
+      this.beach.material?.normalMap?.dispose?.();
+      this.beach.material?.roughnessMap?.dispose?.();
+      this.beach.material?.aoMap?.dispose?.();
+      this.beach.material?.dispose?.();
+      this.beach = null;
+    }
+    if (this.shoreFoam) {
+      this.scene.remove(this.shoreFoam);
+      this.shoreFoam.geometry?.dispose?.();
+      this.shoreFoam.material?.dispose?.();
+      this.shoreFoam = null;
+    }
+  }
+
+  setupBeachLayer(config = {}, oceanConfig = {}) {
+    this.clearBeachLayer();
+    if (!config?.enabled) {
+      return;
+    }
+
+    const maxAnisotropy = this.renderer.capabilities.getMaxAnisotropy();
+    const anisotropy = this.mobileEnabled ? Math.min(2, maxAnisotropy) : Math.min(8, maxAnisotropy);
+    const loadTiledTexture = (url, repeatX, repeatY, colorSpace = null) => {
+      if (!url) {
+        return null;
+      }
+      const texture = this.textureLoader.load(url);
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      texture.repeat.set(repeatX, repeatY);
+      texture.anisotropy = anisotropy;
+      if (colorSpace) {
+        texture.colorSpace = colorSpace;
+      }
+      return texture;
+    };
+
+    const shorelineX = Number(config.shorelineX ?? oceanConfig.shorelineX ?? 12000);
+    const width = Math.max(200, Number(config.width) || 7800);
+    const depth = Math.max(2000, Number(config.depth) || 220000);
+    const repeatX = Number(config.repeatX) || 56;
+    const repeatY = Number(config.repeatY) || 950;
+
+    const beachMap = loadTiledTexture(config.textureUrl, repeatX, repeatY, THREE.SRGBColorSpace);
+    const beachNormal = loadTiledTexture(config.normalTextureUrl, repeatX, repeatY);
+    const beachRoughness = loadTiledTexture(config.roughnessTextureUrl, repeatX, repeatY);
+    const beachAo = loadTiledTexture(config.aoTextureUrl, repeatX, repeatY);
+
+    const beachGeometry = new THREE.PlaneGeometry(width, depth, 1, 1);
+    const uv = beachGeometry.getAttribute("uv");
+    if (uv) {
+      beachGeometry.setAttribute("uv2", new THREE.Float32BufferAttribute(Array.from(uv.array), 2));
+    }
+
+    const normalScale = Array.isArray(config.normalScale)
+      ? new THREE.Vector2(
+          Number(config.normalScale[0]) || 1,
+          Number(config.normalScale[1]) || Number(config.normalScale[0]) || 1
+        )
+      : new THREE.Vector2(1, 1);
+
+    const beach = new THREE.Mesh(
+      beachGeometry,
+      new THREE.MeshStandardMaterial({
+        color: config.color ?? 0xd9c08a,
+        map: beachMap ?? null,
+        normalMap: beachNormal ?? null,
+        normalScale,
+        roughnessMap: beachRoughness ?? null,
+        aoMap: beachAo ?? null,
+        aoMapIntensity: Number(config.aoIntensity) || 0.32,
+        roughness: Number(config.roughness) || 0.93,
+        metalness: Number(config.metalness) || 0,
+        side: THREE.FrontSide
+      })
+    );
+    beach.rotation.x = -Math.PI / 2;
+    beach.position.set(
+      shorelineX - width * 0.5,
+      Number(config.positionY) || 0.025,
+      Number(config.positionZ) || 0
+    );
+    beach.receiveShadow = true;
+    this.beach = beach;
+    this.scene.add(this.beach);
+
+    const foamWidth = Math.max(40, Number(config.foamWidth) || 220);
+    const foam = new THREE.Mesh(
+      new THREE.PlaneGeometry(foamWidth, depth, 1, 1),
+      new THREE.MeshBasicMaterial({
+        color: config.foamColor ?? 0xe8f7ff,
+        transparent: true,
+        opacity: Number(config.foamOpacity) || 0.46,
+        depthWrite: false
+      })
+    );
+    foam.rotation.x = -Math.PI / 2;
+    foam.position.set(shorelineX + foamWidth * 0.4, beach.position.y + 0.015, Number(config.positionZ) || 0);
+    foam.userData.baseOpacity = foam.material.opacity;
+    foam.userData.elapsed = 0;
+    this.shoreFoam = foam;
+    this.scene.add(this.shoreFoam);
+  }
+
   clearOceanLayer() {
     if (!this.ocean) {
       return;
@@ -448,6 +638,10 @@ export class GameRuntime {
 
     const width = Math.max(2000, Number(config.width) || 120000);
     const depth = Math.max(2000, Number(config.depth) || 220000);
+    const shorelineX = Number(config.shorelineX);
+    const centerX = Number.isFinite(shorelineX)
+      ? shorelineX + width * 0.5
+      : Number(config.positionX) || 60000;
     const normalMapUrl =
       String(config.normalTextureUrl ?? "").trim() ||
       "/assets/graphics/world/textures/oss-water/waternormals.jpg";
@@ -474,7 +668,7 @@ export class GameRuntime {
 
     water.rotation.x = -Math.PI / 2;
     water.position.set(
-      Number(config.positionX) || 60000,
+      centerX,
       Number(config.positionY) || 0.05,
       Number(config.positionZ) || 0
     );
@@ -484,6 +678,7 @@ export class GameRuntime {
     water.userData.bobAmplitude = Number(config.bobAmplitude) || 0.05;
     water.userData.bobFrequency = Number(config.bobFrequency) || 0.45;
     water.userData.elapsed = 0;
+    water.userData.shorelineX = Number.isFinite(shorelineX) ? shorelineX : null;
 
     this.ocean = water;
     this.scene.add(this.ocean);
@@ -506,6 +701,14 @@ export class GameRuntime {
     const baseY = Number(this.ocean.userData.basePositionY) || 0;
     if (amplitude > 0 && frequency > 0) {
       this.ocean.position.y = baseY + Math.sin(this.ocean.userData.elapsed * frequency) * amplitude;
+    }
+
+    if (this.shoreFoam?.material) {
+      this.shoreFoam.userData.elapsed = (Number(this.shoreFoam.userData.elapsed) || 0) + delta;
+      const pulse = 0.85 + Math.sin(this.shoreFoam.userData.elapsed * 1.4) * 0.15;
+      const baseOpacity = Number(this.shoreFoam.userData.baseOpacity) || 0.42;
+      this.shoreFoam.material.opacity = THREE.MathUtils.clamp(baseOpacity * pulse, 0.08, 0.95);
+      this.shoreFoam.position.y = this.ocean.position.y + 0.015;
     }
   }
 
@@ -1375,6 +1578,7 @@ export class GameRuntime {
     }
 
     this.setupCloudLayer();
+    this.setupBeachLayer(this.worldContent.beach, this.worldContent.ocean);
     this.setupOceanLayer(this.worldContent.ocean);
     this.setupPostProcessing();
   }

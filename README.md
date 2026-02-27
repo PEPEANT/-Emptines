@@ -93,9 +93,16 @@ Socket server health endpoints:
 - Grass PBR textures: ambientCG `Grass001` (CC0)
   - Source: https://ambientcg.com/view?id=Grass001
   - License: https://docs.ambientcg.com/license/
+- Beach sand PBR textures: ambientCG `Ground055S` (CC0)
+  - Source: https://ambientcg.com/view?id=Ground055S
+  - License: https://docs.ambientcg.com/license/
 - Water normal map: three.js examples `waternormals.jpg` (MIT)
   - Source: https://github.com/mrdoob/three.js/blob/dev/examples/textures/waternormals.jpg
   - License: https://github.com/mrdoob/three.js/blob/dev/LICENSE
+- Sky HDR map: three.js examples `venice_sunset_1k.hdr` (MIT, Poly Haven source)
+  - Source: https://github.com/mrdoob/three.js/blob/dev/examples/textures/equirectangular/venice_sunset_1k.hdr
+  - three.js license: https://github.com/mrdoob/three.js/blob/dev/LICENSE
+  - Poly Haven license info (CC0): https://polyhaven.com/license
 
 ## Project Layout
 
