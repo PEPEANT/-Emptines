@@ -13,11 +13,12 @@ const PLAYER_SPEED = 8.4;
 const PLAYER_SPRINT = 12.6;
 const PLAYER_GRAVITY = -22;
 const JUMP_FORCE = 9.2;
-const WORLD_LIMIT = 72;
+const WORLD_LIMIT = 5000;
 const PLAYER_RADIUS = 0.34;
 const POINTER_LOCK_FALLBACK_MS = 900;
 const MOBILE_LOOK_SENSITIVITY_X = 0.0032;
 const MOBILE_LOOK_SENSITIVITY_Y = 0.0028;
+const VOID_WORLD_MODE = true;
 const ONLINE_ROOM_CODE = "GLOBAL";
 const ONLINE_MAX_PLAYERS = 50;
 const REMOTE_SYNC_INTERVAL = 1 / 12;
@@ -52,8 +53,8 @@ export class Game {
     this.chat = options.chat ?? null;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x09111a);
-    this.scene.fog = new THREE.Fog(0x09111a, 48, 320);
+    this.scene.background = new THREE.Color(0x8ecfff);
+    this.scene.fog = new THREE.Fog(0x8ecfff, 260, 1300);
 
     this.camera = new THREE.PerspectiveCamera(
       DEFAULT_FOV,
@@ -125,11 +126,11 @@ export class Game {
     this.leftMouseDown = false;
     this.aimBlend = 0;
     this.hitSparks = [];
+    this.voidWorldMode = VOID_WORLD_MODE;
     this.worldPhase = WORLD_PHASE_DECONSTRUCT;
     this.combatWorldInitialized = false;
     this.deconstructGround = null;
     this.deconstructCharacter = null;
-    this.deconstructEnterButton = document.getElementById("deconstruct-enter");
 
     this.isRunning = false;
     this.isGameOver = false;
@@ -267,7 +268,7 @@ export class Game {
     this.camera.add(this.weaponView);
     this.camera.add(this.shovelView);
     this.setupWorld();
-    this.setWorldPhase(WORLD_PHASE_DECONSTRUCT);
+    this.setWorldPhase(WORLD_PHASE_COMBAT);
     this.bindEvents();
     this.setupMobileControls();
     this.resetState();
@@ -315,23 +316,23 @@ export class Game {
 
   setupWorld() {
     this.setupSky();
-    const hemiLight = new THREE.HemisphereLight(0x93bcd1, 0x1f2f1f, 0.9);
+    const hemiLight = new THREE.HemisphereLight(0xb9e4ff, 0x7cbf68, 1.28);
     this.scene.add(hemiLight);
 
-    const sun = new THREE.DirectionalLight(0xf5f2d0, 1.18);
-    sun.position.set(48, 62, 28);
+    const sun = new THREE.DirectionalLight(0xffffff, 1.36);
+    sun.position.set(68, 120, 38);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.left = -220;
-    sun.shadow.camera.right = 220;
-    sun.shadow.camera.top = 220;
-    sun.shadow.camera.bottom = -220;
-    sun.shadow.bias = -0.00026;
-    sun.shadow.normalBias = 0.022;
+    sun.shadow.camera.left = -360;
+    sun.shadow.camera.right = 360;
+    sun.shadow.camera.top = 360;
+    sun.shadow.camera.bottom = -360;
+    sun.shadow.bias = -0.00018;
+    sun.shadow.normalBias = 0.02;
     this.scene.add(sun);
 
-    const fill = new THREE.DirectionalLight(0x8ec7ff, 0.26);
-    fill.position.set(-38, 30, -24);
+    const fill = new THREE.DirectionalLight(0xb7e0ff, 0.48);
+    fill.position.set(-72, 56, -32);
     this.scene.add(fill);
     this.buildDeconstructScaffold();
   }
@@ -379,13 +380,13 @@ export class Game {
   buildDeconstructScaffold() {
     if (!this.deconstructGround) {
       this.deconstructGround = new THREE.Mesh(
-        new THREE.PlaneGeometry(180, 180, 1, 1),
+        new THREE.PlaneGeometry(12000, 12000, 1, 1),
         new THREE.MeshStandardMaterial({
-          color: 0x1f7a36,
+          color: 0x2f8f45,
           roughness: 1,
           metalness: 0,
-          emissive: 0x0b2a16,
-          emissiveIntensity: 0.16
+          emissive: 0x1a5b2c,
+          emissiveIntensity: 0.14
         })
       );
       this.deconstructGround.rotation.x = -Math.PI / 2;
@@ -431,6 +432,16 @@ export class Game {
   }
 
   clearDeconstructScaffold() {
+    if (this.voidWorldMode) {
+      if (this.deconstructGround) {
+        this.deconstructGround.visible = true;
+      }
+      if (this.deconstructCharacter) {
+        this.deconstructCharacter.visible = false;
+      }
+      return;
+    }
+
     if (this.deconstructGround) {
       this.deconstructGround.visible = false;
     }
@@ -440,6 +451,23 @@ export class Game {
   }
 
   buildCombatWorld() {
+    if (this.voidWorldMode) {
+      this.voxelWorld.clear();
+      this.buildDeconstructScaffold();
+      if (this.deconstructGround) {
+        this.deconstructGround.visible = true;
+      }
+      if (this.deconstructCharacter) {
+        this.deconstructCharacter.visible = false;
+      }
+      this.clearObjectiveVisuals();
+      this.state.objectiveText = "VOID FIELD: move and expand.";
+      this.state.controlPercent = 0;
+      this.state.controlOwner = "neutral";
+      this.combatWorldInitialized = true;
+      return;
+    }
+
     this.voxelWorld.generateTerrain();
     this.setupObjectives();
     this.combatWorldInitialized = true;
@@ -455,6 +483,11 @@ export class Game {
   }
 
   enterDeconstructMode() {
+    if (this.voidWorldMode) {
+      this.enterCombatMode({ force: true });
+      return;
+    }
+
     this.setWorldPhase(WORLD_PHASE_DECONSTRUCT);
     this.clearCombatWorld();
     this.buildDeconstructScaffold();
@@ -484,8 +517,9 @@ export class Game {
     this.updateVisualMode("gun");
   }
 
-  enterCombatMode() {
-    if (this.isCombatMode()) {
+  enterCombatMode(options = {}) {
+    const force = options.force === true;
+    if (this.isCombatMode() && !force) {
       return;
     }
 
@@ -494,8 +528,8 @@ export class Game {
     if (!this.combatWorldInitialized) {
       this.buildCombatWorld();
     }
-    this.weaponView.visible = true;
-    this.shovelView.visible = this.buildSystem.isDigMode();
+    this.weaponView.visible = false;
+    this.shovelView.visible = true;
     this.weaponRecoil = 0;
     this.aimBlend = 0;
     this.lastAppliedFov = DEFAULT_FOV;
@@ -503,12 +537,10 @@ export class Game {
     this.camera.updateProjectionMatrix();
 
     if (this.activeMatchMode === "online") {
-      if (this.lobbyState?.roomCode) {
-        this.setOnlineSpawnFromLobby();
-        this.syncRemotePlayersFromLobby();
-        this.emitLocalPlayerSync(REMOTE_SYNC_INTERVAL, true);
-      }
-      this.hud.setStatus("Online mode: combat restored.", false, 0.8);
+      this.setOnlineSpawnFromLobby();
+      this.syncRemotePlayersFromLobby();
+      this.emitLocalPlayerSync(REMOTE_SYNC_INTERVAL, true);
+      this.hud.setStatus("Void world online", false, 0.8);
     } else {
       const spawnY = this.voxelWorld.getSurfaceYAt(0, 0);
       this.playerPosition.set(0, (spawnY ?? 0) + PLAYER_HEIGHT, 0);
@@ -524,37 +556,11 @@ export class Game {
 
   setupSky() {
     const skyMaterial = new THREE.MeshBasicMaterial({
-      map: this.graphics.skyMap,
+      color: 0x9ad6ff,
       side: THREE.BackSide
     });
-    const sky = new THREE.Mesh(new THREE.SphereGeometry(620, 32, 18), skyMaterial);
+    const sky = new THREE.Mesh(new THREE.SphereGeometry(1400, 32, 20), skyMaterial);
     this.scene.add(sky);
-
-    const starCount = 650;
-    const positions = new Float32Array(starCount * 3);
-    for (let i = 0; i < starCount; i += 1) {
-      const radius = 170 + Math.random() * 150;
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.random() * Math.PI * 0.46;
-      const x = radius * Math.sin(phi) * Math.cos(theta);
-      const y = radius * Math.cos(phi) + 38;
-      const z = radius * Math.sin(phi) * Math.sin(theta);
-      positions[i * 3] = x;
-      positions[i * 3 + 1] = y;
-      positions[i * 3 + 2] = z;
-    }
-
-    const starsGeometry = new THREE.BufferGeometry();
-    starsGeometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-    const starsMaterial = new THREE.PointsMaterial({
-      color: 0xc8dfff,
-      size: 0.9,
-      transparent: true,
-      opacity: 0.65,
-      sizeAttenuation: true
-    });
-    const stars = new THREE.Points(starsGeometry, starsMaterial);
-    this.scene.add(stars);
   }
 
   setupObjectives() {
@@ -785,7 +791,9 @@ export class Game {
     this.objective.controlPulse = 0;
     this.state.controlPercent = 0;
     this.state.controlOwner = "neutral";
-    this.state.objectiveText = this.getObjectiveText();
+    this.state.objectiveText = this.voidWorldMode
+      ? "VOID FIELD: move and expand."
+      : this.getObjectiveText();
     this.applyControlVisual(0);
 
     if (this.alphaFlag) {
@@ -805,7 +813,7 @@ export class Game {
   }
 
   updateObjectives(delta) {
-    if (!this.isRunning || this.isGameOver || !this.bravoFlag) {
+    if (this.voidWorldMode || !this.isRunning || this.isGameOver || !this.bravoFlag) {
       return;
     }
 
@@ -991,36 +999,47 @@ export class Game {
   createShovelView() {
     const group = new THREE.Group();
 
-    const handleMaterial = new THREE.MeshStandardMaterial({
-      color: 0x6e5138,
-      roughness: 0.82,
+    const skinMaterial = new THREE.MeshStandardMaterial({
+      color: 0xf0c9a8,
+      roughness: 0.68,
+      metalness: 0.02
+    });
+    const sleeveMaterial = new THREE.MeshStandardMaterial({
+      color: 0x33495f,
+      roughness: 0.72,
       metalness: 0.08
     });
-    const metalMaterial = new THREE.MeshStandardMaterial({
-      color: 0x8a99ab,
-      roughness: 0.35,
-      metalness: 0.72
-    });
 
-    const handle = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.03, 0.032, 0.86, 12),
-      handleMaterial
+    const rightPalm = new THREE.Mesh(
+      new THREE.SphereGeometry(0.12, 12, 10),
+      skinMaterial
     );
-    handle.rotation.x = Math.PI * 0.5;
-    handle.castShadow = true;
+    rightPalm.scale.set(1, 0.82, 1.2);
+    rightPalm.position.set(0.3, -0.23, -0.54);
+    rightPalm.castShadow = true;
 
-    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.27, 0.06), metalMaterial);
-    blade.position.set(0, -0.16, -0.42);
-    blade.castShadow = true;
+    const rightSleeve = new THREE.Mesh(new THREE.CapsuleGeometry(0.065, 0.22, 4, 8), sleeveMaterial);
+    rightSleeve.rotation.z = -0.42;
+    rightSleeve.position.set(0.37, -0.28, -0.46);
+    rightSleeve.castShadow = true;
 
-    const collar = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.08, 0.1), metalMaterial);
-    collar.position.set(0, -0.04, -0.31);
-    collar.castShadow = true;
+    const leftPalm = new THREE.Mesh(
+      new THREE.SphereGeometry(0.11, 12, 10),
+      skinMaterial
+    );
+    leftPalm.scale.set(1, 0.84, 1.2);
+    leftPalm.position.set(0.12, -0.29, -0.5);
+    leftPalm.castShadow = true;
 
-    group.add(handle, blade, collar);
-    group.position.set(0.48, -0.44, -0.72);
-    group.rotation.set(-0.28, -0.18, 0.34);
-    group.visible = false;
+    const leftSleeve = new THREE.Mesh(new THREE.CapsuleGeometry(0.06, 0.2, 4, 8), sleeveMaterial);
+    leftSleeve.rotation.z = -0.16;
+    leftSleeve.position.set(0.17, -0.34, -0.42);
+    leftSleeve.castShadow = true;
+
+    group.add(rightSleeve, rightPalm, leftSleeve, leftPalm);
+    group.position.set(0.18, -0.1, -0.06);
+    group.rotation.set(-0.05, -0.12, 0.02);
+    group.visible = true;
     return group;
   }
 
@@ -1129,14 +1148,16 @@ export class Game {
     head.castShadow = true;
     head.receiveShadow = true;
 
-    const gun = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.14, 0.72), detailMaterial);
-    gun.position.set(0, 1.42, -0.48);
-    gun.castShadow = true;
+    const heldItem = this.voidWorldMode
+      ? new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 10), detailMaterial)
+      : new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.14, 0.72), detailMaterial);
+    heldItem.position.set(0, 1.42, -0.48);
+    heldItem.castShadow = true;
 
     const nameTag = this.createRemoteNameTag(player.name, team);
     nameTag.position.set(0, 2.45, 0);
 
-    group.add(torso, head, gun, nameTag);
+    group.add(torso, head, heldItem, nameTag);
     this.scene.add(group);
 
     return {
@@ -1341,13 +1362,27 @@ export class Game {
       seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
     }
     const angle = ((seed % 360) * Math.PI) / 180;
-    const ring = 2.8 + ((seed >> 8) % 5) * 0.55;
 
     let anchorX = 0;
     let anchorZ = 0;
     let faceYaw = 0;
+    let ring = 2.8 + ((seed >> 8) % 5) * 0.55;
 
-    if (team === "alpha") {
+    if (this.voidWorldMode) {
+      if (team === "alpha") {
+        anchorX = -68;
+        faceYaw = -Math.PI * 0.35;
+      } else if (team === "bravo") {
+        anchorX = 68;
+        faceYaw = Math.PI * 0.35;
+      } else {
+        const leftSide = (seed & 1) === 0;
+        anchorX = leftSide ? -38 : 38;
+        faceYaw = leftSide ? -Math.PI * 0.28 : Math.PI * 0.28;
+      }
+      anchorZ = ((seed >> 5) % 41) - 20;
+      ring = 12 + ((seed >> 9) % 17);
+    } else if (team === "alpha") {
       anchorX = this.objective.alphaBase.x;
       anchorZ = this.objective.alphaBase.z;
       faceYaw = -Math.PI * 0.5;
@@ -1557,7 +1592,7 @@ export class Game {
   }
 
   applyRemoteBlockUpdate(payload = {}) {
-    if (this.activeMatchMode !== "online") {
+    if (this.voidWorldMode || this.activeMatchMode !== "online") {
       return;
     }
 
@@ -1666,6 +1701,10 @@ export class Game {
       return;
     }
 
+    if (this.voidWorldMode) {
+      return;
+    }
+
     if (this.buildSystem.isBuildMode()) {
       this.buildSystem.handlePointerAction(0, (x, y, z) =>
         !this.isPlayerIntersectingBlock(x, y, z)
@@ -1682,6 +1721,14 @@ export class Game {
   }
 
   syncMobileUtilityButtons() {
+    if (this.voidWorldMode) {
+      this.mobileModePlaceBtn?.classList.remove("is-active");
+      this.mobileModeDigBtn?.classList.remove("is-active");
+      this.mobileModeGunBtn?.classList.remove("is-active");
+      this.mobileAimBtn?.classList.remove("is-active");
+      return;
+    }
+
     const mode = this.buildSystem?.getToolMode?.() ?? "gun";
     this.mobileModePlaceBtn?.classList.toggle("is-active", mode === "place");
     this.mobileModeDigBtn?.classList.toggle("is-active", mode === "dig");
@@ -1793,14 +1840,23 @@ export class Game {
     };
 
     bindUtilityTap(this.mobileModePlaceBtn, () => {
+      if (this.voidWorldMode) {
+        return;
+      }
       this.buildSystem.setToolMode("place");
       this.syncMobileUtilityButtons();
     });
     bindUtilityTap(this.mobileModeDigBtn, () => {
+      if (this.voidWorldMode) {
+        return;
+      }
       this.buildSystem.setToolMode("dig");
       this.syncMobileUtilityButtons();
     });
     bindUtilityTap(this.mobileModeGunBtn, () => {
+      if (this.voidWorldMode) {
+        return;
+      }
       this.buildSystem.setToolMode("gun");
       this.syncMobileUtilityButtons();
     });
@@ -1810,6 +1866,9 @@ export class Game {
       }
       event.preventDefault();
       if (!this.isCombatMode()) {
+        return;
+      }
+      if (this.voidWorldMode) {
         return;
       }
       this.sound.unlock();
@@ -1848,6 +1907,9 @@ export class Game {
     bindUtilityTap(this.mobileReloadBtn, () => {
       if (!this.isCombatMode()) {
         this.hud.setStatus("Combat not active yet", true, 0.7);
+        return;
+      }
+      if (this.voidWorldMode) {
         return;
       }
       if (!this.buildSystem.isGunMode()) {
@@ -2004,7 +2066,7 @@ export class Game {
         return;
       }
 
-      if (this.buildSystem.handleKeyDown(event)) {
+      if (!this.voidWorldMode && this.buildSystem.handleKeyDown(event)) {
         event.preventDefault();
         if (this.isDeconstructMode()) {
           return;
@@ -2018,6 +2080,9 @@ export class Game {
       this.keys.add(event.code);
 
       if (event.code === "KeyR") {
+        if (this.voidWorldMode) {
+          return;
+        }
         if (!this.isCombatMode()) {
           return;
         }
@@ -2040,6 +2105,9 @@ export class Game {
       }
 
       if (event.code === "ArrowRight" && this.isCombatMode()) {
+        if (this.voidWorldMode) {
+          return;
+        }
         this.isAiming = true;
       }
     });
@@ -2141,7 +2209,7 @@ export class Game {
         if (this.chat?.isInputFocused || !this.isRunning || this.isGameOver) {
           return;
         }
-        if (this.buildSystem.handleWheel(event)) {
+        if (!this.voidWorldMode && this.buildSystem.handleWheel(event)) {
           event.preventDefault();
         }
       },
@@ -2185,6 +2253,13 @@ export class Game {
         return;
       }
 
+      if (this.voidWorldMode) {
+        if (shouldTryPointerLock) {
+          this.tryPointerLock();
+        }
+        return;
+      }
+
       if (this.buildSystem.isBuildMode()) {
         if (event.button === 0 || event.button === 2) {
           this.buildSystem.handlePointerAction(event.button, (x, y, z) =>
@@ -2214,6 +2289,12 @@ export class Game {
 
     document.addEventListener("mouseup", (event) => {
       if (this.isDeconstructMode()) {
+        if (event.button === 0) {
+          this.handlePrimaryActionUp();
+        }
+        return;
+      }
+      if (this.voidWorldMode) {
         if (event.button === 0) {
           this.handlePrimaryActionUp();
         }
@@ -2327,9 +2408,6 @@ export class Game {
       }
     });
 
-    this.deconstructEnterButton?.addEventListener("click", () => {
-      this.enterCombatMode();
-    });
   }
 
   onChatFocusChanged(focused) {
@@ -2388,12 +2466,17 @@ export class Game {
       this.hud.setStatus("Pointer lock unavailable: free-look mode enabled", true, 1.2);
     }
 
-    this.addChatMessage("Operation started. Survive and score points.", "info");
-    this.addChatMessage("Objective: capture flags and hold the center point.", "info");
-    this.addChatMessage("Controls: WASD, SPACE, 1/2/3, R, NumPad1-8", "info");
+    if (this.voidWorldMode) {
+      this.addChatMessage("Void field initialized.", "info");
+      this.addChatMessage("Controls: WASD, SPACE, SHIFT", "info");
+    } else {
+      this.addChatMessage("Operation started. Survive and score points.", "info");
+      this.addChatMessage("Objective: capture flags and hold the center point.", "info");
+      this.addChatMessage("Controls: WASD, SPACE, 1/2/3, R, NumPad1-8", "info");
+    }
     if (this.activeMatchMode === "online") {
       this.joinDefaultRoom({ force: true });
-      this.hud.setStatus("Void initialized. Press F to reconstruct combat world", false, 1);
+      this.hud.setStatus("Void initialized.", false, 1);
       this.syncRemotePlayersFromLobby();
     }
     this.refreshOnlineStatus();
@@ -2485,7 +2568,8 @@ export class Game {
     this.hud.setKillStreak(0);
     this.camera.position.copy(this.playerPosition);
     this.camera.rotation.set(0, 0, 0);
-    this.enterDeconstructMode();
+    this.clearCombatWorld();
+    this.enterCombatMode({ force: true });
     this.syncCursorVisibility();
 
     this.hud.update(0, { ...this.state, ...this.weapon.getState() });
@@ -2496,6 +2580,7 @@ export class Game {
 
   fire() {
     if (
+      this.voidWorldMode ||
       !this.isRunning ||
       this.isGameOver ||
       !this.isCombatMode() ||
@@ -2708,6 +2793,54 @@ export class Game {
       return;
     }
 
+    if (this.voidWorldMode) {
+      const mobileMoveMagnitude = this.mobileEnabled
+        ? Math.hypot(this.mobileState.moveForward, this.mobileState.moveStrafe)
+        : 0;
+      const isMoving =
+        this.keys.has("KeyW") ||
+        this.keys.has("KeyA") ||
+        this.keys.has("KeyS") ||
+        this.keys.has("KeyD") ||
+        this.keys.has("ArrowUp") ||
+        this.keys.has("ArrowDown") ||
+        this.keys.has("ArrowLeft") ||
+        mobileMoveMagnitude > 0.06;
+      const sprinting =
+        this.keys.has("ShiftLeft") ||
+        this.keys.has("ShiftRight") ||
+        (this.mobileEnabled && mobileMoveMagnitude > 0.88);
+      const bobSpeed = sprinting ? 10 : 7;
+      this.weaponBobClock += delta * (isMoving ? bobSpeed : 2.5);
+      const bobX = Math.sin(this.weaponBobClock) * 0.009;
+      const bobY = Math.abs(Math.cos(this.weaponBobClock * 2)) * 0.008;
+
+      this.weaponView.visible = false;
+      if (this.weaponFlash) {
+        this.weaponFlash.material.opacity = 0;
+      }
+      if (this.weaponFlashLight) {
+        this.weaponFlashLight.intensity = 0;
+      }
+      if (this.shovelView) {
+        this.shovelView.visible = true;
+        this.shovelView.position.set(0.18 + bobX * 0.8, -0.1 - bobY, -0.06);
+        this.shovelView.rotation.set(-0.05 + bobY * 0.4, -0.12 + bobX * 0.45, 0.02 + bobX * 0.28);
+      }
+
+      if (Math.abs(DEFAULT_FOV - this.lastAppliedFov) > 0.01 || this.camera.fov !== DEFAULT_FOV) {
+        this.camera.fov = DEFAULT_FOV;
+        this.camera.updateProjectionMatrix();
+        this.lastAppliedFov = DEFAULT_FOV;
+      }
+
+      this.camera.position.copy(this.playerPosition);
+      this.camera.rotation.order = "YXZ";
+      this.camera.rotation.y = this.yaw;
+      this.camera.rotation.x = this.pitch;
+      return;
+    }
+
     const gunMode = this.buildSystem.isGunMode();
     const digMode = this.buildSystem.isDigMode();
     const mobileMoveMagnitude = this.mobileEnabled
@@ -2801,9 +2934,10 @@ export class Game {
     const isChatting = !!this.chat?.isInputFocused;
     const gunMode = this.buildSystem.isGunMode();
     const isCombatMode = this.isCombatMode();
-    const aiEnabled = isCombatMode && this.activeMatchMode !== "online";
+    const weaponEnabled = !this.voidWorldMode;
+    const aiEnabled = weaponEnabled && isCombatMode && this.activeMatchMode !== "online";
 
-    if (gunMode && isCombatMode) {
+    if (weaponEnabled && gunMode && isCombatMode) {
       this.weapon.update(delta);
     }
 
@@ -2821,7 +2955,7 @@ export class Game {
       return;
     }
 
-    if (gunMode && this.leftMouseDown) {
+    if (weaponEnabled && gunMode && this.leftMouseDown) {
       this.fire();
     }
 
@@ -2838,16 +2972,18 @@ export class Game {
 
     this.applyMovement(delta);
     this.updateCamera(delta);
-    this.updateObjectives(delta);
+    if (!this.voidWorldMode) {
+      this.updateObjectives(delta);
+    }
 
     const weapState = this.weapon.getState();
-    if (gunMode && !this._wasReloading && weapState.reloading) {
+    if (weaponEnabled && gunMode && !this._wasReloading && weapState.reloading) {
       this.sound.play("reload", { gain: 0.9, rateJitter: 0.03 });
     }
-    if (gunMode && this._wasReloading && !weapState.reloading) {
+    if (weaponEnabled && gunMode && this._wasReloading && !weapState.reloading) {
       this.addChatMessage("Reload complete", "info");
     }
-    this._wasReloading = gunMode ? weapState.reloading : false;
+    this._wasReloading = weaponEnabled && gunMode ? weapState.reloading : false;
 
     if (aiEnabled) {
       const combatResult = this.enemyManager.update(delta, this.playerPosition, {
@@ -2956,7 +3092,7 @@ export class Game {
   }
 
   updateVisualMode(mode) {
-    const build = mode !== "gun" && mode !== "weapon";
+    const build = !this.voidWorldMode && mode !== "gun" && mode !== "weapon";
     document.body.classList.toggle("ui-mode-build", build);
     document.body.classList.toggle("ui-mode-combat", !build);
   }

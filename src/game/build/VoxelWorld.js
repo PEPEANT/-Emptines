@@ -423,9 +423,38 @@ export class VoxelWorld {
     this.fillRect(centerX - 1, centerX + 1, 0, 2, centerZ + 4, centerZ + 6, wallType);
   }
 
-  generateTerrain() {
+  generateTerrain(options = {}) {
     this.clear();
-    const halfExtent = 56;
+    const flatOnly = options.flatOnly === true;
+    const requestedHalfExtent = Number(options.halfExtent);
+    const halfExtent = Number.isFinite(requestedHalfExtent)
+      ? Math.max(56, Math.trunc(requestedHalfExtent))
+      : flatOnly
+        ? 384
+        : 56;
+
+    if (flatOnly) {
+      for (let x = -halfExtent; x <= halfExtent; x += 1) {
+        for (let z = -halfExtent; z <= halfExtent; z += 1) {
+          this.setBlock(x, -5, z, 3);
+          this.setBlock(x, -4, z, 2);
+          this.setBlock(x, -3, z, 2);
+          this.setBlock(x, -2, z, 1);
+          this.setBlock(x, -1, z, 1);
+        }
+      }
+
+      this.arenaMeta = {
+        alphaBase: { x: -96, y: 0, z: 0 },
+        bravoBase: { x: 96, y: 0, z: 0 },
+        alphaFlag: { x: -96, y: 0, z: 0 },
+        bravoFlag: { x: 96, y: 0, z: 0 },
+        mid: { x: 0, y: 0, z: 0 },
+        halfExtent
+      };
+      return;
+    }
+
     for (let x = -halfExtent; x <= halfExtent; x += 1) {
       for (let z = -halfExtent; z <= halfExtent; z += 1) {
         const edgeDist = halfExtent - Math.max(Math.abs(x), Math.abs(z));

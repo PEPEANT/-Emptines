@@ -461,6 +461,11 @@ canvas {
   pointer-events: none;
 }
 
+/* Void mode keeps only movement + hand view, so hide build/weapon HUD. */
+#build-hud {
+  display: none !important;
+}
+
 #build-mode-badge {
   padding: 4px 10px;
   border-radius: 999px;
@@ -617,6 +622,15 @@ canvas {
   box-shadow:
     0 10px 22px rgba(0, 0, 0, 0.4),
     inset 0 0 0 1px rgba(255, 230, 230, 0.22);
+}
+
+#mobile-fire,
+#mobile-mode-place,
+#mobile-mode-dig,
+#mobile-mode-gun,
+#mobile-aim,
+#mobile-reload {
+  display: none !important;
 }
 
 #mobile-fire:active {
