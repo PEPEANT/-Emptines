@@ -899,7 +899,7 @@ body.world-mode-combat #crosshair {
 
 /* ── Mode Tabs ── */
 .start-tabs {
-  display: flex;
+  display: none;
   gap: 8px;
   border-bottom: 1px solid rgba(148, 221, 232, 0.14);
   margin: 18px 0 0;

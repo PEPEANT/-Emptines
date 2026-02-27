@@ -138,6 +138,21 @@ function sanitizeShootPayload(raw = {}) {
   return { targetId };
 }
 
+function pickBalancedTeam(room) {
+  let alpha = 0;
+  let bravo = 0;
+  for (const player of room.players.values()) {
+    if (player.team === "alpha") {
+      alpha += 1;
+      continue;
+    }
+    if (player.team === "bravo") {
+      bravo += 1;
+    }
+  }
+  return alpha <= bravo ? "alpha" : "bravo";
+}
+
 function serializeRoom(room) {
   pruneRoomPlayers(room);
   return {
@@ -240,6 +255,11 @@ function joinDefaultRoom(socket, nameOverride = null) {
   socket.data.playerName = name;
 
   if (socket.data.roomCode === room.code && room.players.has(socket.id)) {
+    const existing = room.players.get(socket.id);
+    if (existing && existing.team !== "alpha" && existing.team !== "bravo") {
+      existing.team = pickBalancedTeam(room);
+      emitRoomUpdate(room);
+    }
     return { ok: true, room: serializeRoom(room) };
   }
 
@@ -255,7 +275,7 @@ function joinDefaultRoom(socket, nameOverride = null) {
   room.players.set(socket.id, {
     id: socket.id,
     name,
-    team: null,
+    team: pickBalancedTeam(room),
     state: sanitizePlayerState(),
     hp: 100,
     kills: 0,

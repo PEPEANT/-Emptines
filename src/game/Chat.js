@@ -1,6 +1,18 @@
 import { io } from "socket.io-client";
 
-const PROD_CHAT_FALLBACK_URL = "https://reclaim-fps-chat.onrender.com";
+function resolveConfiguredServerUrl() {
+  const envUrl = String(import.meta.env.VITE_CHAT_SERVER ?? "").trim();
+  if (envUrl) {
+    return envUrl;
+  }
+
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  const runtimeUrl = String(window.__EMPTINES_SOCKET_URL ?? "").trim();
+  return runtimeUrl;
+}
 
 function resolveDefaultServerUrl() {
   if (typeof window === "undefined") {
@@ -19,15 +31,10 @@ function resolveDefaultServerUrl() {
     return `${protocol}//${hostname}:3001`;
   }
 
-  // Static hosting domains do not run the Socket.IO backend.
-  if (hostname.endsWith(".netlify.app") || hostname.endsWith(".vercel.app")) {
-    return PROD_CHAT_FALLBACK_URL;
-  }
-
   return origin;
 }
 
-const SERVER_URL = import.meta.env.VITE_CHAT_SERVER ?? resolveDefaultServerUrl();
+const SERVER_URL = resolveConfiguredServerUrl() || resolveDefaultServerUrl();
 const MAX_MSGS = 80;
 
 export class Chat {

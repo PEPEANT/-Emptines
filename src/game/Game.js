@@ -2261,13 +2261,18 @@ export class Game {
     });
 
     if (btnSingle && btnOnline && panelSingle && panelOnline) {
-      switchTab(btnOnline, btnSingle, panelOnline, panelSingle);
+      switchTab(btnSingle, btnOnline, panelSingle, panelOnline);
       this.menuMode = "online";
+    }
+
+    if (this.startButton) {
+      this.startButton.textContent = "PLAY";
     }
 
     this.startButton?.addEventListener("click", () => {
       this.applyLobbyNickname();
-      this.start({ mode: "single" });
+      this.joinDefaultRoom({ force: true });
+      this.start({ mode: "online" });
     });
 
     this.mpCreateBtn?.addEventListener("click", () => {
@@ -2387,7 +2392,8 @@ export class Game {
     this.addChatMessage("Objective: capture flags and hold the center point.", "info");
     this.addChatMessage("Controls: WASD, SPACE, 1/2/3, R, NumPad1-8", "info");
     if (this.activeMatchMode === "online") {
-      this.hud.setStatus("Online mode ready: press F to enter combat world", false, 1);
+      this.joinDefaultRoom({ force: true });
+      this.hud.setStatus("Void initialized. Press F to reconstruct combat world", false, 1);
       this.syncRemotePlayersFromLobby();
     }
     this.refreshOnlineStatus();
