@@ -4,38 +4,41 @@ export const BASE_VOID_PACK = {
   id: "base-void",
   name: "Base Void",
   world: {
-    skyColor: 0x73c2ff,
-    fogNear: 550,
-    fogFar: 4200,
+    skyColor: 0x9edbff,
+    fogDensity: 0.00006,
+    fogNear: 680,
+    fogFar: 5200,
     sky: {
       scale: 450000,
-      turbidity: 2.7,
-      rayleigh: 2.55,
-      mieCoefficient: 0.005,
-      mieDirectionalG: 0.78
+      turbidity: 1.9,
+      rayleigh: 3.3,
+      mieCoefficient: 0.0032,
+      mieDirectionalG: 0.84
     },
     clouds: {
       enabled: true,
-      count: 26,
-      area: 9000,
-      minHeight: 120,
-      maxHeight: 260,
-      minScale: 28,
-      maxScale: 66,
-      color: 0xffffff,
-      opacity: 0.86,
-      driftMin: 0.4,
-      driftMax: 1.1
+      count: 32,
+      area: 10000,
+      minHeight: 140,
+      maxHeight: 320,
+      minScale: 30,
+      maxScale: 82,
+      color: 0xf8fdff,
+      opacity: 0.88,
+      driftMin: 0.28,
+      driftMax: 0.78,
+      emissive: 0x3a5b6c,
+      emissiveIntensity: 0.08
     },
     lights: {
       hemisphere: {
-        skyColor: 0xc8ebff,
-        groundColor: 0x6bb255,
-        intensity: 1.26
+        skyColor: 0xe2f5ff,
+        groundColor: 0xa7e67f,
+        intensity: 1.36
       },
       sun: {
         color: 0xffffff,
-        intensity: 1.3,
+        intensity: 1.24,
         position: [70, 130, 44],
         shadowMobileSize: 1024,
         shadowDesktopSize: 1536,
@@ -46,8 +49,8 @@ export const BASE_VOID_PACK = {
         shadowNormalBias: 0.02
       },
       fill: {
-        color: 0xc7ebff,
-        intensity: 0.5,
+        color: 0xd2f0ff,
+        intensity: 0.64,
         position: [-72, 56, -32]
       }
     },
@@ -56,11 +59,15 @@ export const BASE_VOID_PACK = {
       repeatX: 600,
       repeatY: 600,
       size: 200000,
-      color: 0x4cbc55,
-      roughness: 0.97,
+      color: 0x66d66d,
+      roughness: 0.92,
       metalness: 0,
-      emissive: 0x1f7b32,
-      emissiveIntensity: 0.12
+      emissive: 0x43a74c,
+      emissiveIntensity: 0.2,
+      undersideColor: 0x73df7a,
+      undersideEmissive: 0x4ec059,
+      undersideEmissiveIntensity: 0.34,
+      undersideOffsetY: -0.12
     },
     originMarker: {
       radiusTop: 0.4,
@@ -74,6 +81,15 @@ export const BASE_VOID_PACK = {
         metalness: 0.1,
         emissive: 0x2a3a52,
         emissiveIntensity: 0.2
+      }
+    },
+    postProcessing: {
+      bloom: {
+        enabled: true,
+        mobileEnabled: false,
+        strength: 0.22,
+        radius: 0.62,
+        threshold: 0.86
       }
     }
   },

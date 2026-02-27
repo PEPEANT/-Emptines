@@ -1,6 +1,9 @@
 import * as THREE from "three";
 import { io } from "socket.io-client";
 import { Sky } from "three/addons/objects/Sky.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { HUD } from "../ui/HUD.js";
 import { GAME_CONSTANTS } from "../config/gameConstants.js";
 import { getContentPack } from "../content/registry.js";
@@ -32,11 +35,11 @@ export class GameRuntime {
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(this.worldContent.skyColor);
-    this.scene.fog = new THREE.Fog(
-      this.worldContent.skyColor,
-      this.worldContent.fogNear,
-      this.worldContent.fogFar
-    );
+    const fogDensity = Number(this.worldContent.fogDensity) || 0;
+    this.scene.fog =
+      fogDensity > 0
+        ? new THREE.FogExp2(this.worldContent.skyColor, fogDensity)
+        : new THREE.Fog(this.worldContent.skyColor, this.worldContent.fogNear, this.worldContent.fogFar);
 
     this.camera = new THREE.PerspectiveCamera(
       GAME_CONSTANTS.DEFAULT_FOV,
@@ -53,7 +56,7 @@ export class GameRuntime {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.03;
+    this.renderer.toneMappingExposure = 1.08;
     this.renderer.shadowMap.enabled = !this.mobileEnabled;
     this.renderer.shadowMap.autoUpdate = !this.mobileEnabled;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -82,9 +85,12 @@ export class GameRuntime {
     this.cloudParticles = [];
     this.sunLight = null;
     this.ground = null;
+    this.groundUnderside = null;
     this.handView = null;
     this.handSwayAmplitude = Number(this.handContent.swayAmplitude) || 0.012;
     this.handSwayFrequency = Number(this.handContent.swayFrequency) || 0.0042;
+    this.composer = null;
+    this.bloomPass = null;
 
     this.dynamicResolution = {
       enabled: true,
@@ -129,6 +135,7 @@ export class GameRuntime {
     this.scene.add(this.camera);
 
     this.setupWorld();
+    this.setupPostProcessing();
     this.bindEvents();
     this.connectNetwork();
 
@@ -193,14 +200,15 @@ export class GameRuntime {
     groundMap.colorSpace = THREE.SRGBColorSpace;
     groundMap.anisotropy = anisotropy;
 
+    const groundGeometry = new THREE.PlaneGeometry(ground.size, ground.size, 1, 1);
     this.ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(ground.size, ground.size, 1, 1),
+      groundGeometry,
       new THREE.MeshStandardMaterial({
         color: ground.color,
         map: groundMap,
         roughness: ground.roughness,
         metalness: ground.metalness,
-        side: THREE.DoubleSide,
+        side: THREE.FrontSide,
         emissive: ground.emissive,
         emissiveIntensity: ground.emissiveIntensity
       })
@@ -208,6 +216,24 @@ export class GameRuntime {
     this.ground.rotation.x = -Math.PI / 2;
     this.ground.receiveShadow = true;
     this.scene.add(this.ground);
+
+    this.groundUnderside = new THREE.Mesh(
+      groundGeometry.clone(),
+      new THREE.MeshStandardMaterial({
+        color: ground.undersideColor ?? ground.color,
+        map: groundMap,
+        roughness: 1,
+        metalness: 0,
+        side: THREE.BackSide,
+        emissive: ground.undersideEmissive ?? ground.emissive,
+        emissiveIntensity:
+          Number(ground.undersideEmissiveIntensity) || Math.max(0.2, Number(ground.emissiveIntensity))
+      })
+    );
+    this.groundUnderside.rotation.x = -Math.PI / 2;
+    this.groundUnderside.position.y = Number(ground.undersideOffsetY) || -0.1;
+    this.groundUnderside.receiveShadow = false;
+    this.scene.add(this.groundUnderside);
 
     const marker = world.originMarker;
     const originMarker = new THREE.Mesh(
@@ -272,6 +298,8 @@ export class GameRuntime {
       color: cloudConfig.color,
       roughness: 1,
       metalness: 0,
+      emissive: cloudConfig.emissive ?? 0x0,
+      emissiveIntensity: Number(cloudConfig.emissiveIntensity) || 0,
       transparent: true,
       opacity: cloudConfig.opacity,
       depthWrite: false
@@ -350,6 +378,39 @@ export class GameRuntime {
         cloud.mesh.position.z = cloud.halfArea;
       }
     }
+  }
+
+  setupPostProcessing() {
+    if (this.composer && typeof this.composer.dispose === "function") {
+      this.composer.dispose();
+    }
+
+    const bloomConfig = this.worldContent?.postProcessing?.bloom;
+    const bloomEnabled =
+      Boolean(bloomConfig?.enabled) && (!this.mobileEnabled || Boolean(bloomConfig?.mobileEnabled));
+    if (!bloomEnabled) {
+      this.composer = null;
+      this.bloomPass = null;
+      return;
+    }
+
+    const composer = new EffectComposer(this.renderer);
+    composer.setPixelRatio(this.currentPixelRatio);
+    composer.setSize(window.innerWidth, window.innerHeight);
+
+    const renderPass = new RenderPass(this.scene, this.camera);
+    composer.addPass(renderPass);
+
+    const bloom = new UnrealBloomPass(
+      new THREE.Vector2(window.innerWidth, window.innerHeight),
+      Number(bloomConfig.strength) || 0.22,
+      Number(bloomConfig.radius) || 0.62,
+      Number(bloomConfig.threshold) || 0.86
+    );
+    composer.addPass(bloom);
+
+    this.composer = composer;
+    this.bloomPass = bloom;
   }
 
   setupHands() {
@@ -1107,7 +1168,11 @@ export class GameRuntime {
   loop() {
     const delta = Math.min(this.clock.getDelta(), 0.05);
     this.tick(delta);
-    this.renderer.render(this.scene, this.camera);
+    if (this.composer) {
+      this.composer.render();
+    } else {
+      this.renderer.render(this.scene, this.camera);
+    }
     requestAnimationFrame(() => this.loop());
   }
 
@@ -1153,6 +1218,10 @@ export class GameRuntime {
     this.currentPixelRatio = Number(targetRatio.toFixed(2));
     this.renderer.setPixelRatio(this.currentPixelRatio);
     this.renderer.setSize(window.innerWidth, window.innerHeight, false);
+    if (this.composer) {
+      this.composer.setPixelRatio(this.currentPixelRatio);
+      this.composer.setSize(window.innerWidth, window.innerHeight);
+    }
   }
 
   applyQualityProfile() {
@@ -1174,6 +1243,8 @@ export class GameRuntime {
         this.sunLight.shadow.needsUpdate = true;
       }
     }
+
+    this.setupPostProcessing();
   }
 
   onResize() {
@@ -1199,5 +1270,9 @@ export class GameRuntime {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    if (this.composer) {
+      this.composer.setPixelRatio(this.currentPixelRatio);
+      this.composer.setSize(window.innerWidth, window.innerHeight);
+    }
   }
 }
