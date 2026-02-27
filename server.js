@@ -289,8 +289,25 @@ io.on("connection", (socket) => {
       return;
     }
 
+    const roomCode = socket.data.roomCode;
+    const room = roomCode ? rooms.get(roomCode) : null;
+    if (!room) {
+      return;
+    }
+
+    const player = room.players.get(socket.id);
+    if (!player) {
+      return;
+    }
+
     socket.data.playerName = safeName;
-    io.emit("chat:message", { name: safeName, text: safeText });
+    player.name = safeName;
+    io.to(room.code).emit("chat:message", {
+      id: socket.id,
+      name: safeName,
+      text: safeText
+    });
+    emitRoomUpdate(room);
   });
 
   socket.on("player:sync", (payload = {}) => {

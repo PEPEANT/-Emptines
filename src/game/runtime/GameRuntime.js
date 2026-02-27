@@ -103,10 +103,15 @@ export class GameRuntime {
     };
 
     this.socket = null;
+    this.socketEndpoint = null;
     this.networkConnected = false;
     this.localPlayerId = null;
+    this.localPlayerName = "PLAYER";
     this.remotePlayers = new Map();
     this.remoteSyncClock = 0;
+    this.chatBubbleLifetimeMs = 4200;
+    this.chatInputEl = document.getElementById("chat-input");
+    this.chatSendEl = document.getElementById("chat-send");
 
     this._initialized = false;
   }
@@ -195,6 +200,7 @@ export class GameRuntime {
         map: groundMap,
         roughness: ground.roughness,
         metalness: ground.metalness,
+        side: THREE.DoubleSide,
         emissive: ground.emissive,
         emissiveIntensity: ground.emissiveIntensity
       })
@@ -443,6 +449,19 @@ export class GameRuntime {
     window.addEventListener("resize", () => this.onResize());
 
     window.addEventListener("keydown", (event) => {
+      if (this.isTextInputTarget(event.target)) {
+        if (event.code === "Escape") {
+          event.target.blur?.();
+        }
+        return;
+      }
+
+      if (event.code === "Enter" && this.chatInputEl) {
+        event.preventDefault();
+        this.focusChatInput();
+        return;
+      }
+
       if (event.code === "Space") {
         event.preventDefault();
       }
@@ -455,6 +474,9 @@ export class GameRuntime {
     });
 
     window.addEventListener("keyup", (event) => {
+      if (this.isTextInputTarget(event.target)) {
+        return;
+      }
       this.keys.delete(event.code);
     });
 
@@ -485,6 +507,29 @@ export class GameRuntime {
       },
       { passive: true }
     );
+
+    if (this.chatInputEl) {
+      this.chatInputEl.addEventListener("focus", () => {
+        this.keys.clear();
+      });
+      this.chatInputEl.addEventListener("keydown", (event) => {
+        if (event.code === "Enter") {
+          event.preventDefault();
+          this.sendChatMessage();
+          return;
+        }
+        if (event.code === "Escape") {
+          event.preventDefault();
+          this.chatInputEl.blur();
+        }
+      });
+    }
+
+    if (this.chatSendEl) {
+      this.chatSendEl.addEventListener("click", () => {
+        this.sendChatMessage();
+      });
+    }
   }
 
   tryPointerLock() {
@@ -501,9 +546,10 @@ export class GameRuntime {
 
   connectNetwork() {
     const endpoint = this.resolveSocketEndpoint();
+    this.socketEndpoint = endpoint;
     if (!endpoint) {
       this.networkConnected = false;
-      this.hud.setStatus("OFFLINE");
+      this.hud.setStatus(this.getStatusText());
       return;
     }
 
@@ -543,11 +589,35 @@ export class GameRuntime {
     socket.on("player:sync", (payload) => {
       this.handleRemoteSync(payload);
     });
+
+    socket.on("chat:message", (payload) => {
+      this.handleChatMessage(payload);
+    });
   }
 
   resolveSocketEndpoint() {
     if (typeof window === "undefined") {
       return null;
+    }
+
+    const envEndpoint = String(
+      import.meta.env?.VITE_SOCKET_ENDPOINT ?? import.meta.env?.VITE_CHAT_SERVER ?? ""
+    ).trim();
+    if (envEndpoint) {
+      return envEndpoint;
+    }
+
+    const query = new URLSearchParams(window.location.search);
+    const queryEndpoint = String(
+      query.get("server") ?? query.get("socket") ?? query.get("ws") ?? ""
+    ).trim();
+    if (queryEndpoint) {
+      return queryEndpoint;
+    }
+
+    const globalEndpoint = String(window.__EMPTINES_SOCKET_ENDPOINT ?? "").trim();
+    if (globalEndpoint) {
+      return globalEndpoint;
     }
 
     const { protocol, hostname } = window.location;
@@ -573,11 +643,15 @@ export class GameRuntime {
 
     for (const player of players) {
       const id = String(player?.id ?? "");
-      if (!id || id === this.localPlayerId) {
+      if (!id) {
+        continue;
+      }
+      if (id === this.localPlayerId) {
+        this.localPlayerName = this.formatPlayerName(player?.name);
         continue;
       }
       seen.add(id);
-      this.upsertRemotePlayer(id, player.state ?? null);
+      this.upsertRemotePlayer(id, player.state ?? null, player?.name);
     }
 
     for (const id of this.remotePlayers.keys()) {
@@ -596,12 +670,12 @@ export class GameRuntime {
       return;
     }
 
-    this.upsertRemotePlayer(id, payload.state ?? null);
+    this.upsertRemotePlayer(id, payload.state ?? null, payload?.name);
     const localPlayer = this.networkConnected ? 1 : 0;
     this.hud.setPlayers(this.remotePlayers.size + localPlayer);
   }
 
-  upsertRemotePlayer(id, state) {
+  upsertRemotePlayer(id, state, name) {
     let remote = this.remotePlayers.get(id);
     if (!remote) {
       const root = new THREE.Group();
@@ -634,18 +708,35 @@ export class GameRuntime {
       head.castShadow = true;
       head.receiveShadow = true;
 
-      root.add(body, head);
+      const nameLabel = this.createTextLabel("PLAYER", "name");
+      nameLabel.position.set(0, 2.12, 0);
+
+      const chatLabel = this.createTextLabel("", "chat");
+      chatLabel.position.set(0, 2.5, 0);
+      chatLabel.visible = false;
+
+      root.add(body, head, nameLabel, chatLabel);
       root.position.set(0, 0, 0);
       this.scene.add(root);
 
       remote = {
         mesh: root,
+        nameLabel,
+        chatLabel,
+        name: "PLAYER",
+        chatExpireAt: 0,
         targetPosition: new THREE.Vector3(0, 0, 0),
         targetYaw: 0,
         lastSeen: performance.now()
       };
 
       this.remotePlayers.set(id, remote);
+    }
+
+    const nextName = this.formatPlayerName(name);
+    if (nextName !== remote.name) {
+      remote.name = nextName;
+      this.setTextLabel(remote.nameLabel, nextName, "name");
     }
 
     if (state) {
@@ -668,6 +759,8 @@ export class GameRuntime {
       return;
     }
 
+    this.disposeTextLabel(remote.nameLabel);
+    this.disposeTextLabel(remote.chatLabel);
     this.scene.remove(remote.mesh);
     disposeMeshTree(remote.mesh);
     this.remotePlayers.delete(id);
@@ -752,10 +845,212 @@ export class GameRuntime {
       remote.mesh.position.lerp(remote.targetPosition, alpha);
       remote.mesh.rotation.y = lerpAngle(remote.mesh.rotation.y, remote.targetYaw, alpha);
 
+      if (remote.chatLabel.visible && now >= remote.chatExpireAt) {
+        remote.chatLabel.visible = false;
+      }
+
       if (now - remote.lastSeen > this.remoteStaleTimeoutMs) {
         this.removeRemotePlayer(id);
       }
     }
+  }
+
+  handleChatMessage(payload) {
+    const text = String(payload?.text ?? "").trim().slice(0, 120);
+    if (!text) {
+      return;
+    }
+
+    const senderId = String(payload?.id ?? "");
+    const senderName = this.formatPlayerName(payload?.name);
+
+    if (senderId && senderId === this.localPlayerId) {
+      this.localPlayerName = senderName;
+      return;
+    }
+
+    let remote = null;
+    if (senderId) {
+      this.upsertRemotePlayer(senderId, null, senderName);
+      remote = this.remotePlayers.get(senderId) ?? null;
+    } else {
+      remote = this.findRemotePlayerByName(senderName);
+    }
+    if (!remote) {
+      return;
+    }
+
+    if (senderName !== remote.name) {
+      remote.name = senderName;
+      this.setTextLabel(remote.nameLabel, senderName, "name");
+    }
+
+    this.setTextLabel(remote.chatLabel, text, "chat");
+    remote.chatLabel.visible = true;
+    remote.chatExpireAt = performance.now() + this.chatBubbleLifetimeMs;
+  }
+
+  sendChatMessage() {
+    if (!this.chatInputEl) {
+      return;
+    }
+
+    const text = String(this.chatInputEl.value ?? "").trim().slice(0, 120);
+    if (!text) {
+      return;
+    }
+
+    if (this.socket && this.networkConnected) {
+      this.socket.emit("chat:send", {
+        name: this.formatPlayerName(this.localPlayerName),
+        text
+      });
+    }
+
+    this.chatInputEl.value = "";
+    this.chatInputEl.blur();
+  }
+
+  focusChatInput() {
+    if (!this.chatInputEl) {
+      return;
+    }
+    this.keys.clear();
+    if (document.pointerLockElement === this.renderer.domElement) {
+      document.exitPointerLock?.();
+    }
+    this.chatInputEl.focus();
+    this.chatInputEl.select();
+  }
+
+  isTextInputTarget(target) {
+    if (typeof HTMLElement === "undefined" || !(target instanceof HTMLElement)) {
+      return false;
+    }
+    if (target.isContentEditable) {
+      return true;
+    }
+    const tagName = target.tagName;
+    return tagName === "INPUT" || tagName === "TEXTAREA";
+  }
+
+  findRemotePlayerByName(name) {
+    const targetName = this.formatPlayerName(name);
+    for (const remote of this.remotePlayers.values()) {
+      if (remote.name === targetName) {
+        return remote;
+      }
+    }
+    return null;
+  }
+
+  formatPlayerName(rawName) {
+    const name = String(rawName ?? "")
+      .trim()
+      .replace(/\s+/g, "_")
+      .slice(0, 16);
+    return name || "PLAYER";
+  }
+
+  createTextLabel(text, kind = "name") {
+    const canvas = document.createElement("canvas");
+    canvas.width = 512;
+    canvas.height = kind === "chat" ? 144 : 112;
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.generateMipmaps = false;
+
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false
+    });
+    material.toneMapped = false;
+
+    const label = new THREE.Sprite(material);
+    label.renderOrder = 40;
+    label.userData = {
+      canvas,
+      context: canvas.getContext("2d"),
+      text: "",
+      kind
+    };
+
+    this.setTextLabel(label, text, kind);
+    return label;
+  }
+
+  setTextLabel(label, rawText, kind = "name") {
+    const context = label?.userData?.context;
+    const canvas = label?.userData?.canvas;
+    if (!context || !canvas) {
+      return;
+    }
+
+    const maxLength = kind === "chat" ? 120 : 16;
+    const fallback = kind === "name" ? "PLAYER" : "";
+    const text = String(rawText ?? "").trim().slice(0, maxLength) || fallback;
+    if (label.userData.text === text) {
+      return;
+    }
+
+    const width = canvas.width;
+    const height = canvas.height;
+    context.clearRect(0, 0, width, height);
+
+    if (text) {
+      if (kind === "chat") {
+        context.fillStyle = "rgba(8, 24, 16, 0.82)";
+        context.strokeStyle = "rgba(168, 247, 197, 0.9)";
+        context.lineWidth = 6;
+      } else {
+        context.fillStyle = "rgba(6, 18, 32, 0.86)";
+        context.strokeStyle = "rgba(173, 233, 255, 0.88)";
+        context.lineWidth = 5;
+      }
+
+      this.drawRoundedRect(context, 12, 12, width - 24, height - 24, 22);
+      context.fill();
+      context.stroke();
+
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillStyle = kind === "chat" ? "#ecfff3" : "#e8f8ff";
+      context.font = kind === "chat" ? "600 40px Bahnschrift" : "700 38px Bahnschrift";
+      context.fillText(text, width * 0.5, height * 0.53);
+    }
+
+    const minScaleX = kind === "chat" ? 2.2 : 1.5;
+    const maxScaleX = kind === "chat" ? 5.2 : 3.3;
+    const scaleX = THREE.MathUtils.clamp(
+      minScaleX + text.length * (kind === "chat" ? 0.05 : 0.075),
+      minScaleX,
+      maxScaleX
+    );
+    label.scale.set(scaleX, kind === "chat" ? 0.58 : 0.4, 1);
+
+    label.userData.text = text;
+    label.material.map.needsUpdate = true;
+  }
+
+  drawRoundedRect(context, x, y, width, height, radius) {
+    const r = Math.min(radius, width * 0.5, height * 0.5);
+    context.beginPath();
+    context.moveTo(x + r, y);
+    context.arcTo(x + width, y, x + width, y + height, r);
+    context.arcTo(x + width, y + height, x, y + height, r);
+    context.arcTo(x, y + height, x, y, r);
+    context.arcTo(x, y, x + width, y, r);
+    context.closePath();
+  }
+
+  disposeTextLabel(label) {
+    const map = label?.material?.map;
+    map?.dispose?.();
   }
 
   emitLocalSync(delta) {
@@ -801,7 +1096,7 @@ export class GameRuntime {
 
   getStatusText() {
     if (!this.networkConnected) {
-      return "OFFLINE";
+      return this.socketEndpoint ? "OFFLINE" : "OFFLINE / SET SERVER";
     }
     if (this.pointerLockSupported && !this.pointerLocked && !this.mobileEnabled) {
       return "ONLINE / CLICK";

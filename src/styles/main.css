@@ -67,6 +67,58 @@ canvas {
   color: #aef2c8;
 }
 
+#chat-ui {
+  position: fixed;
+  left: 14px;
+  bottom: 14px;
+  z-index: 25;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid rgba(138, 230, 166, 0.45);
+  border-radius: 10px;
+  background: rgba(5, 19, 14, 0.74);
+  backdrop-filter: blur(5px);
+}
+
+#chat-input {
+  width: min(58vw, 340px);
+  height: 36px;
+  padding: 0 11px;
+  border: 1px solid rgba(160, 228, 180, 0.55);
+  border-radius: 8px;
+  background: rgba(7, 26, 18, 0.88);
+  color: #e8ffef;
+  font: 600 0.85rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  outline: none;
+}
+
+#chat-input::placeholder {
+  color: rgba(200, 241, 212, 0.7);
+}
+
+#chat-input:focus {
+  border-color: rgba(191, 247, 207, 0.95);
+  box-shadow: 0 0 0 2px rgba(149, 222, 179, 0.28);
+}
+
+#chat-send {
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid rgba(186, 247, 209, 0.66);
+  border-radius: 8px;
+  background: linear-gradient(135deg, #8cf2b8, #5fd398);
+  color: #07331e;
+  font: 700 0.78rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+#chat-send:active {
+  transform: translateY(1px);
+}
+
 #boot-error {
   position: fixed;
   inset: 0;
@@ -85,6 +137,18 @@ canvas {
     top: 10px;
     left: 10px;
     right: 10px;
+    min-width: 0;
+  }
+
+  #chat-ui {
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+  }
+
+  #chat-input {
+    flex: 1;
+    width: auto;
     min-width: 0;
   }
 }
