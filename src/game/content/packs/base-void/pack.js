@@ -15,8 +15,8 @@ export const BASE_VOID_PACK = {
       mieCoefficient: 0.0042,
       mieDirectionalG: 0.82,
       textureUrl: "/assets/graphics/world/sky/oss-sky/venice_sunset_1k.hdr",
-      textureBackgroundIntensity: 0.36,
-      textureEnvironmentIntensity: 0.28
+      textureBackgroundIntensity: 0.2,
+      textureEnvironmentIntensity: 0.16
     },
     clouds: {
       enabled: true,
@@ -63,8 +63,8 @@ export const BASE_VOID_PACK = {
       normalTextureUrl: "/assets/graphics/world/textures/cc0-grass/grass_normal_gl.jpg",
       roughnessTextureUrl: "/assets/graphics/world/textures/cc0-grass/grass_roughness.jpg",
       aoTextureUrl: "/assets/graphics/world/textures/cc0-grass/grass_ao.jpg",
-      repeatX: 430,
-      repeatY: 430,
+      repeatX: 220,
+      repeatY: 220,
       size: 200000,
       color: 0x66d66d,
       roughness: 0.92,
@@ -72,7 +72,7 @@ export const BASE_VOID_PACK = {
       emissive: 0x43a74c,
       emissiveIntensity: 0.2,
       normalScale: [0.88, 0.88],
-      aoIntensity: 0.5,
+      aoIntensity: 0.18,
       undersideColor: 0x73df7a,
       undersideEmissive: 0x4ec059,
       undersideEmissiveIntensity: 0.34,
@@ -82,18 +82,18 @@ export const BASE_VOID_PACK = {
       enabled: true,
       width: 90000,
       depth: 140000,
-      shorelineX: 300,
-      positionY: 0.018,
+      shorelineX: 120,
+      positionY: 0.06,
       positionZ: 0,
       normalTextureUrl: "/assets/graphics/world/textures/oss-water/waternormals.jpg",
       normalRepeatX: 20,
       normalRepeatY: 20,
       color: 0x2f8ed9,
       sunColor: 0xffffff,
-      opacity: 0.7,
-      distortionScale: 2.2,
+      opacity: 1,
+      distortionScale: 1.5,
       timeScale: 0.33,
-      bobAmplitude: 0.018,
+      bobAmplitude: 0,
       bobFrequency: 0.35
     },
     beach: {
@@ -102,10 +102,10 @@ export const BASE_VOID_PACK = {
       normalTextureUrl: "/assets/graphics/world/textures/cc0-sand/sand_normal_gl.jpg",
       roughnessTextureUrl: "/assets/graphics/world/textures/cc0-sand/sand_roughness.jpg",
       aoTextureUrl: "/assets/graphics/world/textures/cc0-sand/sand_ao.jpg",
-      shorelineX: 300,
-      width: 2600,
+      shorelineX: 120,
+      width: 1400,
       depth: 140000,
-      positionY: 0.042,
+      positionY: 0.082,
       repeatX: 20,
       repeatY: 640,
       color: 0xd9c08a,
@@ -113,11 +113,11 @@ export const BASE_VOID_PACK = {
       metalness: 0,
       normalScale: [0.65, 0.65],
       aoIntensity: 0.32,
-      foamWidth: 100,
+      foamWidth: 72,
       foamOpacity: 0.46,
       foamColor: 0xe8f7ff,
-      wetBandWidth: 190,
-      wetBandOpacity: 0.28,
+      wetBandWidth: 120,
+      wetBandOpacity: 0.22,
       wetBandColor: 0xc8a16a
     },
     originMarker: {
@@ -135,13 +135,13 @@ export const BASE_VOID_PACK = {
       }
     },
     postProcessing: {
-      exposure: 0.74,
+      exposure: 0.62,
       bloom: {
         enabled: true,
         mobileEnabled: false,
-        strength: 0.08,
+        strength: 0.05,
         radius: 0.56,
-        threshold: 0.94
+        threshold: 0.96
       }
     }
   },

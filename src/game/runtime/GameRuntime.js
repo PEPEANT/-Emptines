@@ -95,6 +95,7 @@ export class GameRuntime {
     this.beach = null;
     this.shoreFoam = null;
     this.shoreWetBand = null;
+    this.oceanBase = null;
     this.ocean = null;
     this.handView = null;
     this.handSwayAmplitude = Number(this.handContent.swayAmplitude) || 0.012;
@@ -606,6 +607,9 @@ export class GameRuntime {
         aoMapIntensity: Number(config.aoIntensity) || 0.32,
         roughness: Number(config.roughness) || 0.93,
         metalness: Number(config.metalness) || 0,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
         side: THREE.FrontSide
       })
     );
@@ -616,6 +620,7 @@ export class GameRuntime {
       Number(config.positionZ) || 0
     );
     beach.receiveShadow = true;
+    beach.renderOrder = 4;
     this.beach = beach;
     this.scene.add(this.beach);
 
@@ -626,13 +631,16 @@ export class GameRuntime {
         color: config.foamColor ?? 0xe8f7ff,
         transparent: true,
         opacity: Number(config.foamOpacity) || 0.46,
-        depthWrite: false
+        depthWrite: false,
+        depthTest: false
       })
     );
     foam.rotation.x = -Math.PI / 2;
     foam.position.set(shorelineX + foamWidth * 0.4, beach.position.y + 0.015, Number(config.positionZ) || 0);
     foam.userData.baseOpacity = foam.material.opacity;
     foam.userData.elapsed = 0;
+    foam.material.toneMapped = false;
+    foam.renderOrder = 7;
     this.shoreFoam = foam;
     this.scene.add(this.shoreFoam);
 
@@ -643,18 +651,27 @@ export class GameRuntime {
         color: config.wetBandColor ?? 0xc8a16a,
         transparent: true,
         opacity: Number(config.wetBandOpacity) || 0.28,
-        depthWrite: false
+        depthWrite: false,
+        depthTest: false
       })
     );
     wetBand.rotation.x = -Math.PI / 2;
     wetBand.position.set(shorelineX - wetBandWidth * 0.32, beach.position.y + 0.01, Number(config.positionZ) || 0);
     wetBand.userData.baseOpacity = wetBand.material.opacity;
     wetBand.userData.elapsed = 0;
+    wetBand.material.toneMapped = false;
+    wetBand.renderOrder = 6;
     this.shoreWetBand = wetBand;
     this.scene.add(this.shoreWetBand);
   }
 
   clearOceanLayer() {
+    if (this.oceanBase) {
+      this.scene.remove(this.oceanBase);
+      this.oceanBase.geometry?.dispose?.();
+      this.oceanBase.material?.dispose?.();
+      this.oceanBase = null;
+    }
     if (!this.ocean) {
       return;
     }
@@ -698,7 +715,7 @@ export class GameRuntime {
       waterColor: config.color ?? 0x2f8ed9,
       distortionScale: Number(config.distortionScale) || 2.2,
       fog: Boolean(this.scene.fog),
-      alpha: Number(config.opacity) || 0.82,
+      alpha: THREE.MathUtils.clamp(Number(config.opacity) || 0.92, 0.75, 1),
       side: THREE.DoubleSide
     });
 
@@ -709,12 +726,30 @@ export class GameRuntime {
       Number(config.positionZ) || 0
     );
     water.receiveShadow = false;
+    water.renderOrder = 3;
+    water.material.depthWrite = true;
+    water.material.depthTest = true;
+    water.material.transparent = false;
     water.userData.timeScale = Number(config.timeScale) || 0.33;
     water.userData.basePositionY = water.position.y;
     water.userData.bobAmplitude = Number(config.bobAmplitude) || 0.05;
     water.userData.bobFrequency = Number(config.bobFrequency) || 0.45;
     water.userData.elapsed = 0;
     water.userData.shorelineX = Number.isFinite(shorelineX) ? shorelineX : null;
+
+    const oceanBase = new THREE.Mesh(
+      new THREE.PlaneGeometry(width, depth),
+      new THREE.MeshBasicMaterial({
+        color: config.color ?? 0x2f8ed9
+      })
+    );
+    oceanBase.rotation.x = -Math.PI / 2;
+    oceanBase.position.copy(water.position);
+    oceanBase.position.y -= 0.018;
+    oceanBase.renderOrder = 2;
+    oceanBase.material.toneMapped = false;
+    this.oceanBase = oceanBase;
+    this.scene.add(this.oceanBase);
 
     this.ocean = water;
     this.scene.add(this.ocean);
@@ -744,14 +779,17 @@ export class GameRuntime {
       const pulse = 0.85 + Math.sin(this.shoreFoam.userData.elapsed * 1.4) * 0.15;
       const baseOpacity = Number(this.shoreFoam.userData.baseOpacity) || 0.42;
       this.shoreFoam.material.opacity = THREE.MathUtils.clamp(baseOpacity * pulse, 0.08, 0.95);
-      this.shoreFoam.position.y = this.ocean.position.y + 0.015;
+      this.shoreFoam.position.y = Math.max(this.ocean.position.y + 0.015, (this.beach?.position.y ?? 0) + 0.01);
     }
     if (this.shoreWetBand?.material) {
       this.shoreWetBand.userData.elapsed = (Number(this.shoreWetBand.userData.elapsed) || 0) + delta;
       const pulse = 0.9 + Math.sin(this.shoreWetBand.userData.elapsed * 0.7) * 0.1;
       const baseOpacity = Number(this.shoreWetBand.userData.baseOpacity) || 0.28;
       this.shoreWetBand.material.opacity = THREE.MathUtils.clamp(baseOpacity * pulse, 0.06, 0.8);
-      this.shoreWetBand.position.y = this.ocean.position.y + 0.008;
+      this.shoreWetBand.position.y = Math.max(
+        this.ocean.position.y + 0.008,
+        (this.beach?.position.y ?? 0) + 0.004
+      );
     }
   }
 
