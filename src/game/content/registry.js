@@ -1,25 +1,20 @@
-import { BASE_VOID_PACK } from "./packs/baseVoidPack.js";
+import { BASE_VOID_PACK as BASE_VOID_PACK_SOURCE } from "./packs/base-void/pack.js";
+import { normalizeContentPack, validateContentPackShape } from "./schema.js";
 
-const contentPackRegistry = new Map([[BASE_VOID_PACK.id, BASE_VOID_PACK]]);
-
-function isValidContentPack(pack) {
-  return (
-    pack &&
-    typeof pack === "object" &&
-    typeof pack.id === "string" &&
-    pack.id.trim().length > 0 &&
-    pack.world &&
-    pack.hands &&
-    pack.network
-  );
+function assertPackShape(pack, label = "Content pack", options = {}) {
+  const errors = validateContentPackShape(pack, options);
+  if (errors.length > 0) {
+    throw new Error(`${label} is invalid: ${errors.join("; ")}`);
+  }
 }
 
-export function registerContentPack(pack) {
-  if (!isValidContentPack(pack)) {
-    throw new Error("Invalid content pack format.");
-  }
+assertPackShape(BASE_VOID_PACK_SOURCE, "Base content pack", { requireSections: true });
+const BASE_VOID_PACK = normalizeContentPack(BASE_VOID_PACK_SOURCE, BASE_VOID_PACK_SOURCE);
+const contentPackRegistry = new Map([[BASE_VOID_PACK.id, BASE_VOID_PACK]]);
 
-  const next = { ...pack, id: pack.id.trim() };
+export function registerContentPack(pack) {
+  assertPackShape(pack);
+  const next = normalizeContentPack(pack, BASE_VOID_PACK);
   contentPackRegistry.set(next.id, next);
   return next;
 }

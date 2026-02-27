@@ -83,9 +83,17 @@ async function main() {
   checkFile("src/game/ui/HUD.js");
   checkFile("src/game/config/gameConstants.js");
   checkFile("src/game/content/registry.js");
+  checkFile("src/game/content/schema.js");
+  checkFile("src/game/content/packs/README.md");
   checkFile("src/game/content/packs/baseVoidPack.js");
+  checkFile("src/game/content/packs/base-void/pack.js");
+  checkFile("src/game/content/packs/template/pack.template.js");
   checkFile("public/assets/graphics/ui/logo.svg");
   checkFile("public/assets/graphics/world/textures/ground.svg");
+  checkFile("public/assets/graphics/world/textures/cc0-grass/grass_color.jpg");
+  checkFile("public/assets/graphics/world/textures/cc0-grass/grass_normal_gl.jpg");
+  checkFile("public/assets/graphics/world/textures/cc0-grass/grass_roughness.jpg");
+  checkFile("public/assets/graphics/world/textures/cc0-grass/grass_ao.jpg");
   checkIndexEntry();
 
   const chatUp = await pingLocalServer("http://localhost:3001/health");

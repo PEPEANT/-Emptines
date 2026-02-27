@@ -109,8 +109,11 @@ Socket server health endpoints:
 |     |  `- gameConstants.js
 |     |- content/
 |     |  |- registry.js
+|     |  |- schema.js
 |     |  `- packs/
-|     |     `- baseVoidPack.js
+|     |     |- base-void/pack.js
+|     |     |- baseVoidPack.js
+|     |     `- template/pack.template.js
 |     |- runtime/
 |     |  `- GameRuntime.js
 |     |- ui/

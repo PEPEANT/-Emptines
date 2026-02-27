@@ -191,7 +191,7 @@ export class GameRuntime {
     this.setupCloudLayer();
 
     const maxAnisotropy = this.renderer.capabilities.getMaxAnisotropy();
-    const anisotropy = this.mobileEnabled ? Math.min(4, maxAnisotropy) : maxAnisotropy;
+    const anisotropy = this.mobileEnabled ? Math.min(2, maxAnisotropy) : maxAnisotropy;
     const ground = world.ground;
     const configureGroundTexture = (texture, colorSpace = null) => {
       if (!texture) {
@@ -328,7 +328,11 @@ export class GameRuntime {
     }
 
     const group = new THREE.Group();
-    const puffGeometry = new THREE.SphereGeometry(1, 10, 8);
+    const puffGeometry = new THREE.SphereGeometry(
+      1,
+      this.mobileEnabled ? 8 : 10,
+      this.mobileEnabled ? 6 : 8
+    );
     const puffMaterial = new THREE.MeshStandardMaterial({
       color: cloudConfig.color,
       roughness: 1,
@@ -340,7 +344,11 @@ export class GameRuntime {
       depthWrite: false
     });
 
-    const count = Math.max(1, Math.trunc(cloudConfig.count));
+    const baseCount = Math.max(1, Math.trunc(cloudConfig.count));
+    const mobileCountScale = Number(cloudConfig.mobileCountScale) || 0.55;
+    const count = this.mobileEnabled
+      ? Math.max(6, Math.round(baseCount * mobileCountScale))
+      : baseCount;
     const area = Math.max(1000, Number(cloudConfig.area) || 9000);
     const halfArea = area * 0.5;
     const minScale = Number(cloudConfig.minScale) || 28;
@@ -1279,6 +1287,7 @@ export class GameRuntime {
       }
     }
 
+    this.setupCloudLayer();
     this.setupPostProcessing();
   }
 
