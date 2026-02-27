@@ -56,7 +56,8 @@ export class GameRuntime {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.08;
+    const rendererExposure = Number(this.worldContent?.postProcessing?.exposure);
+    this.renderer.toneMappingExposure = Number.isFinite(rendererExposure) ? rendererExposure : 1.08;
     this.renderer.shadowMap.enabled = !this.mobileEnabled;
     this.renderer.shadowMap.autoUpdate = !this.mobileEnabled;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;

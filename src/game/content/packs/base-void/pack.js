@@ -4,16 +4,16 @@ export const BASE_VOID_PACK = {
   id: "base-void",
   name: "Base Void",
   world: {
-    skyColor: 0x9edbff,
+    skyColor: 0x7ec5fa,
     fogDensity: 0.00006,
     fogNear: 680,
     fogFar: 5200,
     sky: {
       scale: 450000,
-      turbidity: 1.9,
-      rayleigh: 3.3,
-      mieCoefficient: 0.0032,
-      mieDirectionalG: 0.84
+      turbidity: 2.2,
+      rayleigh: 2.65,
+      mieCoefficient: 0.0042,
+      mieDirectionalG: 0.82
     },
     clouds: {
       enabled: true,
@@ -24,7 +24,7 @@ export const BASE_VOID_PACK = {
       minScale: 30,
       maxScale: 82,
       color: 0xf8fdff,
-      opacity: 0.88,
+      opacity: 0.82,
       driftMin: 0.28,
       driftMax: 0.78,
       mobileCountScale: 0.55,
@@ -33,13 +33,13 @@ export const BASE_VOID_PACK = {
     },
     lights: {
       hemisphere: {
-        skyColor: 0xe2f5ff,
+        skyColor: 0xcdeaff,
         groundColor: 0xa7e67f,
-        intensity: 1.36
+        intensity: 1.18
       },
       sun: {
         color: 0xffffff,
-        intensity: 1.24,
+        intensity: 1.08,
         position: [70, 130, 44],
         shadowMobileSize: 1024,
         shadowDesktopSize: 1536,
@@ -50,8 +50,8 @@ export const BASE_VOID_PACK = {
         shadowNormalBias: 0.02
       },
       fill: {
-        color: 0xd2f0ff,
-        intensity: 0.64,
+        color: 0xc5e8ff,
+        intensity: 0.46,
         position: [-72, 56, -32]
       }
     },
@@ -90,12 +90,13 @@ export const BASE_VOID_PACK = {
       }
     },
     postProcessing: {
+      exposure: 0.96,
       bloom: {
         enabled: true,
         mobileEnabled: false,
-        strength: 0.22,
-        radius: 0.62,
-        threshold: 0.86
+        strength: 0.13,
+        radius: 0.56,
+        threshold: 0.9
       }
     }
   },
