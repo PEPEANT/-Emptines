@@ -441,6 +441,7 @@ export class GameRuntime {
       color: cloudConfig.color,
       roughness: 1,
       metalness: 0,
+      envMapIntensity: 0,
       emissive: cloudConfig.emissive ?? 0x0,
       emissiveIntensity: Number(cloudConfig.emissiveIntensity) || 0,
       transparent: true,

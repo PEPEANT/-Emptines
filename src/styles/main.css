@@ -1,8 +1,8 @@
 :root {
   color-scheme: only light;
-  --hud-text: #e7f3ff;
-  --hud-border: rgba(168, 203, 236, 0.5);
-  --hud-bg: rgba(12, 22, 36, 0.6);
+  --hud-text: #f3f8ff;
+  --hud-border: rgba(188, 213, 238, 0.56);
+  --hud-bg: rgba(14, 25, 38, 0.6);
 }
 
 * {
@@ -17,9 +17,9 @@ body {
   overflow: hidden;
   font-family: "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
   background:
-    radial-gradient(circle at 12% 16%, rgba(137, 183, 255, 0.2), transparent 42%),
-    radial-gradient(circle at 84% 86%, rgba(151, 202, 255, 0.16), transparent 46%),
-    #071523;
+    radial-gradient(circle at 16% 18%, rgba(155, 197, 255, 0.18), transparent 44%),
+    radial-gradient(circle at 86% 84%, rgba(128, 167, 225, 0.14), transparent 50%),
+    #081523;
   color: var(--hud-text);
 }
 
@@ -43,10 +43,10 @@ canvas {
   border: 1px solid var(--hud-border);
   border-radius: 10px;
   background:
-    linear-gradient(155deg, rgba(66, 118, 168, 0.22), rgba(14, 31, 46, 0.45)),
+    linear-gradient(155deg, rgba(76, 118, 162, 0.2), rgba(13, 27, 42, 0.46)),
     var(--hud-bg);
   box-shadow:
-    inset 0 0 0 1px rgba(221, 237, 255, 0.12),
+    inset 0 0 0 1px rgba(226, 239, 255, 0.14),
     0 10px 30px rgba(0, 0, 0, 0.35);
   letter-spacing: 0.08em;
   font-size: 0.75rem;
@@ -64,7 +64,7 @@ canvas {
 }
 
 .hud-line span {
-  color: #bfe2ff;
+  color: #d0e6ff;
 }
 
 #chat-ui {
@@ -77,9 +77,9 @@ canvas {
   align-items: stretch;
   padding: 8px;
   width: min(66vw, 380px);
-  border: 1px solid rgba(171, 207, 241, 0.56);
+  border: 1px solid rgba(179, 208, 236, 0.62);
   border-radius: 10px;
-  background: rgba(9, 20, 32, 0.78);
+  background: rgba(10, 21, 34, 0.82);
   backdrop-filter: blur(5px);
 }
 
@@ -87,9 +87,9 @@ canvas {
   height: 132px;
   overflow-y: auto;
   padding: 8px;
-  border: 1px solid rgba(167, 206, 244, 0.46);
+  border: 1px solid rgba(174, 206, 237, 0.5);
   border-radius: 8px;
-  background: rgba(9, 24, 40, 0.86);
+  background: rgba(11, 25, 41, 0.9);
   font: 600 0.74rem/1.35 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
   letter-spacing: 0.03em;
   scrollbar-width: thin;
@@ -103,7 +103,7 @@ canvas {
 
 .chat-line {
   margin: 0 0 6px;
-  color: #d9ebff;
+  color: #ddeeff;
   word-break: break-word;
 }
 
@@ -112,16 +112,16 @@ canvas {
 }
 
 .chat-line.self {
-  color: #f5fbff;
+  color: #ffffff;
 }
 
 .chat-line.system {
-  color: #b5d3ee;
+  color: #c0daef;
   font-style: italic;
 }
 
 .chat-name {
-  color: #9cc9f5;
+  color: #a7cdf1;
   margin-right: 6px;
 }
 
@@ -130,30 +130,30 @@ canvas {
   min-width: 0;
   height: 36px;
   padding: 0 11px;
-  border: 1px solid rgba(171, 208, 240, 0.62);
+  border: 1px solid rgba(177, 210, 240, 0.64);
   border-radius: 8px;
-  background: rgba(11, 28, 45, 0.9);
-  color: #ecf6ff;
+  background: rgba(12, 28, 44, 0.92);
+  color: #edf6ff;
   font: 600 0.85rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
   outline: none;
 }
 
 #chat-input::placeholder {
-  color: rgba(191, 222, 248, 0.72);
+  color: rgba(193, 221, 245, 0.76);
 }
 
 #chat-input:focus {
-  border-color: rgba(186, 221, 253, 0.97);
-  box-shadow: 0 0 0 2px rgba(148, 190, 233, 0.28);
+  border-color: rgba(196, 225, 250, 0.98);
+  box-shadow: 0 0 0 2px rgba(149, 187, 228, 0.26);
 }
 
 #chat-send {
   height: 36px;
   padding: 0 14px;
-  border: 1px solid rgba(198, 226, 255, 0.72);
+  border: 1px solid rgba(193, 220, 246, 0.74);
   border-radius: 8px;
-  background: linear-gradient(135deg, #d7ecff, #8ec4ff);
-  color: #102842;
+  background: linear-gradient(135deg, #e4f0ff, #a7ccf2);
+  color: #112840;
   font: 700 0.78rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
   letter-spacing: 0.06em;
   cursor: pointer;

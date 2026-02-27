@@ -4,17 +4,17 @@ export const BASE_VOID_PACK = {
   id: "base-void",
   name: "Base Void",
   world: {
-    skyColor: 0x7ec5fa,
+    skyColor: 0x86c4ff,
     fogDensity: 0.00006,
     fogNear: 110,
     fogFar: 500,
     sky: {
       scale: 450000,
-      turbidity: 2.2,
-      rayleigh: 2.65,
-      mieCoefficient: 0.0042,
-      mieDirectionalG: 0.82,
-      textureUrl: "/assets/graphics/world/sky/oss-sky/venice_sunset_1k.hdr",
+      turbidity: 1.85,
+      rayleigh: 2.95,
+      mieCoefficient: 0.0028,
+      mieDirectionalG: 0.79,
+      textureUrl: "",
       textureBackgroundIntensity: 0.2,
       textureEnvironmentIntensity: 0.16
     },
@@ -26,23 +26,23 @@ export const BASE_VOID_PACK = {
       maxHeight: 180,
       minScale: 16,
       maxScale: 34,
-      color: 0xffffff,
-      opacity: 0.82,
+      color: 0xfdfefe,
+      opacity: 0.84,
       driftMin: 0.28,
       driftMax: 0.78,
       mobileCountScale: 0.55,
-      emissive: 0x4a6783,
-      emissiveIntensity: 0.05
+      emissive: 0x304a63,
+      emissiveIntensity: 0.03
     },
     lights: {
       hemisphere: {
-        skyColor: 0xd8ecff,
-        groundColor: 0xc6d0dd,
-        intensity: 0.96
+        skyColor: 0xe1efff,
+        groundColor: 0xbec7d2,
+        intensity: 0.88
       },
       sun: {
         color: 0xffffff,
-        intensity: 0.9,
+        intensity: 0.86,
         position: [70, 130, 44],
         shadowMobileSize: 1024,
         shadowDesktopSize: 1536,
@@ -53,8 +53,8 @@ export const BASE_VOID_PACK = {
         shadowNormalBias: 0.02
       },
       fill: {
-        color: 0xc5e8ff,
-        intensity: 0.34,
+        color: 0xe5f2ff,
+        intensity: 0.26,
         position: [-72, 56, -32]
       }
     },
@@ -146,7 +146,7 @@ export const BASE_VOID_PACK = {
       }
     },
     postProcessing: {
-      exposure: 0.62,
+      exposure: 0.58,
       bloom: {
         enabled: false,
         mobileEnabled: false,
