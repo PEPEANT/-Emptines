@@ -52,6 +52,12 @@ Fast verification (no build):
 npm run check:smoke
 ```
 
+World configuration audit:
+
+```bash
+npm run audit:world
+```
+
 ## Build
 
 ```bash

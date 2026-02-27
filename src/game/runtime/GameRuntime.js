@@ -85,6 +85,7 @@ export class GameRuntime {
     this.skyDome = null;
     this.skyBackgroundTexture = null;
     this.skyEnvironmentTexture = null;
+    this.skyTextureRequestId = 0;
     this.skySun = new THREE.Vector3();
     this.cloudLayer = null;
     this.cloudParticles = [];
@@ -93,6 +94,7 @@ export class GameRuntime {
     this.groundUnderside = null;
     this.beach = null;
     this.shoreFoam = null;
+    this.shoreWetBand = null;
     this.ocean = null;
     this.handView = null;
     this.handSwayAmplitude = Number(this.handContent.swayAmplitude) || 0.012;
@@ -332,6 +334,8 @@ export class GameRuntime {
   }
 
   setupSkyTexture(skyConfig, sunDirection) {
+    this.skyTextureRequestId += 1;
+    const requestId = this.skyTextureRequestId;
     this.clearSkyTexture();
 
     const url = String(skyConfig?.textureUrl ?? "").trim();
@@ -344,17 +348,17 @@ export class GameRuntime {
     loader.load(
       url,
       (hdrTexture) => {
+        if (requestId !== this.skyTextureRequestId) {
+          hdrTexture.dispose?.();
+          return;
+        }
         const pmrem = new THREE.PMREMGenerator(this.renderer);
         const envRT = pmrem.fromEquirectangular(hdrTexture);
         pmrem.dispose();
+        hdrTexture.dispose?.();
 
-        hdrTexture.mapping = THREE.EquirectangularReflectionMapping;
         const backgroundIntensity = Number(skyConfig.textureBackgroundIntensity);
-        if (Number.isFinite(backgroundIntensity)) {
-          hdrTexture.colorSpace = THREE.LinearSRGBColorSpace;
-        }
-
-        this.skyBackgroundTexture = hdrTexture;
+        this.skyBackgroundTexture = envRT.texture;
         this.skyEnvironmentTexture = envRT.texture;
 
         this.scene.background = this.skyBackgroundTexture;
@@ -362,7 +366,7 @@ export class GameRuntime {
         if (Number.isFinite(backgroundIntensity)) {
           this.scene.backgroundIntensity = backgroundIntensity;
         }
-        this.scene.backgroundBlurriness = 0.12;
+        this.scene.backgroundBlurriness = 0.2;
         const environmentIntensity = Number(skyConfig.textureEnvironmentIntensity);
         this.scene.environmentIntensity = Number.isFinite(environmentIntensity)
           ? environmentIntensity
@@ -370,6 +374,9 @@ export class GameRuntime {
       },
       undefined,
       () => {
+        if (requestId !== this.skyTextureRequestId) {
+          return;
+        }
         this.clearSkyTexture();
         const sky = new Sky();
         sky.scale.setScalar(skyConfig.scale);
@@ -396,8 +403,12 @@ export class GameRuntime {
       this.scene.environment = null;
       this.scene.environmentIntensity = 1;
     }
-    this.skyBackgroundTexture?.dispose?.();
-    this.skyEnvironmentTexture?.dispose?.();
+    if (this.skyBackgroundTexture && this.skyBackgroundTexture === this.skyEnvironmentTexture) {
+      this.skyBackgroundTexture.dispose?.();
+    } else {
+      this.skyBackgroundTexture?.dispose?.();
+      this.skyEnvironmentTexture?.dispose?.();
+    }
     this.skyBackgroundTexture = null;
     this.skyEnvironmentTexture = null;
   }
@@ -528,6 +539,12 @@ export class GameRuntime {
       this.shoreFoam.material?.dispose?.();
       this.shoreFoam = null;
     }
+    if (this.shoreWetBand) {
+      this.scene.remove(this.shoreWetBand);
+      this.shoreWetBand.geometry?.dispose?.();
+      this.shoreWetBand.material?.dispose?.();
+      this.shoreWetBand = null;
+    }
   }
 
   setupBeachLayer(config = {}, oceanConfig = {}) {
@@ -618,6 +635,23 @@ export class GameRuntime {
     foam.userData.elapsed = 0;
     this.shoreFoam = foam;
     this.scene.add(this.shoreFoam);
+
+    const wetBandWidth = Math.max(60, Number(config.wetBandWidth) || 190);
+    const wetBand = new THREE.Mesh(
+      new THREE.PlaneGeometry(wetBandWidth, depth, 1, 1),
+      new THREE.MeshBasicMaterial({
+        color: config.wetBandColor ?? 0xc8a16a,
+        transparent: true,
+        opacity: Number(config.wetBandOpacity) || 0.28,
+        depthWrite: false
+      })
+    );
+    wetBand.rotation.x = -Math.PI / 2;
+    wetBand.position.set(shorelineX - wetBandWidth * 0.32, beach.position.y + 0.01, Number(config.positionZ) || 0);
+    wetBand.userData.baseOpacity = wetBand.material.opacity;
+    wetBand.userData.elapsed = 0;
+    this.shoreWetBand = wetBand;
+    this.scene.add(this.shoreWetBand);
   }
 
   clearOceanLayer() {
@@ -711,6 +745,13 @@ export class GameRuntime {
       const baseOpacity = Number(this.shoreFoam.userData.baseOpacity) || 0.42;
       this.shoreFoam.material.opacity = THREE.MathUtils.clamp(baseOpacity * pulse, 0.08, 0.95);
       this.shoreFoam.position.y = this.ocean.position.y + 0.015;
+    }
+    if (this.shoreWetBand?.material) {
+      this.shoreWetBand.userData.elapsed = (Number(this.shoreWetBand.userData.elapsed) || 0) + delta;
+      const pulse = 0.9 + Math.sin(this.shoreWetBand.userData.elapsed * 0.7) * 0.1;
+      const baseOpacity = Number(this.shoreWetBand.userData.baseOpacity) || 0.28;
+      this.shoreWetBand.material.opacity = THREE.MathUtils.clamp(baseOpacity * pulse, 0.06, 0.8);
+      this.shoreWetBand.position.y = this.ocean.position.y + 0.008;
     }
   }
 

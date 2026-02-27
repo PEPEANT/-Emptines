@@ -74,6 +74,7 @@ async function main() {
   }
 
   checkFile("package.json");
+  checkFile("scripts/world-audit.mjs");
   checkFile("vite.config.js");
   checkFile("server.js");
   checkFile("src/main.js");

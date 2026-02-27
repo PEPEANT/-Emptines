@@ -81,6 +81,7 @@ async function checkSyntax() {
     "src/game/utils/device.js",
     "src/game/utils/math.js",
     "src/game/utils/threeUtils.js",
+    "scripts/world-audit.mjs",
     "server.js"
   ];
   for (const file of files) {
