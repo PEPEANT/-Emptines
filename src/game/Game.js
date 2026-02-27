@@ -3122,6 +3122,7 @@ export class Game {
     if (!this.isRunning || this.isGameOver) {
       config.sampleTime = 0;
       config.frameCount = 0;
+      config.cooldown = 0;
       return;
     }
 
@@ -3174,6 +3175,21 @@ export class Game {
     }
     if (this.dynamicResolution) {
       this.dynamicResolution.minRatio = this.mobileEnabled ? 0.65 : 0.85;
+    }
+    const nextMaxPixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+    this.maxPixelRatio = nextMaxPixelRatio;
+    const minPixelRatio = Math.max(
+      0.5,
+      Math.min(this.dynamicResolution?.minRatio ?? 0.5, this.maxPixelRatio)
+    );
+    const clampedPixelRatio = THREE.MathUtils.clamp(
+      this.currentPixelRatio,
+      minPixelRatio,
+      this.maxPixelRatio
+    );
+    if (Math.abs(clampedPixelRatio - this.currentPixelRatio) > 0.01) {
+      this.currentPixelRatio = Number(clampedPixelRatio.toFixed(2));
+      this.renderer.setPixelRatio(this.currentPixelRatio);
     }
     if (this.mobileEnabled && !this._mobileBound) {
       this.setupMobileControls();
