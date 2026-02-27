@@ -37,6 +37,9 @@ export class HUD {
     this.pauseOverlayEl = document.getElementById("pause-overlay");
     this.gameOverOverlayEl = document.getElementById("gameover-overlay");
     this.finalScoreEl = document.getElementById("final-score");
+    this.deconstructOverlayEl = document.getElementById("deconstruct-overlay");
+    this.deconstructTitleEl = document.getElementById("deconstruct-phase-title");
+    this.deconstructTextEl = document.getElementById("deconstruct-phase-text");
 
     this.statusTimer = 0;
     this.damageOverlayTimeout = null;
@@ -110,6 +113,16 @@ export class HUD {
   showGameOver(score) {
     setText(this.finalScoreEl, `${score}`);
     this.gameOverOverlayEl?.classList.add("show");
+  }
+
+  showDeconstructOverlay(visible, title = "", text = "") {
+    if (this.deconstructTitleEl && title) {
+      setText(this.deconstructTitleEl, title);
+    }
+    if (this.deconstructTextEl && text) {
+      setText(this.deconstructTextEl, text);
+    }
+    toggleClass(this.deconstructOverlayEl, "show", visible);
   }
 
   hideGameOver() {

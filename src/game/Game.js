@@ -24,6 +24,8 @@ const REMOTE_SYNC_INTERVAL = 1 / 12;
 const REMOTE_NAME_TAG_DISTANCE = 72;
 const PVP_HIT_SCORE = 10;
 const PVP_KILL_SCORE = 100;
+const WORLD_PHASE_DECONSTRUCT = "deconstruct";
+const WORLD_PHASE_COMBAT = "combat";
 
 function isLikelyTouchDevice() {
   if (typeof window === "undefined" || typeof navigator === "undefined") {
@@ -123,6 +125,11 @@ export class Game {
     this.leftMouseDown = false;
     this.aimBlend = 0;
     this.hitSparks = [];
+    this.worldPhase = WORLD_PHASE_DECONSTRUCT;
+    this.combatWorldInitialized = false;
+    this.deconstructGround = null;
+    this.deconstructCharacter = null;
+    this.deconstructEnterButton = document.getElementById("deconstruct-enter");
 
     this.isRunning = false;
     this.isGameOver = false;
@@ -260,6 +267,7 @@ export class Game {
     this.camera.add(this.weaponView);
     this.camera.add(this.shovelView);
     this.setupWorld();
+    this.setWorldPhase(WORLD_PHASE_DECONSTRUCT);
     this.bindEvents();
     this.setupMobileControls();
     this.resetState();
@@ -307,7 +315,6 @@ export class Game {
 
   setupWorld() {
     this.setupSky();
-
     const hemiLight = new THREE.HemisphereLight(0x93bcd1, 0x1f2f1f, 0.9);
     this.scene.add(hemiLight);
 
@@ -326,9 +333,193 @@ export class Game {
     const fill = new THREE.DirectionalLight(0x8ec7ff, 0.26);
     fill.position.set(-38, 30, -24);
     this.scene.add(fill);
+    this.buildDeconstructScaffold();
+  }
 
+  setWorldPhase(phase) {
+    this.worldPhase = phase === WORLD_PHASE_COMBAT ? WORLD_PHASE_COMBAT : WORLD_PHASE_DECONSTRUCT;
+    document.body.classList.toggle("world-mode-combat", this.worldPhase === WORLD_PHASE_COMBAT);
+    document.body.classList.toggle(
+      "world-mode-deconstruct",
+      this.worldPhase === WORLD_PHASE_DECONSTRUCT
+    );
+  }
+
+  isCombatMode() {
+    return this.worldPhase === WORLD_PHASE_COMBAT;
+  }
+
+  isDeconstructMode() {
+    return this.worldPhase === WORLD_PHASE_DECONSTRUCT;
+  }
+
+  getDeconstructFloorY() {
+    return PLAYER_HEIGHT;
+  }
+
+  clearObjectiveVisuals() {
+    for (const marker of this.objectiveMarkers) {
+      this.scene.remove(marker);
+    }
+    this.objectiveMarkers.length = 0;
+    this.controlBeacon = null;
+    this.controlRing = null;
+    this.controlCore = null;
+
+    if (this.alphaFlag) {
+      this.scene.remove(this.alphaFlag);
+      this.alphaFlag = null;
+    }
+    if (this.bravoFlag) {
+      this.scene.remove(this.bravoFlag);
+      this.bravoFlag = null;
+    }
+  }
+
+  buildDeconstructScaffold() {
+    if (!this.deconstructGround) {
+      this.deconstructGround = new THREE.Mesh(
+        new THREE.PlaneGeometry(180, 180, 1, 1),
+        new THREE.MeshStandardMaterial({
+          color: 0x1f7a36,
+          roughness: 1,
+          metalness: 0,
+          emissive: 0x0b2a16,
+          emissiveIntensity: 0.16
+        })
+      );
+      this.deconstructGround.rotation.x = -Math.PI / 2;
+      this.deconstructGround.position.set(0, 0, 0);
+      this.deconstructGround.receiveShadow = true;
+      this.scene.add(this.deconstructGround);
+    } else {
+      this.deconstructGround.visible = true;
+    }
+
+    if (!this.deconstructCharacter) {
+      const group = new THREE.Group();
+      const body = new THREE.Mesh(
+        new THREE.CapsuleGeometry(0.18, 0.62, 4, 8),
+        new THREE.MeshStandardMaterial({
+          color: 0x5f6d7f,
+          emissive: 0x364e67,
+          emissiveIntensity: 0.22,
+          roughness: 0.45
+        })
+      );
+      body.position.set(0, 0.95, -2.2);
+
+      const head = new THREE.Mesh(
+        new THREE.SphereGeometry(0.22, 12, 12),
+        new THREE.MeshStandardMaterial({
+          color: 0x7d8a96,
+          emissive: 0x405266,
+          emissiveIntensity: 0.26,
+          roughness: 0.36
+        })
+      );
+      head.position.set(0, 1.62, -2.2);
+
+      group.add(body, head);
+      group.castShadow = true;
+      this.deconstructCharacter = group;
+      this.scene.add(this.deconstructCharacter);
+    } else {
+      this.deconstructCharacter.visible = true;
+    }
+    this.deconstructCharacter.position.set(0, 0.02, -2.2);
+  }
+
+  clearDeconstructScaffold() {
+    if (this.deconstructGround) {
+      this.deconstructGround.visible = false;
+    }
+    if (this.deconstructCharacter) {
+      this.deconstructCharacter.visible = false;
+    }
+  }
+
+  buildCombatWorld() {
     this.voxelWorld.generateTerrain();
     this.setupObjectives();
+    this.combatWorldInitialized = true;
+    this.clearDeconstructScaffold();
+  }
+
+  clearCombatWorld() {
+    this.voxelWorld.clear();
+    this.enemyManager.reset();
+    this.clearObjectiveVisuals();
+    this.clearRemotePlayers();
+    this.combatWorldInitialized = false;
+  }
+
+  enterDeconstructMode() {
+    this.setWorldPhase(WORLD_PHASE_DECONSTRUCT);
+    this.clearCombatWorld();
+    this.buildDeconstructScaffold();
+    this.playerPosition.set(0, this.getDeconstructFloorY(), 0);
+    this.verticalVelocity = 0;
+    this.onGround = true;
+    this.yaw = 0;
+    this.pitch = 0;
+    this.camera.position.set(0, 0, 0).add(this.playerPosition);
+    this.camera.fov = DEFAULT_FOV;
+    this.camera.updateProjectionMatrix();
+    this.lastAppliedFov = DEFAULT_FOV;
+    this.weaponRecoil = 0;
+    this.aimBlend = 0;
+    this.weaponBobClock = 0;
+    this.weaponView.visible = false;
+    this.shovelView.visible = false;
+    if (this.weaponFlashLight) {
+      this.weaponFlashLight.intensity = 0;
+    }
+    if (this.weaponFlash) {
+      this.weaponFlash.material.opacity = 0;
+    }
+    this.hud.showDeconstructOverlay(true);
+    this.hud.setStatus("World has been reduced to one signal field.", false, 8);
+    this.state.objectiveText = "Phase: deconstruction";
+    this.updateVisualMode("gun");
+  }
+
+  enterCombatMode() {
+    if (this.isCombatMode()) {
+      return;
+    }
+
+    this.setWorldPhase(WORLD_PHASE_COMBAT);
+    this.hud.showDeconstructOverlay(false);
+    if (!this.combatWorldInitialized) {
+      this.buildCombatWorld();
+    }
+    this.weaponView.visible = true;
+    this.shovelView.visible = this.buildSystem.isDigMode();
+    this.weaponRecoil = 0;
+    this.aimBlend = 0;
+    this.lastAppliedFov = DEFAULT_FOV;
+    this.camera.fov = DEFAULT_FOV;
+    this.camera.updateProjectionMatrix();
+
+    if (this.activeMatchMode === "online") {
+      if (this.lobbyState?.roomCode) {
+        this.setOnlineSpawnFromLobby();
+        this.syncRemotePlayersFromLobby();
+        this.emitLocalPlayerSync(REMOTE_SYNC_INTERVAL, true);
+      }
+      this.hud.setStatus("Online mode: combat restored.", false, 0.8);
+    } else {
+      const spawnY = this.voxelWorld.getSurfaceYAt(0, 0);
+      this.playerPosition.set(0, (spawnY ?? 0) + PLAYER_HEIGHT, 0);
+      this.yaw = 0;
+      this.pitch = 0;
+    }
+
+    this.camera.position.copy(this.playerPosition);
+    this.onGround = true;
+    this.verticalVelocity = 0;
+    this.camera.rotation.order = "YXZ";
   }
 
   setupSky() {
@@ -367,20 +558,7 @@ export class Game {
   }
 
   setupObjectives() {
-    for (const marker of this.objectiveMarkers) {
-      this.scene.remove(marker);
-    }
-    this.objectiveMarkers.length = 0;
-    this.controlBeacon = null;
-    this.controlRing = null;
-    this.controlCore = null;
-
-    if (this.alphaFlag) {
-      this.scene.remove(this.alphaFlag);
-    }
-    if (this.bravoFlag) {
-      this.scene.remove(this.bravoFlag);
-    }
+    this.clearObjectiveVisuals();
 
     const arena = this.voxelWorld.getArenaMeta?.() ?? {
       alphaBase: { x: -42, z: 0 },
@@ -1484,7 +1662,7 @@ export class Game {
   }
 
   handlePrimaryActionDown() {
-    if (!this.isRunning || this.isGameOver || this.chat?.isInputFocused) {
+    if (!this.isRunning || this.isGameOver || this.chat?.isInputFocused || !this.isCombatMode()) {
       return;
     }
 
@@ -1580,6 +1758,12 @@ export class Game {
         return;
       }
       event.preventDefault();
+      if (!this.isCombatMode()) {
+        if (this.isRunning && !this.isGameOver && !this.chat?.isInputFocused) {
+          this.tryPointerLock();
+        }
+        return;
+      }
       this.sound.unlock();
       this.handlePrimaryActionDown();
       this.mobileFireButtonEl.setPointerCapture(event.pointerId);
@@ -1625,6 +1809,9 @@ export class Game {
         return;
       }
       event.preventDefault();
+      if (!this.isCombatMode()) {
+        return;
+      }
       this.sound.unlock();
       if (!this.isRunning || this.isGameOver || this.chat?.isInputFocused) {
         return;
@@ -1650,12 +1837,19 @@ export class Game {
     this.mobileAimBtn.addEventListener("pointercancel", endAim);
 
     bindUtilityTap(this.mobileJumpBtn, () => {
+      if (!this.isCombatMode()) {
+        return;
+      }
       if (this.onGround && this.isRunning && !this.isGameOver) {
         this.verticalVelocity = JUMP_FORCE;
         this.onGround = false;
       }
     });
     bindUtilityTap(this.mobileReloadBtn, () => {
+      if (!this.isCombatMode()) {
+        this.hud.setStatus("Combat not active yet", true, 0.7);
+        return;
+      }
       if (!this.buildSystem.isGunMode()) {
         this.hud.setStatus("Switch to gun mode to reload", true, 0.75);
         return;
@@ -1770,6 +1964,14 @@ export class Game {
     ]);
 
     document.addEventListener("keydown", (event) => {
+      if (this.isRunning && !this.chat?.isInputFocused && event.code === "KeyF") {
+        if (this.isDeconstructMode()) {
+          event.preventDefault();
+          this.enterCombatMode();
+          return;
+        }
+      }
+
       if (
         this.isRunning &&
         this.chat &&
@@ -1804,6 +2006,9 @@ export class Game {
 
       if (this.buildSystem.handleKeyDown(event)) {
         event.preventDefault();
+        if (this.isDeconstructMode()) {
+          return;
+        }
         return;
       }
 
@@ -1813,6 +2018,9 @@ export class Game {
       this.keys.add(event.code);
 
       if (event.code === "KeyR") {
+        if (!this.isCombatMode()) {
+          return;
+        }
         if (!this.buildSystem.isGunMode()) {
           this.hud.setStatus("Press 3 to switch to gun mode", true, 0.9);
         } else if (this.weapon.startReload()) {
@@ -1820,12 +2028,18 @@ export class Game {
         }
       }
 
-      if (event.code === "Space" && this.onGround && this.isRunning && !this.isGameOver) {
+      if (
+        event.code === "Space" &&
+        this.onGround &&
+        this.isRunning &&
+        !this.isGameOver &&
+        this.isCombatMode()
+      ) {
         this.verticalVelocity = JUMP_FORCE;
         this.onGround = false;
       }
 
-      if (event.code === "ArrowRight") {
+      if (event.code === "ArrowRight" && this.isCombatMode()) {
         this.isAiming = true;
       }
     });
@@ -1840,7 +2054,7 @@ export class Game {
       }
       this.keys.delete(event.code);
 
-      if (event.code === "ArrowRight") {
+      if (event.code === "ArrowRight" && this.isCombatMode()) {
         this.isAiming = false;
       }
     });
@@ -1958,6 +2172,19 @@ export class Game {
       }
       this.sound.unlock();
 
+      const shouldTryPointerLock =
+        this.pointerLockSupported &&
+        !this.pointerLocked &&
+        !this.mouseLookEnabled &&
+        !this.chat?.isInputFocused;
+
+      if (this.isDeconstructMode()) {
+        if (shouldTryPointerLock) {
+          this.tryPointerLock();
+        }
+        return;
+      }
+
       if (this.buildSystem.isBuildMode()) {
         if (event.button === 0 || event.button === 2) {
           this.buildSystem.handlePointerAction(event.button, (x, y, z) =>
@@ -1966,12 +2193,6 @@ export class Game {
           return;
         }
       }
-
-      const shouldTryPointerLock =
-        this.pointerLockSupported &&
-        !this.pointerLocked &&
-        !this.mouseLookEnabled &&
-        !this.chat?.isInputFocused;
 
       if (event.button === 2) {
         this.rightMouseAiming = true;
@@ -1992,6 +2213,12 @@ export class Game {
     });
 
     document.addEventListener("mouseup", (event) => {
+      if (this.isDeconstructMode()) {
+        if (event.button === 0) {
+          this.handlePrimaryActionUp();
+        }
+        return;
+      }
       if (event.button === 0) {
         this.handlePrimaryActionUp();
       }
@@ -2094,6 +2321,10 @@ export class Game {
         this.tryPointerLock();
       }
     });
+
+    this.deconstructEnterButton?.addEventListener("click", () => {
+      this.enterCombatMode();
+    });
   }
 
   onChatFocusChanged(focused) {
@@ -2156,10 +2387,8 @@ export class Game {
     this.addChatMessage("Objective: capture flags and hold the center point.", "info");
     this.addChatMessage("Controls: WASD, SPACE, 1/2/3, R, NumPad1-8", "info");
     if (this.activeMatchMode === "online") {
-      this.hud.setStatus("Online match: AI disabled", false, 0.9);
-      this.setOnlineSpawnFromLobby();
+      this.hud.setStatus("Online mode ready: press F to enter combat world", false, 1);
       this.syncRemotePlayersFromLobby();
-      this.emitLocalPlayerSync(REMOTE_SYNC_INTERVAL, true);
     }
     this.refreshOnlineStatus();
   }
@@ -2239,7 +2468,6 @@ export class Game {
     this.state.captures = 0;
     this.state.controlPercent = 0;
     this.state.controlOwner = "neutral";
-    this.state.objectiveText = this.getObjectiveText();
     this.state.killStreak = 0;
     this.state.lastKillTime = 0;
     this._wasReloading = false;
@@ -2251,6 +2479,7 @@ export class Game {
     this.hud.setKillStreak(0);
     this.camera.position.copy(this.playerPosition);
     this.camera.rotation.set(0, 0, 0);
+    this.enterDeconstructMode();
     this.syncCursorVisibility();
 
     this.hud.update(0, { ...this.state, ...this.weapon.getState() });
@@ -2263,6 +2492,7 @@ export class Game {
     if (
       !this.isRunning ||
       this.isGameOver ||
+      !this.isCombatMode() ||
       this.chat?.isInputFocused ||
       !this.buildSystem.isGunMode()
     ) {
@@ -2447,6 +2677,31 @@ export class Game {
   }
 
   updateCamera(delta) {
+    if (this.isDeconstructMode()) {
+      if (this.weaponFlash) {
+        this.weaponFlash.material.opacity = 0;
+      }
+      if (this.weaponFlashLight) {
+        this.weaponFlashLight.intensity = 0;
+      }
+      this.weaponView.visible = false;
+      if (this.shovelView) {
+        this.shovelView.visible = false;
+      }
+
+      if (Math.abs(DEFAULT_FOV - this.lastAppliedFov) > 0.01 || this.camera.fov !== DEFAULT_FOV) {
+        this.camera.fov = DEFAULT_FOV;
+        this.camera.updateProjectionMatrix();
+        this.lastAppliedFov = DEFAULT_FOV;
+      }
+
+      this.camera.position.copy(this.playerPosition);
+      this.camera.rotation.order = "YXZ";
+      this.camera.rotation.y = this.yaw;
+      this.camera.rotation.x = this.pitch;
+      return;
+    }
+
     const gunMode = this.buildSystem.isGunMode();
     const digMode = this.buildSystem.isDigMode();
     const mobileMoveMagnitude = this.mobileEnabled
@@ -2539,9 +2794,10 @@ export class Game {
     this.updateSparks(delta);
     const isChatting = !!this.chat?.isInputFocused;
     const gunMode = this.buildSystem.isGunMode();
-    const aiEnabled = this.activeMatchMode !== "online";
+    const isCombatMode = this.isCombatMode();
+    const aiEnabled = isCombatMode && this.activeMatchMode !== "online";
 
-    if (gunMode) {
+    if (gunMode && isCombatMode) {
       this.weapon.update(delta);
     }
 
@@ -2561,6 +2817,17 @@ export class Game {
 
     if (gunMode && this.leftMouseDown) {
       this.fire();
+    }
+
+    if (!isCombatMode) {
+      this.applyMovement(delta);
+      this.updateCamera(delta);
+      this.hud.update(delta, {
+        ...this.state,
+        ...this.weapon.getState(),
+        enemyCount: 0
+      });
+      return;
     }
 
     this.applyMovement(delta);
