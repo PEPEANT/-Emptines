@@ -362,6 +362,7 @@ export class GameRuntime {
         if (Number.isFinite(backgroundIntensity)) {
           this.scene.backgroundIntensity = backgroundIntensity;
         }
+        this.scene.backgroundBlurriness = 0.12;
         const environmentIntensity = Number(skyConfig.textureEnvironmentIntensity);
         this.scene.environmentIntensity = Number.isFinite(environmentIntensity)
           ? environmentIntensity
@@ -389,6 +390,7 @@ export class GameRuntime {
     if (this.scene.background === this.skyBackgroundTexture) {
       this.scene.background = new THREE.Color(this.worldContent.skyColor);
       this.scene.backgroundIntensity = 1;
+      this.scene.backgroundBlurriness = 0;
     }
     if (this.scene.environment === this.skyEnvironmentTexture) {
       this.scene.environment = null;

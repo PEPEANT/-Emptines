@@ -15,8 +15,8 @@ export const BASE_VOID_PACK = {
       mieCoefficient: 0.0042,
       mieDirectionalG: 0.82,
       textureUrl: "/assets/graphics/world/sky/oss-sky/venice_sunset_1k.hdr",
-      textureBackgroundIntensity: 0.82,
-      textureEnvironmentIntensity: 0.5
+      textureBackgroundIntensity: 0.36,
+      textureEnvironmentIntensity: 0.28
     },
     clouds: {
       enabled: true,
@@ -38,11 +38,11 @@ export const BASE_VOID_PACK = {
       hemisphere: {
         skyColor: 0xcdeaff,
         groundColor: 0xa7e67f,
-        intensity: 1.18
+        intensity: 1.04
       },
       sun: {
         color: 0xffffff,
-        intensity: 1.08,
+        intensity: 0.9,
         position: [70, 130, 44],
         shadowMobileSize: 1024,
         shadowDesktopSize: 1536,
@@ -54,7 +54,7 @@ export const BASE_VOID_PACK = {
       },
       fill: {
         color: 0xc5e8ff,
-        intensity: 0.46,
+        intensity: 0.34,
         position: [-72, 56, -32]
       }
     },
@@ -80,20 +80,20 @@ export const BASE_VOID_PACK = {
     },
     ocean: {
       enabled: true,
-      width: 120000,
-      depth: 220000,
-      shorelineX: 12000,
-      positionY: 0.05,
+      width: 90000,
+      depth: 140000,
+      shorelineX: 650,
+      positionY: -0.025,
       positionZ: 0,
       normalTextureUrl: "/assets/graphics/world/textures/oss-water/waternormals.jpg",
       normalRepeatX: 20,
       normalRepeatY: 20,
       color: 0x2f8ed9,
       sunColor: 0xffffff,
-      opacity: 0.82,
+      opacity: 0.7,
       distortionScale: 2.2,
       timeScale: 0.33,
-      bobAmplitude: 0.03,
+      bobAmplitude: 0.018,
       bobFrequency: 0.35
     },
     beach: {
@@ -102,18 +102,18 @@ export const BASE_VOID_PACK = {
       normalTextureUrl: "/assets/graphics/world/textures/cc0-sand/sand_normal_gl.jpg",
       roughnessTextureUrl: "/assets/graphics/world/textures/cc0-sand/sand_roughness.jpg",
       aoTextureUrl: "/assets/graphics/world/textures/cc0-sand/sand_ao.jpg",
-      shorelineX: 12000,
-      width: 7800,
-      depth: 220000,
-      positionY: 0.025,
-      repeatX: 56,
-      repeatY: 950,
+      shorelineX: 650,
+      width: 3200,
+      depth: 140000,
+      positionY: 0.045,
+      repeatX: 24,
+      repeatY: 640,
       color: 0xd9c08a,
       roughness: 0.93,
       metalness: 0,
       normalScale: [0.65, 0.65],
       aoIntensity: 0.32,
-      foamWidth: 220,
+      foamWidth: 120,
       foamOpacity: 0.46,
       foamColor: 0xe8f7ff
     },
@@ -132,13 +132,13 @@ export const BASE_VOID_PACK = {
       }
     },
     postProcessing: {
-      exposure: 0.88,
+      exposure: 0.74,
       bloom: {
         enabled: true,
         mobileEnabled: false,
-        strength: 0.13,
+        strength: 0.08,
         radius: 0.56,
-        threshold: 0.9
+        threshold: 0.94
       }
     }
   },
