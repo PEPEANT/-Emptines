@@ -9,6 +9,9 @@ Current identity is intentionally simple:
 - global realtime player sync via Socket.io
 - minimal HUD only
 
+The project is now structured for expansion packs.
+New world variants can be added through `src/game/content/packs/`.
+
 ## Quick Start
 
 Install dependencies:
@@ -95,8 +98,22 @@ Socket server health endpoints:
 |  |- main.js
 |  |- styles/main.css
 |  `- game/
-|     |- Game.js
-|     `- HUD.js
+|     |- index.js
+|     |- config/
+|     |  `- gameConstants.js
+|     |- content/
+|     |  |- registry.js
+|     |  `- packs/
+|     |     `- baseVoidPack.js
+|     |- runtime/
+|     |  `- GameRuntime.js
+|     |- ui/
+|     |  `- HUD.js
+|     `- utils/
+|        |- device.js
+|        |- math.js
+|        `- threeUtils.js
 `- scripts/
-   `- verify.mjs
+   |- verify.mjs
+   `- doctor.mjs
 ```

@@ -1,71 +1,45 @@
 import * as THREE from "three";
 import { io } from "socket.io-client";
 import { Sky } from "three/addons/objects/Sky.js";
-import { HUD } from "./HUD.js";
+import { HUD } from "../ui/HUD.js";
+import { GAME_CONSTANTS } from "../config/gameConstants.js";
+import { getContentPack } from "../content/registry.js";
+import { isLikelyTouchDevice } from "../utils/device.js";
+import { lerpAngle } from "../utils/math.js";
+import { disposeMeshTree } from "../utils/threeUtils.js";
 
-const PLAYER_HEIGHT = 1.72;
-const DEFAULT_FOV = 75;
-const PLAYER_SPEED = 8.8;
-const PLAYER_SPRINT = 13.2;
-const PLAYER_GRAVITY = -24;
-const JUMP_FORCE = 8.8;
-const WORLD_LIMIT = 30000;
-const REMOTE_SYNC_INTERVAL = 1 / 12;
-const REMOTE_LERP_SPEED = 12;
-
-function isLikelyTouchDevice() {
-  if (typeof window === "undefined" || typeof navigator === "undefined") {
-    return false;
-  }
-
-  const coarse = window.matchMedia?.("(pointer: coarse)")?.matches ?? false;
-  const touchPoints = navigator.maxTouchPoints ?? 0;
-  return coarse || touchPoints > 0;
-}
-
-function lerpAngle(from, to, alpha) {
-  const delta = Math.atan2(Math.sin(to - from), Math.cos(to - from));
-  return from + delta * alpha;
-}
-
-function disposeMeshTree(root) {
-  if (!root) {
-    return;
-  }
-
-  root.traverse((node) => {
-    if (node.geometry) {
-      node.geometry.dispose?.();
-    }
-
-    const material = node.material;
-    if (Array.isArray(material)) {
-      for (const item of material) {
-        item?.dispose?.();
-      }
-    } else {
-      material?.dispose?.();
-    }
-  });
-}
-
-export class Game {
-  constructor(mount) {
+export class GameRuntime {
+  constructor(mount, options = {}) {
     this.mount = mount;
     this.clock = new THREE.Clock();
     this.mobileEnabled = isLikelyTouchDevice();
     this.hud = new HUD();
+
+    this.contentPack = options.contentPack ?? getContentPack(options.contentPackId);
+    this.worldContent = this.contentPack.world;
+    this.handContent = this.contentPack.hands;
+    this.networkContent = this.contentPack.network;
+    this.networkSyncInterval =
+      Number(this.networkContent.syncInterval) || GAME_CONSTANTS.REMOTE_SYNC_INTERVAL;
+    this.remoteLerpSpeed =
+      Number(this.networkContent.remoteLerpSpeed) || GAME_CONSTANTS.REMOTE_LERP_SPEED;
+    this.remoteStaleTimeoutMs =
+      Number(this.networkContent.staleTimeoutMs) || GAME_CONSTANTS.REMOTE_STALE_TIMEOUT_MS;
 
     const initialPixelRatio = Math.min(window.devicePixelRatio || 1, 2);
     this.maxPixelRatio = initialPixelRatio;
     this.currentPixelRatio = initialPixelRatio;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0xa2d9ff);
-    this.scene.fog = new THREE.Fog(0xa2d9ff, 550, 4200);
+    this.scene.background = new THREE.Color(this.worldContent.skyColor);
+    this.scene.fog = new THREE.Fog(
+      this.worldContent.skyColor,
+      this.worldContent.fogNear,
+      this.worldContent.fogFar
+    );
 
     this.camera = new THREE.PerspectiveCamera(
-      DEFAULT_FOV,
+      GAME_CONSTANTS.DEFAULT_FOV,
       window.innerWidth / window.innerHeight,
       0.1,
       1200
@@ -86,7 +60,7 @@ export class Game {
 
     this.textureLoader = new THREE.TextureLoader();
 
-    this.playerPosition = new THREE.Vector3(0, PLAYER_HEIGHT, 0);
+    this.playerPosition = new THREE.Vector3(0, GAME_CONSTANTS.PLAYER_HEIGHT, 0);
     this.verticalVelocity = 0;
     this.onGround = true;
     this.yaw = 0;
@@ -107,10 +81,14 @@ export class Game {
     this.sunLight = null;
     this.ground = null;
     this.handView = null;
+    this.handSwayAmplitude = Number(this.handContent.swayAmplitude) || 0.012;
+    this.handSwayFrequency = Number(this.handContent.swayFrequency) || 0.0042;
 
     this.dynamicResolution = {
       enabled: true,
-      minRatio: this.mobileEnabled ? 0.65 : 0.85,
+      minRatio: this.mobileEnabled
+        ? GAME_CONSTANTS.DYNAMIC_RESOLUTION.mobileMinRatio
+        : GAME_CONSTANTS.DYNAMIC_RESOLUTION.desktopMinRatio,
       sampleTime: 0,
       frameCount: 0,
       cooldown: 0
@@ -163,65 +141,83 @@ export class Game {
   }
 
   setupWorld() {
-    const hemi = new THREE.HemisphereLight(0xbce7ff, 0x75b160, 1.22);
+    const world = this.worldContent;
+    const lights = world.lights;
+    const sunConfig = lights.sun;
+
+    const hemi = new THREE.HemisphereLight(
+      lights.hemisphere.skyColor,
+      lights.hemisphere.groundColor,
+      lights.hemisphere.intensity
+    );
     this.scene.add(hemi);
 
-    const sun = new THREE.DirectionalLight(0xffffff, 1.26);
-    sun.position.set(70, 130, 44);
+    const sun = new THREE.DirectionalLight(sunConfig.color, sunConfig.intensity);
+    sun.position.fromArray(sunConfig.position);
     sun.castShadow = !this.mobileEnabled;
-    sun.shadow.mapSize.set(this.mobileEnabled ? 1024 : 1536, this.mobileEnabled ? 1024 : 1536);
-    sun.shadow.camera.left = -300;
-    sun.shadow.camera.right = 300;
-    sun.shadow.camera.top = 300;
-    sun.shadow.camera.bottom = -300;
-    sun.shadow.camera.near = 1;
-    sun.shadow.camera.far = 500;
-    sun.shadow.bias = -0.00018;
-    sun.shadow.normalBias = 0.02;
+    sun.shadow.mapSize.set(
+      this.mobileEnabled ? sunConfig.shadowMobileSize : sunConfig.shadowDesktopSize,
+      this.mobileEnabled ? sunConfig.shadowMobileSize : sunConfig.shadowDesktopSize
+    );
+    sun.shadow.camera.left = -sunConfig.shadowBounds;
+    sun.shadow.camera.right = sunConfig.shadowBounds;
+    sun.shadow.camera.top = sunConfig.shadowBounds;
+    sun.shadow.camera.bottom = -sunConfig.shadowBounds;
+    sun.shadow.camera.near = sunConfig.shadowNear;
+    sun.shadow.camera.far = sunConfig.shadowFar;
+    sun.shadow.bias = sunConfig.shadowBias;
+    sun.shadow.normalBias = sunConfig.shadowNormalBias;
     this.scene.add(sun);
     this.sunLight = sun;
 
-    const fill = new THREE.DirectionalLight(0xb9e6ff, 0.42);
-    fill.position.set(-72, 56, -32);
+    const fill = new THREE.DirectionalLight(lights.fill.color, lights.fill.intensity);
+    fill.position.fromArray(lights.fill.position);
     this.scene.add(fill);
 
     this.setupSky(sun.position.clone().normalize());
 
     const maxAnisotropy = this.renderer.capabilities.getMaxAnisotropy();
     const anisotropy = this.mobileEnabled ? Math.min(4, maxAnisotropy) : maxAnisotropy;
-    const groundMap = this.textureLoader.load("/assets/graphics/world/textures/ground.svg");
+    const ground = world.ground;
+    const groundMap = this.textureLoader.load(ground.textureUrl);
     groundMap.wrapS = THREE.RepeatWrapping;
     groundMap.wrapT = THREE.RepeatWrapping;
-    groundMap.repeat.set(600, 600);
+    groundMap.repeat.set(ground.repeatX, ground.repeatY);
     groundMap.colorSpace = THREE.SRGBColorSpace;
     groundMap.anisotropy = anisotropy;
 
     this.ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(200000, 200000, 1, 1),
+      new THREE.PlaneGeometry(ground.size, ground.size, 1, 1),
       new THREE.MeshStandardMaterial({
-        color: 0x8ecf7f,
+        color: ground.color,
         map: groundMap,
-        roughness: 0.97,
-        metalness: 0,
-        emissive: 0x1d5f31,
-        emissiveIntensity: 0.09
+        roughness: ground.roughness,
+        metalness: ground.metalness,
+        emissive: ground.emissive,
+        emissiveIntensity: ground.emissiveIntensity
       })
     );
     this.ground.rotation.x = -Math.PI / 2;
     this.ground.receiveShadow = true;
     this.scene.add(this.ground);
 
+    const marker = world.originMarker;
     const originMarker = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.4, 0.4, 1.6, 14),
+      new THREE.CylinderGeometry(
+        marker.radiusTop,
+        marker.radiusBottom,
+        marker.height,
+        marker.radialSegments
+      ),
       new THREE.MeshStandardMaterial({
-        color: 0x5e6f83,
-        roughness: 0.32,
-        metalness: 0.1,
-        emissive: 0x2a3a52,
-        emissiveIntensity: 0.2
+        color: marker.material.color,
+        roughness: marker.material.roughness,
+        metalness: marker.material.metalness,
+        emissive: marker.material.emissive,
+        emissiveIntensity: marker.material.emissiveIntensity
       })
     );
-    originMarker.position.set(0, 0.8, -5);
+    originMarker.position.fromArray(marker.position);
     originMarker.castShadow = true;
     this.scene.add(originMarker);
   }
@@ -233,15 +229,16 @@ export class Game {
       this.skyDome = null;
     }
 
+    const skyConfig = this.worldContent.sky;
     const sky = new Sky();
-    sky.scale.setScalar(450000);
+    sky.scale.setScalar(skyConfig.scale);
     const uniforms = sky.material.uniforms;
-    uniforms.turbidity.value = 2.9;
-    uniforms.rayleigh.value = 2.4;
-    uniforms.mieCoefficient.value = 0.005;
-    uniforms.mieDirectionalG.value = 0.79;
+    uniforms.turbidity.value = skyConfig.turbidity;
+    uniforms.rayleigh.value = skyConfig.rayleigh;
+    uniforms.mieCoefficient.value = skyConfig.mieCoefficient;
+    uniforms.mieDirectionalG.value = skyConfig.mieDirectionalG;
 
-    this.skySun.copy(sunDirection).multiplyScalar(450000);
+    this.skySun.copy(sunDirection).multiplyScalar(skyConfig.scale);
     uniforms.sunPosition.value.copy(this.skySun);
 
     this.skyDome = sky;
@@ -249,43 +246,44 @@ export class Game {
   }
 
   setupHands() {
+    const hands = this.handContent;
     const group = new THREE.Group();
 
     const skin = new THREE.MeshStandardMaterial({
-      color: 0xbcc6d6,
-      roughness: 0.4,
-      metalness: 0.05,
-      emissive: 0x2f425e,
-      emissiveIntensity: 0.16
+      color: hands.skin.color,
+      roughness: hands.skin.roughness,
+      metalness: hands.skin.metalness,
+      emissive: hands.skin.emissive,
+      emissiveIntensity: hands.skin.emissiveIntensity
     });
 
     const sleeve = new THREE.MeshStandardMaterial({
-      color: 0x4e6889,
-      roughness: 0.55,
-      metalness: 0.08,
-      emissive: 0x1e2c3f,
-      emissiveIntensity: 0.2
+      color: hands.sleeve.color,
+      roughness: hands.sleeve.roughness,
+      metalness: hands.sleeve.metalness,
+      emissive: hands.sleeve.emissive,
+      emissiveIntensity: hands.sleeve.emissiveIntensity
     });
 
     const rightPalm = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.11, 0.2), skin);
-    rightPalm.position.set(0.24, -0.34, -0.46);
+    rightPalm.position.fromArray(hands.rightPalmPosition);
     rightPalm.castShadow = true;
 
     const rightSleeve = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.15, 0.24), sleeve);
-    rightSleeve.position.set(0.26, -0.27, -0.58);
+    rightSleeve.position.fromArray(hands.rightSleevePosition);
     rightSleeve.castShadow = true;
 
     const leftPalm = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.11, 0.2), skin);
-    leftPalm.position.set(-0.24, -0.34, -0.46);
+    leftPalm.position.fromArray(hands.leftPalmPosition);
     leftPalm.castShadow = true;
 
     const leftSleeve = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.15, 0.24), sleeve);
-    leftSleeve.position.set(-0.26, -0.27, -0.58);
+    leftSleeve.position.fromArray(hands.leftSleevePosition);
     leftSleeve.castShadow = true;
 
     group.add(rightPalm, rightSleeve, leftPalm, leftSleeve);
     group.position.set(0, 0, 0);
-    group.rotation.x = -0.03;
+    group.rotation.x = hands.groupRotationX;
 
     this.handView = group;
     this.camera.add(this.handView);
@@ -301,7 +299,7 @@ export class Game {
 
       this.keys.add(event.code);
       if (event.code === "Space" && this.onGround) {
-        this.verticalVelocity = JUMP_FORCE;
+        this.verticalVelocity = GAME_CONSTANTS.JUMP_FORCE;
         this.onGround = false;
       }
     });
@@ -503,7 +501,10 @@ export class Game {
     if (state) {
       remote.targetPosition.set(
         Number(state.x) || 0,
-        Math.max(0, (Number(state.y) || PLAYER_HEIGHT) - PLAYER_HEIGHT),
+        Math.max(
+          0,
+          (Number(state.y) || GAME_CONSTANTS.PLAYER_HEIGHT) - GAME_CONSTANTS.PLAYER_HEIGHT
+        ),
         Number(state.z) || 0
       );
       remote.targetYaw = Number(state.yaw) || 0;
@@ -545,7 +546,7 @@ export class Game {
       (this.keys.has("KeyA") || this.keys.has("ArrowLeft") ? 1 : 0);
 
     const sprinting = this.keys.has("ShiftLeft") || this.keys.has("ShiftRight");
-    const speed = sprinting ? PLAYER_SPRINT : PLAYER_SPEED;
+    const speed = sprinting ? GAME_CONSTANTS.PLAYER_SPRINT : GAME_CONSTANTS.PLAYER_SPEED;
 
     if (keyForward !== 0 || keyStrafe !== 0) {
       const sinYaw = Math.sin(this.yaw);
@@ -566,21 +567,21 @@ export class Game {
       const moveStep = speed * delta;
       this.playerPosition.x = THREE.MathUtils.clamp(
         this.playerPosition.x + this.moveVec.x * moveStep,
-        -WORLD_LIMIT,
-        WORLD_LIMIT
+        -GAME_CONSTANTS.WORLD_LIMIT,
+        GAME_CONSTANTS.WORLD_LIMIT
       );
       this.playerPosition.z = THREE.MathUtils.clamp(
         this.playerPosition.z + this.moveVec.z * moveStep,
-        -WORLD_LIMIT,
-        WORLD_LIMIT
+        -GAME_CONSTANTS.WORLD_LIMIT,
+        GAME_CONSTANTS.WORLD_LIMIT
       );
     }
 
-    this.verticalVelocity += PLAYER_GRAVITY * delta;
+    this.verticalVelocity += GAME_CONSTANTS.PLAYER_GRAVITY * delta;
     this.playerPosition.y += this.verticalVelocity * delta;
 
-    if (this.playerPosition.y <= PLAYER_HEIGHT) {
-      this.playerPosition.y = PLAYER_HEIGHT;
+    if (this.playerPosition.y <= GAME_CONSTANTS.PLAYER_HEIGHT) {
+      this.playerPosition.y = GAME_CONSTANTS.PLAYER_HEIGHT;
       this.verticalVelocity = 0;
       this.onGround = true;
     } else {
@@ -592,20 +593,20 @@ export class Game {
     this.camera.rotation.x = this.pitch;
 
     if (this.handView) {
-      const sway = Math.sin(performance.now() * 0.0042) * 0.012;
+      const sway = Math.sin(performance.now() * this.handSwayFrequency) * this.handSwayAmplitude;
       this.handView.position.y = sway;
     }
   }
 
   updateRemotePlayers(delta) {
-    const alpha = THREE.MathUtils.clamp(1 - Math.exp(-REMOTE_LERP_SPEED * delta), 0, 1);
+    const alpha = THREE.MathUtils.clamp(1 - Math.exp(-this.remoteLerpSpeed * delta), 0, 1);
     const now = performance.now();
 
     for (const [id, remote] of this.remotePlayers) {
       remote.mesh.position.lerp(remote.targetPosition, alpha);
       remote.mesh.rotation.y = lerpAngle(remote.mesh.rotation.y, remote.targetYaw, alpha);
 
-      if (now - remote.lastSeen > 15000) {
+      if (now - remote.lastSeen > this.remoteStaleTimeoutMs) {
         this.removeRemotePlayer(id);
       }
     }
@@ -617,7 +618,7 @@ export class Game {
     }
 
     this.remoteSyncClock += delta;
-    if (this.remoteSyncClock < REMOTE_SYNC_INTERVAL) {
+    if (this.remoteSyncClock < this.networkSyncInterval) {
       return;
     }
     this.remoteSyncClock = 0;
@@ -719,8 +720,11 @@ export class Game {
     this.renderer.shadowMap.autoUpdate = shadowEnabled;
 
     if (this.sunLight) {
+      const sunConfig = this.worldContent.lights.sun;
       this.sunLight.castShadow = shadowEnabled;
-      const shadowMapSize = this.mobileEnabled ? 1024 : 1536;
+      const shadowMapSize = this.mobileEnabled
+        ? sunConfig.shadowMobileSize
+        : sunConfig.shadowDesktopSize;
       if (
         this.sunLight.shadow.mapSize.x !== shadowMapSize ||
         this.sunLight.shadow.mapSize.y !== shadowMapSize
@@ -739,7 +743,9 @@ export class Game {
       this.applyQualityProfile();
     }
 
-    this.dynamicResolution.minRatio = this.mobileEnabled ? 0.65 : 0.85;
+    this.dynamicResolution.minRatio = this.mobileEnabled
+      ? GAME_CONSTANTS.DYNAMIC_RESOLUTION.mobileMinRatio
+      : GAME_CONSTANTS.DYNAMIC_RESOLUTION.desktopMinRatio;
 
     this.maxPixelRatio = Math.min(window.devicePixelRatio || 1, 2);
     const minPixelRatio = Math.max(0.5, Math.min(this.dynamicResolution.minRatio, this.maxPixelRatio));

@@ -78,17 +78,21 @@ async function main() {
   checkFile("server.js");
   checkFile("src/main.js");
   checkFile("src/styles/main.css");
-  checkFile("src/game/Game.js");
+  checkFile("src/game/index.js");
+  checkFile("src/game/runtime/GameRuntime.js");
+  checkFile("src/game/ui/HUD.js");
+  checkFile("src/game/config/gameConstants.js");
+  checkFile("src/game/content/registry.js");
+  checkFile("src/game/content/packs/baseVoidPack.js");
   checkFile("public/assets/graphics/ui/logo.svg");
-  checkFile("public/assets/graphics/world/blocks/kenney/grass.png");
-  checkFile("public/assets/audio/weapons/gunshot_0.mp3");
+  checkFile("public/assets/graphics/world/textures/ground.svg");
   checkIndexEntry();
 
   const chatUp = await pingLocalServer("http://localhost:3001/health");
   if (chatUp) {
     pass("chat server is reachable on http://localhost:3001/health");
   } else {
-    warn("chat server is not running on localhost:3001 (online lobby/chat will be offline)");
+    warn("chat server is not running on localhost:3001 (realtime sync will be offline)");
   }
 
   console.log("");

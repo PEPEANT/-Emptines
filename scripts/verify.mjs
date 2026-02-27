@@ -67,7 +67,19 @@ async function waitFor(fn, timeoutMs = 6000, stepMs = 30) {
 }
 
 async function checkSyntax() {
-  const files = ["src/main.js", "src/game/HUD.js", "src/game/Game.js", "server.js"];
+  const files = [
+    "src/main.js",
+    "src/game/index.js",
+    "src/game/ui/HUD.js",
+    "src/game/runtime/GameRuntime.js",
+    "src/game/config/gameConstants.js",
+    "src/game/content/registry.js",
+    "src/game/content/packs/baseVoidPack.js",
+    "src/game/utils/device.js",
+    "src/game/utils/math.js",
+    "src/game/utils/threeUtils.js",
+    "server.js"
+  ];
   for (const file of files) {
     await run(process.execPath, ["--check", file]);
   }

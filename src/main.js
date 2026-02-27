@@ -1,5 +1,5 @@
 import "./styles/main.css";
-import { Game } from "./game/Game.js";
+import { createGame } from "./game/index.js";
 
 function supportsWebGL() {
   try {
@@ -34,7 +34,7 @@ function boot() {
   }
 
   try {
-    const game = new Game(mount);
+    const game = createGame(mount, { contentPackId: "base-void" });
     game.init();
     window.__emptinesGame = game;
   } catch (error) {
