@@ -1,4 +1,4 @@
-﻿import { createServer } from "http";
+import { createServer } from "http";
 import { Server } from "socket.io";
 
 function parseCorsOrigins(rawValue) {
@@ -46,7 +46,6 @@ async function probeExistingServer(port) {
 
 const DEFAULT_ROOM_CODE = "GLOBAL";
 const MAX_ROOM_PLAYERS = 50;
-const PVP_DAMAGE = 34;
 
 const rooms = new Map();
 let playerCount = 0;
@@ -99,60 +98,6 @@ function sanitizePlayerState(raw = {}) {
   };
 }
 
-function sanitizeBlockPayload(raw = {}) {
-  const action = raw.action === "place" ? "place" : raw.action === "remove" ? "remove" : null;
-  if (!action) {
-    return null;
-  }
-
-  const x = clampNumber(raw.x, -256, 256, Number.NaN);
-  const y = clampNumber(raw.y, -64, 192, Number.NaN);
-  const z = clampNumber(raw.z, -256, 256, Number.NaN);
-  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
-    return null;
-  }
-
-  const payload = {
-    action,
-    x: Math.trunc(x),
-    y: Math.trunc(y),
-    z: Math.trunc(z)
-  };
-
-  if (action === "place") {
-    const typeId = clampNumber(raw.typeId, 1, 64, Number.NaN);
-    if (!Number.isFinite(typeId)) {
-      return null;
-    }
-    payload.typeId = Math.trunc(typeId);
-  }
-
-  return payload;
-}
-
-function sanitizeShootPayload(raw = {}) {
-  const targetId = String(raw.targetId ?? "").trim();
-  if (!targetId) {
-    return null;
-  }
-  return { targetId };
-}
-
-function pickBalancedTeam(room) {
-  let alpha = 0;
-  let bravo = 0;
-  for (const player of room.players.values()) {
-    if (player.team === "alpha") {
-      alpha += 1;
-      continue;
-    }
-    if (player.team === "bravo") {
-      bravo += 1;
-    }
-  }
-  return alpha <= bravo ? "alpha" : "bravo";
-}
-
 function serializeRoom(room) {
   pruneRoomPlayers(room);
   return {
@@ -161,9 +106,7 @@ function serializeRoom(room) {
     players: Array.from(room.players.values()).map((player) => ({
       id: player.id,
       name: player.name,
-      team: player.team ?? null,
-      state: player.state ?? null,
-      hp: Number(player.hp ?? 100)
+      state: player.state ?? null
     }))
   };
 }
@@ -251,15 +194,14 @@ function leaveCurrentRoom(socket) {
 function joinDefaultRoom(socket, nameOverride = null) {
   const room = getDefaultRoom();
   pruneRoomPlayers(room);
+
   const name = sanitizeName(nameOverride ?? socket.data.playerName);
   socket.data.playerName = name;
 
   if (socket.data.roomCode === room.code && room.players.has(socket.id)) {
     const existing = room.players.get(socket.id);
-    if (existing && existing.team !== "alpha" && existing.team !== "bravo") {
-      existing.team = pickBalancedTeam(room);
-      emitRoomUpdate(room);
-    }
+    existing.name = name;
+    emitRoomUpdate(room);
     return { ok: true, room: serializeRoom(room) };
   }
 
@@ -275,11 +217,7 @@ function joinDefaultRoom(socket, nameOverride = null) {
   room.players.set(socket.id, {
     id: socket.id,
     name,
-    team: pickBalancedTeam(room),
-    state: sanitizePlayerState(),
-    hp: 100,
-    kills: 0,
-    deaths: 0
+    state: sanitizePlayerState()
   });
 
   updateHost(room);
@@ -310,7 +248,7 @@ const httpServer = createServer((req, res) => {
   if (req.url === "/" || req.url === "/status") {
     writeJson(res, 200, {
       ok: true,
-      message: "RECLAIM FPS socket server is running",
+      message: "Emptines realtime sync server is running",
       room: DEFAULT_ROOM_CODE,
       capacity: MAX_ROOM_PLAYERS,
       health: "/health"
@@ -341,10 +279,7 @@ io.on("connection", (socket) => {
 
   console.log(`[+] player connected (${playerCount}) ${socket.id}`);
 
-  const joined = joinDefaultRoom(socket);
-  if (joined.ok) {
-    ack(null, joined);
-  }
+  joinDefaultRoom(socket);
   emitRoomList(socket);
 
   socket.on("chat:send", ({ name, text }) => {
@@ -376,80 +311,7 @@ io.on("connection", (socket) => {
     socket.to(room.code).emit("player:sync", {
       id: player.id,
       name: player.name,
-      team: player.team ?? null,
       state: nextState
-    });
-  });
-
-  socket.on("block:update", (payload = {}) => {
-    const roomCode = socket.data.roomCode;
-    const room = roomCode ? rooms.get(roomCode) : null;
-    if (!room || !room.players.has(socket.id)) {
-      return;
-    }
-
-    const sanitized = sanitizeBlockPayload(payload);
-    if (!sanitized) {
-      return;
-    }
-
-    socket.to(room.code).emit("block:update", {
-      id: socket.id,
-      ...sanitized
-    });
-  });
-
-  socket.on("pvp:shoot", (payload = {}) => {
-    const roomCode = socket.data.roomCode;
-    const room = roomCode ? rooms.get(roomCode) : null;
-    if (!room) {
-      return;
-    }
-
-    const shooter = room.players.get(socket.id);
-    if (!shooter) {
-      return;
-    }
-
-    const sanitized = sanitizeShootPayload(payload);
-    if (!sanitized) {
-      return;
-    }
-
-    const target = room.players.get(sanitized.targetId);
-    if (!target || target.id === shooter.id) {
-      return;
-    }
-
-    const shooterTeam = shooter.team ?? null;
-    const targetTeam = target.team ?? null;
-    const validTeamFight =
-      (shooterTeam === "alpha" || shooterTeam === "bravo") &&
-      (targetTeam === "alpha" || targetTeam === "bravo") &&
-      shooterTeam !== targetTeam;
-
-    if (!validTeamFight) {
-      return;
-    }
-
-    const currentHp = Number.isFinite(target.hp) ? target.hp : 100;
-    const nextHp = Math.max(0, currentHp - PVP_DAMAGE);
-    const killed = nextHp <= 0;
-
-    target.hp = killed ? 100 : nextHp;
-    if (killed) {
-      shooter.kills = (Number(shooter.kills) || 0) + 1;
-      target.deaths = (Number(target.deaths) || 0) + 1;
-    }
-
-    io.to(room.code).emit("pvp:damage", {
-      attackerId: shooter.id,
-      victimId: target.id,
-      damage: PVP_DAMAGE,
-      victimHealth: target.hp,
-      killed,
-      attackerKills: shooter.kills ?? 0,
-      victimDeaths: target.deaths ?? 0
     });
   });
 
@@ -473,43 +335,6 @@ io.on("connection", (socket) => {
     ack(ackFn, joinDefaultRoom(socket));
   });
 
-  socket.on("room:set-team", (payload = {}, ackFn) => {
-    const team = payload.team === "alpha" || payload.team === "bravo" ? payload.team : null;
-    if (!team) {
-      ack(ackFn, { ok: false, error: "Invalid team" });
-      return;
-    }
-
-    const roomCode = socket.data.roomCode;
-    const room = roomCode ? rooms.get(roomCode) : null;
-    if (!room) {
-      ack(ackFn, { ok: false, error: "Not in room" });
-      return;
-    }
-
-    const player = room.players.get(socket.id);
-    if (!player) {
-      ack(ackFn, { ok: false, error: "Not in room" });
-      return;
-    }
-
-    player.team = team;
-    emitRoomUpdate(room);
-    ack(ackFn, { ok: true });
-  });
-
-  socket.on("room:start", (ackFn) => {
-    const roomCode = socket.data.roomCode;
-    const room = roomCode ? rooms.get(roomCode) : null;
-    if (!room) {
-      ack(ackFn, { ok: false, error: "Not in room" });
-      return;
-    }
-
-    io.to(room.code).emit("room:started", { code: room.code, startedAt: Date.now() });
-    ack(ackFn, { ok: true });
-  });
-
   socket.on("disconnecting", () => {
     leaveCurrentRoom(socket);
   });
@@ -524,21 +349,19 @@ const PORT = Number(process.env.PORT ?? 3001);
 httpServer.on("error", (error) => {
   if (error && error.code === "EADDRINUSE") {
     void (async () => {
-      const existingChatServer = await probeExistingServer(PORT);
-      if (existingChatServer) {
-        console.log(`Port ${PORT} is already in use. Existing chat server is running.`);
+      const existingServer = await probeExistingServer(PORT);
+      if (existingServer) {
+        console.log(`Port ${PORT} is already in use. Existing sync server is running.`);
         process.exit(0);
       }
 
-      console.error(
-        `Port ${PORT} is in use by another process. Free the port or set a different PORT.`
-      );
+      console.error(`Port ${PORT} is in use by another process. Free the port or set a different PORT.`);
       process.exit(1);
     })();
     return;
   }
 
-  console.error("Chat server failed to start:", error);
+  console.error("Sync server failed to start:", error);
   process.exit(1);
 });
 

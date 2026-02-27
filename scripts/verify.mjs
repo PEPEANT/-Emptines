@@ -1,9 +1,6 @@
 import { spawn } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
-import * as THREE from "three";
 import { io } from "socket.io-client";
-import { WeaponSystem } from "../src/game/WeaponSystem.js";
-import { VoxelWorld } from "../src/game/build/VoxelWorld.js";
 
 const skipBuild = process.argv.includes("--skip-build");
 
@@ -29,6 +26,7 @@ function run(command, args, options = {}) {
         stdout += String(data);
       });
     }
+
     if (child.stderr) {
       child.stderr.on("data", (data) => {
         stderr += String(data);
@@ -68,70 +66,11 @@ async function waitFor(fn, timeoutMs = 6000, stepMs = 30) {
   throw new Error("Timed out waiting for condition");
 }
 
-function emitWithAck(socket, event, payload = undefined) {
-  return new Promise((resolve) => {
-    if (payload === undefined) {
-      socket.emit(event, resolve);
-      return;
-    }
-    socket.emit(event, payload, resolve);
-  });
-}
-
 async function checkSyntax() {
-  const files = [
-    "src/main.js",
-    "src/game/Chat.js",
-    "src/game/HUD.js",
-    "src/game/WeaponSystem.js",
-    "src/game/EnemyManager.js",
-    "src/game/Game.js",
-    "src/game/audio/SoundSystem.js",
-    "src/game/build/BuildSystem.js",
-    "src/game/build/BlockPalette.js",
-    "src/game/build/VoxelWorld.js",
-    "server.js"
-  ];
-
+  const files = ["src/main.js", "src/game/HUD.js", "src/game/Game.js", "server.js"];
   for (const file of files) {
     await run(process.execPath, ["--check", file]);
   }
-}
-
-function checkWeaponSystem() {
-  const weapon = new WeaponSystem();
-  let shots = 0;
-  const dt = 1 / 120;
-  for (let t = 0; t < 1.01; t += dt) {
-    weapon.update(dt);
-    if (weapon.tryShoot().success) {
-      shots += 1;
-    }
-  }
-
-  assert(shots >= 9 && shots <= 11, `Unexpected shots in 1s: ${shots}`);
-}
-
-function checkVoxelWorld() {
-  const scene = new THREE.Scene();
-  const textureLoader = {
-    load() {
-      return new THREE.Texture();
-    }
-  };
-  const world = new VoxelWorld(scene, textureLoader);
-
-  const basePlaced = world.setBlock(0, 0, 0, 1);
-  const adjacentPlaced = world.placeAdjacent(
-    { x: 0, y: 0, z: 0, normal: new THREE.Vector3(1, 0, 0) },
-    2
-  );
-  const removed = world.removeFromHit({ x: 1, y: 0, z: 0 });
-
-  assert(basePlaced === true, "Failed to place base block");
-  assert(adjacentPlaced === true, "Failed to place adjacent block");
-  assert(removed === true, "Failed to remove placed block");
-  assert(world.hasBlock(1, 0, 0) === false, "Block still exists after remove");
 }
 
 async function checkSocketServer() {
@@ -158,6 +97,7 @@ async function checkSocketServer() {
       }
     });
   }
+
   if (server.stderr) {
     server.stderr.on("data", (data) => {
       bootLog += String(data);
@@ -172,75 +112,52 @@ async function checkSocketServer() {
     assert(serverReady, `Server failed to boot:\n${bootLog}`);
 
     c1 = io(`http://localhost:${port}`, {
+      transports: ["websocket"],
+      timeout: 5000,
       reconnection: true,
       reconnectionAttempts: 8,
-      reconnectionDelay: 120,
-      timeout: 5000,
-      transports: ["websocket"]
+      reconnectionDelay: 120
     });
     c2 = io(`http://localhost:${port}`, {
+      transports: ["websocket"],
+      timeout: 5000,
       reconnection: true,
       reconnectionAttempts: 8,
-      reconnectionDelay: 120,
-      timeout: 5000,
-      transports: ["websocket"]
+      reconnectionDelay: 120
     });
 
-    await Promise.all([
-      waitFor(() => c1.connected, 6000),
-      waitFor(() => c2.connected, 6000)
-    ]);
+    await Promise.all([waitFor(() => c1.connected, 6000), waitFor(() => c2.connected, 6000)]);
 
-    let startedCount = 0;
-    let receivedChatText = "";
-    let latestRoomPlayers = [];
-    c1.on("room:started", () => {
-      startedCount += 1;
-    });
-    c2.on("room:started", () => {
-      startedCount += 1;
-    });
-    c1.on("room:update", (room) => {
-      latestRoomPlayers = Array.isArray(room?.players) ? room.players : [];
-    });
-    c1.on("chat:message", (payload) => {
-      receivedChatText = payload?.text ?? "";
+    let roomPlayerCount = 0;
+    let receivedSync = false;
+
+    c2.on("player:sync", (payload) => {
+      if (payload?.id === c1.id && Number.isFinite(payload?.state?.x)) {
+        receivedSync = true;
+      }
     });
 
-    const created = await emitWithAck(c1, "room:create", { name: "CheckHost" });
-    assert(created?.ok === true, `room:create failed: ${JSON.stringify(created)}`);
-    const code = created.room?.code;
-    assert(code === "GLOBAL", `Expected GLOBAL room code, got: ${String(code)}`);
+    c1.on("room:list", (rooms) => {
+      const first = Array.isArray(rooms) ? rooms[0] : null;
+      roomPlayerCount = Number(first?.count) || 0;
+    });
 
-    const joined = await emitWithAck(c2, "room:join", { code, name: "CheckGuest" });
-    assert(joined?.ok === true, `room:join failed: ${JSON.stringify(joined)}`);
-    assert(
-      joined?.room?.code === "GLOBAL",
-      `Expected GLOBAL room on join, got: ${JSON.stringify(joined)}`
-    );
+    c1.emit("player:sync", {
+      x: 12,
+      y: 1.72,
+      z: -6,
+      yaw: 0.8,
+      pitch: -0.12
+    });
+    c1.emit("room:list");
 
-    const teamHost = await emitWithAck(c1, "room:set-team", { team: "alpha" });
-    const teamGuest = await emitWithAck(c2, "room:set-team", { team: "bravo" });
-    assert(teamHost?.ok === true, `host team select failed: ${JSON.stringify(teamHost)}`);
-    assert(teamGuest?.ok === true, `guest team select failed: ${JSON.stringify(teamGuest)}`);
+    await waitFor(() => receivedSync, 5000);
+    await waitFor(() => roomPlayerCount >= 2, 5000);
 
-    const left = await emitWithAck(c2, "room:leave");
-    assert(left?.ok === true, `room:leave failed: ${JSON.stringify(left)}`);
-    assert(left?.room?.code === "GLOBAL", `leave should keep GLOBAL room: ${JSON.stringify(left)}`);
-
-    const started = await emitWithAck(c2, "room:start");
-    assert(started?.ok === true, `room:start failed: ${JSON.stringify(started)}`);
-    await waitFor(() => startedCount >= 2, 4000);
-
-    c2.emit("chat:send", { name: "CheckGuest", text: "smoke-test-chat" });
-    await waitFor(() => receivedChatText === "smoke-test-chat", 4000);
-
-    const guestId = c2.id;
     c2.disconnect();
-    await waitFor(
-      () => latestRoomPlayers.length === 0 || !latestRoomPlayers.some((player) => player.id === guestId),
-      5000
-    );
+    c1.emit("room:list");
+
+    await waitFor(() => roomPlayerCount <= 1, 5000);
   } finally {
     c1?.disconnect();
     c2?.disconnect();
@@ -266,13 +183,7 @@ async function main() {
     }
   }
 
-  console.log("[verify] weapon smoke...");
-  checkWeaponSystem();
-
-  console.log("[verify] voxel smoke...");
-  checkVoxelWorld();
-
-  console.log("[verify] socket/lobby/chat smoke...");
+  console.log("[verify] socket sync smoke...");
   await checkSocketServer();
 
   console.log("[verify] all checks passed");
