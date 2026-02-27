@@ -16,14 +16,17 @@
     </div>
 
     <div id="chat-ui" aria-label="chat">
-      <input
-        id="chat-input"
-        type="text"
-        maxlength="120"
-        placeholder="채팅 입력 (Enter)"
-        autocomplete="off"
-      />
-      <button id="chat-send" type="button">전송</button>
+      <div id="chat-log" role="log" aria-live="polite" aria-relevant="additions text"></div>
+      <div id="chat-controls">
+        <input
+          id="chat-input"
+          type="text"
+          maxlength="120"
+          placeholder="Type chat (Enter)"
+          autocomplete="off"
+        />
+        <button id="chat-send" type="button">Send</button>
+      </div>
     </div>
 
     <script type="module" src="/src/main.js"></script>

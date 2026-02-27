@@ -128,6 +128,8 @@ export class GameRuntime {
     this.remotePlayers = new Map();
     this.remoteSyncClock = 0;
     this.chatBubbleLifetimeMs = 4200;
+    this.chatLogMaxEntries = 36;
+    this.chatLogEl = document.getElementById("chat-log");
     this.chatInputEl = document.getElementById("chat-input");
     this.chatSendEl = document.getElementById("chat-send");
 
@@ -1405,6 +1407,8 @@ export class GameRuntime {
       return;
     }
 
+    this.appendChatLine(senderName, text, "remote");
+
     let remote = null;
     if (senderId) {
       this.upsertRemotePlayer(senderId, null, senderName);
@@ -1426,6 +1430,40 @@ export class GameRuntime {
     remote.chatExpireAt = performance.now() + this.chatBubbleLifetimeMs;
   }
 
+  appendChatLine(name, text, type = "remote") {
+    if (!this.chatLogEl) {
+      return;
+    }
+
+    const line = document.createElement("p");
+    line.className = `chat-line ${type}`;
+
+    if (type === "system") {
+      line.textContent = String(text ?? "").trim();
+    } else {
+      const safeName = this.formatPlayerName(name);
+      const safeText = String(text ?? "").trim();
+      if (!safeText) {
+        return;
+      }
+
+      const nameEl = document.createElement("span");
+      nameEl.className = "chat-name";
+      nameEl.textContent = `${safeName}:`;
+
+      const textEl = document.createElement("span");
+      textEl.textContent = safeText;
+
+      line.append(nameEl, textEl);
+    }
+
+    this.chatLogEl.appendChild(line);
+    while (this.chatLogEl.childElementCount > this.chatLogMaxEntries) {
+      this.chatLogEl.firstElementChild?.remove();
+    }
+    this.chatLogEl.scrollTop = this.chatLogEl.scrollHeight;
+  }
+
   sendChatMessage() {
     if (!this.chatInputEl) {
       return;
@@ -1436,9 +1474,13 @@ export class GameRuntime {
       return;
     }
 
+    const senderName = this.formatPlayerName(this.localPlayerName);
+    this.localPlayerName = senderName;
+    this.appendChatLine(senderName, text, "self");
+
     if (this.socket && this.networkConnected) {
       this.socket.emit("chat:send", {
-        name: this.formatPlayerName(this.localPlayerName),
+        name: senderName,
         text
       });
     }
