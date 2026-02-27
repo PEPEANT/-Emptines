@@ -621,6 +621,7 @@ export class GameRuntime {
     );
     beach.receiveShadow = true;
     beach.renderOrder = 4;
+    beach.frustumCulled = false;
     this.beach = beach;
     this.scene.add(this.beach);
 
@@ -641,6 +642,7 @@ export class GameRuntime {
     foam.userData.elapsed = 0;
     foam.material.toneMapped = false;
     foam.renderOrder = 7;
+    foam.frustumCulled = false;
     this.shoreFoam = foam;
     this.scene.add(this.shoreFoam);
 
@@ -661,6 +663,7 @@ export class GameRuntime {
     wetBand.userData.elapsed = 0;
     wetBand.material.toneMapped = false;
     wetBand.renderOrder = 6;
+    wetBand.frustumCulled = false;
     this.shoreWetBand = wetBand;
     this.scene.add(this.shoreWetBand);
   }
@@ -727,6 +730,7 @@ export class GameRuntime {
     );
     water.receiveShadow = false;
     water.renderOrder = 3;
+    water.frustumCulled = false;
     water.material.depthWrite = true;
     water.material.depthTest = true;
     water.material.transparent = false;
@@ -748,6 +752,7 @@ export class GameRuntime {
     oceanBase.position.y -= 0.018;
     oceanBase.renderOrder = 2;
     oceanBase.material.toneMapped = false;
+    oceanBase.frustumCulled = false;
     this.oceanBase = oceanBase;
     this.scene.add(this.oceanBase);
 
