@@ -132,6 +132,8 @@ export class GameRuntime {
     this.chatLogEl = document.getElementById("chat-log");
     this.chatInputEl = document.getElementById("chat-input");
     this.chatSendEl = document.getElementById("chat-send");
+    this.lastLocalChatEcho = "";
+    this.lastLocalChatEchoAt = 0;
 
     this._initialized = false;
   }
@@ -147,6 +149,7 @@ export class GameRuntime {
     this._initialized = true;
     this.mount.appendChild(this.renderer.domElement);
     this.scene.add(this.camera);
+    this.resolveUiElements();
 
     this.setupWorld();
     this.setupPostProcessing();
@@ -163,6 +166,7 @@ export class GameRuntime {
       z: this.playerPosition.z,
       fps: 0
     });
+    this.appendChatLine("", "Chat ready", "system");
 
     this.loop();
   }
@@ -984,6 +988,8 @@ export class GameRuntime {
   }
 
   bindEvents() {
+    this.resolveUiElements();
+
     window.addEventListener("resize", () => this.onResize());
 
     window.addEventListener("keydown", (event) => {
@@ -1067,6 +1073,18 @@ export class GameRuntime {
       this.chatSendEl.addEventListener("click", () => {
         this.sendChatMessage();
       });
+    }
+  }
+
+  resolveUiElements() {
+    if (!this.chatLogEl) {
+      this.chatLogEl = document.getElementById("chat-log");
+    }
+    if (!this.chatInputEl) {
+      this.chatInputEl = document.getElementById("chat-input");
+    }
+    if (!this.chatSendEl) {
+      this.chatSendEl = document.getElementById("chat-send");
     }
   }
 
@@ -1402,9 +1420,17 @@ export class GameRuntime {
 
     const senderId = String(payload?.id ?? "");
     const senderName = this.formatPlayerName(payload?.name);
+    const signature = `${senderName}|${text}`;
 
     if (senderId && senderId === this.localPlayerId) {
       this.localPlayerName = senderName;
+      const elapsed = performance.now() - this.lastLocalChatEchoAt;
+      const isRecentEcho = this.lastLocalChatEcho === signature && elapsed < 6000;
+      if (!isRecentEcho) {
+        this.appendChatLine(senderName, text, "self");
+      }
+      this.lastLocalChatEcho = "";
+      this.lastLocalChatEchoAt = 0;
       return;
     }
 
@@ -1432,8 +1458,9 @@ export class GameRuntime {
   }
 
   appendChatLine(name, text, type = "remote") {
+    this.resolveUiElements();
     if (!this.chatLogEl) {
-      return;
+      return false;
     }
 
     const line = document.createElement("p");
@@ -1445,7 +1472,7 @@ export class GameRuntime {
       const safeName = this.formatPlayerName(name);
       const safeText = String(text ?? "").trim();
       if (!safeText) {
-        return;
+        return false;
       }
 
       const nameEl = document.createElement("span");
@@ -1463,9 +1490,11 @@ export class GameRuntime {
       this.chatLogEl.firstElementChild?.remove();
     }
     this.chatLogEl.scrollTop = this.chatLogEl.scrollHeight;
+    return true;
   }
 
   sendChatMessage() {
+    this.resolveUiElements();
     if (!this.chatInputEl) {
       return;
     }
@@ -1477,7 +1506,11 @@ export class GameRuntime {
 
     const senderName = this.formatPlayerName(this.localPlayerName);
     this.localPlayerName = senderName;
-    this.appendChatLine(senderName, text, "self");
+    const appended = this.appendChatLine(senderName, text, "self");
+    if (appended) {
+      this.lastLocalChatEcho = `${senderName}|${text}`;
+      this.lastLocalChatEchoAt = performance.now();
+    }
 
     if (this.socket && this.networkConnected) {
       this.socket.emit("chat:send", {
@@ -1491,6 +1524,7 @@ export class GameRuntime {
   }
 
   focusChatInput() {
+    this.resolveUiElements();
     if (!this.chatInputEl) {
       return;
     }
