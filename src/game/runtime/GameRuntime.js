@@ -1540,8 +1540,8 @@ export class GameRuntime {
 
     if (text) {
       if (kind === "chat") {
-        context.fillStyle = "rgba(8, 24, 16, 0.82)";
-        context.strokeStyle = "rgba(168, 247, 197, 0.9)";
+        context.fillStyle = "rgba(10, 24, 40, 0.84)";
+        context.strokeStyle = "rgba(178, 216, 252, 0.92)";
         context.lineWidth = 6;
       } else {
         context.fillStyle = "rgba(6, 18, 32, 0.86)";
@@ -1555,7 +1555,7 @@ export class GameRuntime {
 
       context.textAlign = "center";
       context.textBaseline = "middle";
-      context.fillStyle = kind === "chat" ? "#ecfff3" : "#e8f8ff";
+      context.fillStyle = kind === "chat" ? "#f0f8ff" : "#e8f8ff";
       context.font = kind === "chat" ? "600 40px Bahnschrift" : "700 38px Bahnschrift";
       context.fillText(text, width * 0.5, height * 0.53);
     }

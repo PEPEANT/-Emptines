@@ -26,19 +26,19 @@ export const BASE_VOID_PACK = {
       maxHeight: 180,
       minScale: 16,
       maxScale: 34,
-      color: 0xf8fdff,
+      color: 0xffffff,
       opacity: 0.82,
       driftMin: 0.28,
       driftMax: 0.78,
       mobileCountScale: 0.55,
-      emissive: 0x3a5b6c,
-      emissiveIntensity: 0.08
+      emissive: 0x4a6783,
+      emissiveIntensity: 0.05
     },
     lights: {
       hemisphere: {
-        skyColor: 0xcdeaff,
-        groundColor: 0xa7e67f,
-        intensity: 1.04
+        skyColor: 0xd8ecff,
+        groundColor: 0xc6d0dd,
+        intensity: 0.96
       },
       sun: {
         color: 0xffffff,
