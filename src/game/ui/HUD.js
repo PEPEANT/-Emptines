@@ -14,6 +14,7 @@ export class HUD {
     this.playersEl = document.getElementById("hud-players");
     this.positionEl = document.getElementById("hud-position");
     this.fpsEl = document.getElementById("hud-fps");
+    this.enabled = Boolean(this.statusEl || this.playersEl || this.positionEl || this.fpsEl);
 
     this.cache = {
       status: "",
@@ -24,6 +25,9 @@ export class HUD {
   }
 
   setStatus(status) {
+    if (!this.enabled) {
+      return;
+    }
     const next = String(status ?? "OFFLINE");
     if (this.cache.status !== next) {
       this.cache.status = next;
@@ -32,6 +36,9 @@ export class HUD {
   }
 
   setPlayers(count) {
+    if (!this.enabled) {
+      return;
+    }
     const next = String(count ?? 0);
     if (this.cache.players !== next) {
       this.cache.players = next;
@@ -40,6 +47,9 @@ export class HUD {
   }
 
   setPosition(x, z) {
+    if (!this.enabled) {
+      return;
+    }
     const next = `${Math.round(x ?? 0)}, ${Math.round(z ?? 0)}`;
     if (this.cache.position !== next) {
       this.cache.position = next;
@@ -48,6 +58,9 @@ export class HUD {
   }
 
   setFps(fps) {
+    if (!this.enabled) {
+      return;
+    }
     const next = String(Math.max(0, Math.round(fps ?? 0)));
     if (this.cache.fps !== next) {
       this.cache.fps = next;
@@ -56,6 +69,9 @@ export class HUD {
   }
 
   update(state = {}) {
+    if (!this.enabled) {
+      return;
+    }
     this.setStatus(state.status ?? "OFFLINE");
     this.setPlayers(state.players ?? 0);
     this.setPosition(state.x ?? 0, state.z ?? 0);

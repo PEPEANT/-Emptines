@@ -81,6 +81,7 @@ async function main() {
   checkFile("src/styles/main.css");
   checkFile("src/game/index.js");
   checkFile("src/game/runtime/GameRuntime.js");
+  checkFile("src/game/runtime/config/runtimeTuning.js");
   checkFile("src/game/ui/HUD.js");
   checkFile("src/game/config/gameConstants.js");
   checkFile("src/game/content/registry.js");

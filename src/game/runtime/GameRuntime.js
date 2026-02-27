@@ -12,6 +12,7 @@ import { getContentPack } from "../content/registry.js";
 import { isLikelyTouchDevice } from "../utils/device.js";
 import { lerpAngle } from "../utils/math.js";
 import { disposeMeshTree } from "../utils/threeUtils.js";
+import { RUNTIME_TUNING } from "./config/runtimeTuning.js";
 
 export class GameRuntime {
   constructor(mount, options = {}) {
@@ -119,6 +120,7 @@ export class GameRuntime {
       frameCount: 0,
       fps: 0
     };
+    this.hudRefreshClock = 0;
 
     this.socket = null;
     this.socketEndpoint = null;
@@ -128,12 +130,14 @@ export class GameRuntime {
     this.remotePlayers = new Map();
     this.remoteSyncClock = 0;
     this.chatBubbleLifetimeMs = 4200;
-    this.chatLogMaxEntries = 36;
+    this.chatLogMaxEntries = RUNTIME_TUNING.CHAT_LOG_MAX_ENTRIES;
     this.chatLogEl = document.getElementById("chat-log");
     this.chatInputEl = document.getElementById("chat-input");
     this.chatSendEl = document.getElementById("chat-send");
     this.lastLocalChatEcho = "";
     this.lastLocalChatEchoAt = 0;
+    this.lastSystemChatNotice = "";
+    this.lastSystemChatNoticeAt = 0;
 
     this._initialized = false;
   }
@@ -166,7 +170,7 @@ export class GameRuntime {
       z: this.playerPosition.z,
       fps: 0
     });
-    this.appendChatLine("", "Chat ready", "system");
+    this.appendSystemNotice("chat-ready", "Chat ready");
 
     this.loop();
   }
@@ -458,7 +462,7 @@ export class GameRuntime {
     const count = this.mobileEnabled
       ? Math.max(6, Math.round(baseCount * mobileCountScale))
       : baseCount;
-    const area = Math.max(1000, Number(cloudConfig.area) || 9000);
+    const area = Math.max(RUNTIME_TUNING.CLOUD_MIN_AREA, Number(cloudConfig.area) || 9000);
     const halfArea = area * 0.5;
     const minScale = Number(cloudConfig.minScale) || 28;
     const maxScale = Number(cloudConfig.maxScale) || 66;
@@ -1106,6 +1110,10 @@ export class GameRuntime {
     if (!endpoint) {
       this.networkConnected = false;
       this.hud.setStatus(this.getStatusText());
+      this.appendSystemNotice(
+        "server-missing",
+        "Realtime server not set. Local chat only."
+      );
       return;
     }
 
@@ -1123,6 +1131,7 @@ export class GameRuntime {
       this.networkConnected = true;
       this.localPlayerId = socket.id;
       this.hud.setStatus(this.getStatusText());
+      this.appendSystemNotice("server-connected", "Realtime server connected.");
     });
 
     socket.on("disconnect", () => {
@@ -1131,11 +1140,13 @@ export class GameRuntime {
       this.clearRemotePlayers();
       this.hud.setStatus(this.getStatusText());
       this.hud.setPlayers(1);
+      this.appendSystemNotice("server-disconnected", "Realtime server disconnected.");
     });
 
     socket.on("connect_error", () => {
       this.networkConnected = false;
       this.hud.setStatus(this.getStatusText());
+      this.appendSystemNotice("server-connect-error", "Realtime server connection failed.");
     });
 
     socket.on("room:update", (room) => {
@@ -1425,7 +1436,8 @@ export class GameRuntime {
     if (senderId && senderId === this.localPlayerId) {
       this.localPlayerName = senderName;
       const elapsed = performance.now() - this.lastLocalChatEchoAt;
-      const isRecentEcho = this.lastLocalChatEcho === signature && elapsed < 6000;
+      const isRecentEcho =
+        this.lastLocalChatEcho === signature && elapsed < RUNTIME_TUNING.CHAT_ECHO_DEDUP_MS;
       if (!isRecentEcho) {
         this.appendChatLine(senderName, text, "self");
       }
@@ -1455,6 +1467,22 @@ export class GameRuntime {
     this.setTextLabel(remote.chatLabel, text, "chat");
     remote.chatLabel.visible = true;
     remote.chatExpireAt = performance.now() + this.chatBubbleLifetimeMs;
+  }
+
+  appendSystemNotice(key, text) {
+    const now = performance.now();
+    if (
+      this.lastSystemChatNotice === key &&
+      now - this.lastSystemChatNoticeAt < RUNTIME_TUNING.CHAT_SYSTEM_DEDUP_MS
+    ) {
+      return false;
+    }
+    const appended = this.appendChatLine("", text, "system");
+    if (appended) {
+      this.lastSystemChatNotice = key;
+      this.lastSystemChatNoticeAt = now;
+    }
+    return appended;
   }
 
   appendChatLine(name, text, type = "remote") {
@@ -1687,15 +1715,25 @@ export class GameRuntime {
   }
 
   updateHud(delta) {
+    if (!this.hud.enabled) {
+      return;
+    }
+
     const fpsState = this.fpsState;
     fpsState.sampleTime += delta;
     fpsState.frameCount += 1;
 
-    if (fpsState.sampleTime >= 0.5) {
+    if (fpsState.sampleTime >= RUNTIME_TUNING.HUD_FPS_SAMPLE_SECONDS) {
       fpsState.fps = fpsState.frameCount / fpsState.sampleTime;
       fpsState.sampleTime = 0;
       fpsState.frameCount = 0;
     }
+
+    this.hudRefreshClock += delta;
+    if (this.hudRefreshClock < RUNTIME_TUNING.HUD_REFRESH_INTERVAL_SECONDS) {
+      return;
+    }
+    this.hudRefreshClock = 0;
 
     const localPlayer = this.networkConnected ? 1 : 0;
     this.hud.update({
