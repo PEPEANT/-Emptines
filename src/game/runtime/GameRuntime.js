@@ -92,6 +92,7 @@ export class GameRuntime {
     this.sunLight = null;
     this.ground = null;
     this.groundUnderside = null;
+    this.boundaryGroup = null;
     this.beach = null;
     this.shoreFoam = null;
     this.shoreWetBand = null;
@@ -281,6 +282,7 @@ export class GameRuntime {
     this.groundUnderside.receiveShadow = false;
     this.scene.add(this.groundUnderside);
 
+    this.setupBoundaryWalls(world.boundary);
     this.setupBeachLayer(world.beach, world.ocean);
     this.setupOceanLayer(world.ocean);
 
@@ -521,6 +523,60 @@ export class GameRuntime {
         cloud.mesh.position.z = cloud.halfArea;
       }
     }
+  }
+
+  clearBoundaryWalls() {
+    if (!this.boundaryGroup) {
+      return;
+    }
+    this.scene.remove(this.boundaryGroup);
+    disposeMeshTree(this.boundaryGroup);
+    this.boundaryGroup = null;
+  }
+
+  setupBoundaryWalls(config = {}) {
+    this.clearBoundaryWalls();
+    if (!config?.enabled) {
+      return;
+    }
+
+    const halfExtent = Math.max(20, Number(config.halfExtent) || GAME_CONSTANTS.WORLD_LIMIT);
+    const height = Math.max(4, Number(config.height) || 14);
+    const thickness = Math.max(0.4, Number(config.thickness) || 2.2);
+    const span = halfExtent * 2 + thickness * 2;
+
+    const material = new THREE.MeshStandardMaterial({
+      color: config.color ?? 0x6f757d,
+      roughness: Number(config.roughness) || 0.82,
+      metalness: Number(config.metalness) || 0.03,
+      emissive: config.emissive ?? 0x20252a,
+      emissiveIntensity: Number(config.emissiveIntensity) || 0.09
+    });
+
+    const wallXGeometry = new THREE.BoxGeometry(thickness, height, span);
+    const wallZGeometry = new THREE.BoxGeometry(span, height, thickness);
+    const group = new THREE.Group();
+
+    const createWall = (geometry, x, y, z) => {
+      const wall = new THREE.Mesh(geometry, material);
+      wall.position.set(x, y, z);
+      wall.castShadow = !this.mobileEnabled;
+      wall.receiveShadow = true;
+      wall.frustumCulled = false;
+      return wall;
+    };
+
+    const y = height * 0.5;
+    group.add(
+      createWall(wallXGeometry, halfExtent + thickness * 0.5, y, 0),
+      createWall(wallXGeometry, -halfExtent - thickness * 0.5, y, 0),
+      createWall(wallZGeometry, 0, y, halfExtent + thickness * 0.5),
+      createWall(wallZGeometry, 0, y, -halfExtent - thickness * 0.5)
+    );
+
+    group.renderOrder = 5;
+    this.boundaryGroup = group;
+    this.scene.add(this.boundaryGroup);
   }
 
   clearBeachLayer() {
@@ -1664,6 +1720,7 @@ export class GameRuntime {
     }
 
     this.setupCloudLayer();
+    this.setupBoundaryWalls(this.worldContent.boundary);
     this.setupBeachLayer(this.worldContent.beach, this.worldContent.ocean);
     this.setupOceanLayer(this.worldContent.ocean);
     this.setupPostProcessing();

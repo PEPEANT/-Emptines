@@ -57,7 +57,7 @@ function main() {
     }
 
     const oceanWidth = numberOr(ocean.width, 0);
-    if (oceanWidth < 1000) {
+    if (oceanWidth < 300) {
       warn(`ocean width is very small (${oceanWidth}).`);
     } else {
       note(`ocean width looks valid (${oceanWidth}).`);
@@ -75,7 +75,7 @@ function main() {
 
   if (beach.enabled) {
     const beachWidth = numberOr(beach.width, 0);
-    if (beachWidth < 220) {
+    if (beachWidth < 80) {
       warn(`beach width is small (${beachWidth}). It may be hard to see.`);
     } else {
       note(`beach width looks valid (${beachWidth}).`);
