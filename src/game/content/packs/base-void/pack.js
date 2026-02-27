@@ -75,6 +75,22 @@ export const BASE_VOID_PACK = {
       undersideEmissiveIntensity: 0.34,
       undersideOffsetY: -0.12
     },
+    ocean: {
+      enabled: true,
+      width: 120000,
+      depth: 220000,
+      positionX: 60000,
+      positionY: 0.05,
+      positionZ: 0,
+      normalTextureUrl: "/assets/graphics/world/textures/oss-water/waternormals.jpg",
+      normalRepeatX: 20,
+      normalRepeatY: 20,
+      color: 0x2f8ed9,
+      sunColor: 0xffffff,
+      opacity: 0.82,
+      distortionScale: 2.2,
+      timeScale: 0.33
+    },
     originMarker: {
       radiusTop: 0.4,
       radiusBottom: 0.4,

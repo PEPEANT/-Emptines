@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { io } from "socket.io-client";
 import { Sky } from "three/addons/objects/Sky.js";
+import { Water } from "three/addons/objects/Water.js";
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
@@ -87,6 +88,7 @@ export class GameRuntime {
     this.sunLight = null;
     this.ground = null;
     this.groundUnderside = null;
+    this.ocean = null;
     this.handView = null;
     this.handSwayAmplitude = Number(this.handContent.swayAmplitude) || 0.012;
     this.handSwayFrequency = Number(this.handContent.swayFrequency) || 0.0042;
@@ -271,6 +273,8 @@ export class GameRuntime {
     this.groundUnderside.receiveShadow = false;
     this.scene.add(this.groundUnderside);
 
+    this.setupOceanLayer(world.ocean);
+
     const marker = world.originMarker;
     const originMarker = new THREE.Mesh(
       new THREE.CylinderGeometry(
@@ -421,6 +425,87 @@ export class GameRuntime {
       } else if (cloud.mesh.position.z < -cloud.halfArea) {
         cloud.mesh.position.z = cloud.halfArea;
       }
+    }
+  }
+
+  clearOceanLayer() {
+    if (!this.ocean) {
+      return;
+    }
+    const normalSampler = this.ocean.material?.uniforms?.normalSampler?.value;
+    normalSampler?.dispose?.();
+    this.scene.remove(this.ocean);
+    this.ocean.geometry?.dispose?.();
+    this.ocean.material?.dispose?.();
+    this.ocean = null;
+  }
+
+  setupOceanLayer(config = {}) {
+    this.clearOceanLayer();
+    if (!config?.enabled) {
+      return;
+    }
+
+    const width = Math.max(2000, Number(config.width) || 120000);
+    const depth = Math.max(2000, Number(config.depth) || 220000);
+    const normalMapUrl =
+      String(config.normalTextureUrl ?? "").trim() ||
+      "/assets/graphics/world/textures/oss-water/waternormals.jpg";
+    const normalMap = this.textureLoader.load(normalMapUrl);
+    normalMap.wrapS = THREE.RepeatWrapping;
+    normalMap.wrapT = THREE.RepeatWrapping;
+    normalMap.repeat.set(Number(config.normalRepeatX) || 20, Number(config.normalRepeatY) || 20);
+    normalMap.anisotropy = this.mobileEnabled ? 2 : 4;
+
+    const water = new Water(new THREE.PlaneGeometry(width, depth), {
+      textureWidth: this.mobileEnabled ? 512 : 1024,
+      textureHeight: this.mobileEnabled ? 512 : 1024,
+      waterNormals: normalMap,
+      sunDirection: this.sunLight
+        ? this.sunLight.position.clone().normalize()
+        : new THREE.Vector3(0.4, 0.8, 0.2),
+      sunColor: config.sunColor ?? 0xffffff,
+      waterColor: config.color ?? 0x2f8ed9,
+      distortionScale: Number(config.distortionScale) || 2.2,
+      fog: Boolean(this.scene.fog),
+      alpha: Number(config.opacity) || 0.82,
+      side: THREE.DoubleSide
+    });
+
+    water.rotation.x = -Math.PI / 2;
+    water.position.set(
+      Number(config.positionX) || 60000,
+      Number(config.positionY) || 0.05,
+      Number(config.positionZ) || 0
+    );
+    water.receiveShadow = false;
+    water.userData.timeScale = Number(config.timeScale) || 0.33;
+    water.userData.basePositionY = water.position.y;
+    water.userData.bobAmplitude = Number(config.bobAmplitude) || 0.05;
+    water.userData.bobFrequency = Number(config.bobFrequency) || 0.45;
+    water.userData.elapsed = 0;
+
+    this.ocean = water;
+    this.scene.add(this.ocean);
+  }
+
+  updateOcean(delta) {
+    if (!this.ocean) {
+      return;
+    }
+    const uniforms = this.ocean.material?.uniforms;
+    if (!uniforms?.time) {
+      return;
+    }
+    const timeScale = Number(this.ocean.userData.timeScale) || 0.33;
+    uniforms.time.value += delta * timeScale;
+
+    this.ocean.userData.elapsed = (Number(this.ocean.userData.elapsed) || 0) + delta;
+    const amplitude = Number(this.ocean.userData.bobAmplitude) || 0;
+    const frequency = Number(this.ocean.userData.bobFrequency) || 0;
+    const baseY = Number(this.ocean.userData.basePositionY) || 0;
+    if (amplitude > 0 && frequency > 0) {
+      this.ocean.position.y = baseY + Math.sin(this.ocean.userData.elapsed * frequency) * amplitude;
     }
   }
 
@@ -880,6 +965,7 @@ export class GameRuntime {
   tick(delta) {
     this.updateMovement(delta);
     this.updateCloudLayer(delta);
+    this.updateOcean(delta);
     this.updateRemotePlayers(delta);
     this.emitLocalSync(delta);
     this.updateDynamicResolution(delta);
@@ -1289,6 +1375,7 @@ export class GameRuntime {
     }
 
     this.setupCloudLayer();
+    this.setupOceanLayer(this.worldContent.ocean);
     this.setupPostProcessing();
   }
 

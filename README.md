@@ -93,6 +93,9 @@ Socket server health endpoints:
 - Grass PBR textures: ambientCG `Grass001` (CC0)
   - Source: https://ambientcg.com/view?id=Grass001
   - License: https://docs.ambientcg.com/license/
+- Water normal map: three.js examples `waternormals.jpg` (MIT)
+  - Source: https://github.com/mrdoob/three.js/blob/dev/examples/textures/waternormals.jpg
+  - License: https://github.com/mrdoob/three.js/blob/dev/LICENSE
 
 ## Project Layout
 
