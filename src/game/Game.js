@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { Sky } from "three/addons/objects/Sky.js";
 import { EnemyManager } from "./EnemyManager.js";
 import { WeaponSystem } from "./WeaponSystem.js";
 import { HUD } from "./HUD.js";
@@ -51,6 +52,7 @@ export class Game {
     this.mount = mount;
     this.clock = new THREE.Clock();
     this.chat = options.chat ?? null;
+    const likelyTouchDevice = isLikelyTouchDevice();
     const initialPixelRatio = Math.min(window.devicePixelRatio || 1, 2);
 
     this.scene = new THREE.Scene();
@@ -64,7 +66,10 @@ export class Game {
       500
     );
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: !likelyTouchDevice,
+      powerPreference: "high-performance"
+    });
     this.maxPixelRatio = initialPixelRatio;
     this.currentPixelRatio = initialPixelRatio;
     this.renderer.setPixelRatio(this.currentPixelRatio);
@@ -134,6 +139,8 @@ export class Game {
     this.combatWorldInitialized = false;
     this.deconstructGround = null;
     this.deconstructCharacter = null;
+    this.skyDome = null;
+    this.skySun = new THREE.Vector3();
 
     this.isRunning = false;
     this.isGameOver = false;
@@ -163,7 +170,7 @@ export class Game {
       typeof this.renderer.domElement.requestPointerLock === "function";
     this.allowUnlockedLook = !this.pointerLockSupported;
     this.mouseLookEnabled = this.allowUnlockedLook;
-    this.mobileEnabled = isLikelyTouchDevice();
+    this.mobileEnabled = likelyTouchDevice;
     if (this.mobileEnabled) {
       this.allowUnlockedLook = true;
       this.mouseLookEnabled = true;
@@ -314,18 +321,16 @@ export class Game {
     };
 
     return {
-      groundMap: configureColorTexture("/assets/graphics/world/textures/ground.svg", 26, 26),
+      groundMap: configureColorTexture("/assets/graphics/world/textures/ground.svg", 420, 420),
       concreteMap: configureColorTexture("/assets/graphics/world/textures/concrete.svg", 1.4, 1.4),
       metalMap: configureColorTexture("/assets/graphics/world/textures/metal.svg", 1.2, 1.2),
       enemyMap: configureColorTexture("/assets/graphics/world/textures/metal.svg", 1, 1),
-      skyMap: configureColorTexture("/assets/graphics/world/sky/sky.svg", 1, 1),
       muzzleFlashMap: configureSpriteTexture("/assets/graphics/world/sprites/muzzleflash.svg"),
       sparkMap: configureSpriteTexture("/assets/graphics/world/sprites/spark.svg")
     };
   }
 
   setupWorld() {
-    this.setupSky();
     const hemiLight = new THREE.HemisphereLight(0xb9e4ff, 0x7cbf68, 1.28);
     this.scene.add(hemiLight);
 
@@ -347,6 +352,7 @@ export class Game {
     const fill = new THREE.DirectionalLight(0xb7e0ff, 0.48);
     fill.position.set(-72, 56, -32);
     this.scene.add(fill);
+    this.setupSky({ sunDirection: sun.position.clone().normalize() });
     this.buildDeconstructScaffold();
   }
 
@@ -392,14 +398,17 @@ export class Game {
 
   buildDeconstructScaffold() {
     if (!this.deconstructGround) {
+      const groundMap = this.graphics.groundMap.clone();
+      groundMap.needsUpdate = true;
       this.deconstructGround = new THREE.Mesh(
         new THREE.PlaneGeometry(160000, 160000, 1, 1),
         new THREE.MeshStandardMaterial({
-          color: 0x3eaa57,
-          roughness: 1,
+          color: 0x8ed084,
+          map: groundMap,
+          roughness: 0.96,
           metalness: 0,
           emissive: 0x1f6a39,
-          emissiveIntensity: 0.16
+          emissiveIntensity: 0.11
         })
       );
       this.deconstructGround.rotation.x = -Math.PI / 2;
@@ -422,6 +431,8 @@ export class Game {
         })
       );
       body.position.set(0, 0.95, -2.2);
+      body.castShadow = true;
+      body.receiveShadow = true;
 
       const head = new THREE.Mesh(
         new THREE.SphereGeometry(0.22, 12, 12),
@@ -433,9 +444,10 @@ export class Game {
         })
       );
       head.position.set(0, 1.62, -2.2);
+      head.castShadow = true;
+      head.receiveShadow = true;
 
       group.add(body, head);
-      group.castShadow = true;
       this.deconstructCharacter = group;
       this.scene.add(this.deconstructCharacter);
     } else {
@@ -567,13 +579,25 @@ export class Game {
     this.camera.rotation.order = "YXZ";
   }
 
-  setupSky() {
-    const skyMaterial = new THREE.MeshBasicMaterial({
-      color: 0x9ad6ff,
-      side: THREE.BackSide
-    });
-    const sky = new THREE.Mesh(new THREE.SphereGeometry(1400, 32, 20), skyMaterial);
-    this.scene.add(sky);
+  setupSky(options = {}) {
+    if (this.skyDome) {
+      this.scene.remove(this.skyDome);
+    }
+
+    const sky = new Sky();
+    sky.scale.setScalar(450000);
+    const uniforms = sky.material.uniforms;
+    uniforms.turbidity.value = 3.1;
+    uniforms.rayleigh.value = 2.4;
+    uniforms.mieCoefficient.value = 0.005;
+    uniforms.mieDirectionalG.value = 0.79;
+
+    const sunDirection = options.sunDirection ?? new THREE.Vector3(0.35, 0.8, 0.22).normalize();
+    this.skySun.copy(sunDirection).multiplyScalar(450000);
+    uniforms.sunPosition.value.copy(this.skySun);
+
+    this.skyDome = sky;
+    this.scene.add(this.skyDome);
   }
 
   setupObjectives() {
