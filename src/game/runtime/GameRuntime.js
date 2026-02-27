@@ -124,7 +124,6 @@ export class GameRuntime {
     this.scene.add(this.camera);
 
     this.setupWorld();
-    this.setupHands();
     this.bindEvents();
     this.connectNetwork();
 
@@ -743,11 +742,6 @@ export class GameRuntime {
     this.camera.position.copy(this.playerPosition);
     this.camera.rotation.y = this.yaw;
     this.camera.rotation.x = this.pitch;
-
-    if (this.handView) {
-      const sway = Math.sin(performance.now() * this.handSwayFrequency) * this.handSwayAmplitude;
-      this.handView.position.y = sway;
-    }
   }
 
   updateRemotePlayers(delta) {
