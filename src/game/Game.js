@@ -13,7 +13,7 @@ const PLAYER_SPEED = 8.4;
 const PLAYER_SPRINT = 12.6;
 const PLAYER_GRAVITY = -22;
 const JUMP_FORCE = 9.2;
-const WORLD_LIMIT = 5000;
+const WORLD_LIMIT = 20000;
 const PLAYER_RADIUS = 0.34;
 const POINTER_LOCK_FALLBACK_MS = 900;
 const MOBILE_LOOK_SENSITIVITY_X = 0.0032;
@@ -51,10 +51,11 @@ export class Game {
     this.mount = mount;
     this.clock = new THREE.Clock();
     this.chat = options.chat ?? null;
+    const initialPixelRatio = Math.min(window.devicePixelRatio || 1, 2);
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x8ecfff);
-    this.scene.fog = new THREE.Fog(0x8ecfff, 260, 1300);
+    this.scene.background = new THREE.Color(0x9fd9ff);
+    this.scene.fog = new THREE.Fog(0x9fd9ff, 420, 2600);
 
     this.camera = new THREE.PerspectiveCamera(
       DEFAULT_FOV,
@@ -64,7 +65,9 @@ export class Game {
     );
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.maxPixelRatio = initialPixelRatio;
+    this.currentPixelRatio = initialPixelRatio;
+    this.renderer.setPixelRatio(this.currentPixelRatio);
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -165,6 +168,13 @@ export class Game {
       this.allowUnlockedLook = true;
       this.mouseLookEnabled = true;
     }
+    this.dynamicResolution = {
+      enabled: true,
+      minRatio: this.mobileEnabled ? 0.7 : 0.85,
+      sampleTime: 0,
+      frameCount: 0,
+      cooldown: 0
+    };
 
     this.mobileControlsEl = document.getElementById("mobile-controls");
     this.mobileJoystickEl = document.getElementById("mobile-joystick");
@@ -322,11 +332,14 @@ export class Game {
     const sun = new THREE.DirectionalLight(0xffffff, 1.36);
     sun.position.set(68, 120, 38);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.left = -360;
-    sun.shadow.camera.right = 360;
-    sun.shadow.camera.top = 360;
-    sun.shadow.camera.bottom = -360;
+    const shadowMapSize = this.mobileEnabled ? 1024 : 1536;
+    sun.shadow.mapSize.set(shadowMapSize, shadowMapSize);
+    sun.shadow.camera.left = -280;
+    sun.shadow.camera.right = 280;
+    sun.shadow.camera.top = 280;
+    sun.shadow.camera.bottom = -280;
+    sun.shadow.camera.near = 1;
+    sun.shadow.camera.far = 420;
     sun.shadow.bias = -0.00018;
     sun.shadow.normalBias = 0.02;
     this.scene.add(sun);
@@ -380,13 +393,13 @@ export class Game {
   buildDeconstructScaffold() {
     if (!this.deconstructGround) {
       this.deconstructGround = new THREE.Mesh(
-        new THREE.PlaneGeometry(12000, 12000, 1, 1),
+        new THREE.PlaneGeometry(160000, 160000, 1, 1),
         new THREE.MeshStandardMaterial({
-          color: 0x2f8f45,
+          color: 0x3eaa57,
           roughness: 1,
           metalness: 0,
-          emissive: 0x1a5b2c,
-          emissiveIntensity: 0.14
+          emissive: 0x1f6a39,
+          emissiveIntensity: 0.16
         })
       );
       this.deconstructGround.rotation.x = -Math.PI / 2;
@@ -3039,12 +3052,69 @@ export class Game {
   loop() {
     const delta = Math.min(this.clock.getDelta(), 0.05);
     this.tick(delta);
+    this.updateDynamicResolution(delta);
     this.renderer.render(this.scene, this.camera);
     requestAnimationFrame(() => this.loop());
   }
 
+  updateDynamicResolution(delta) {
+    const config = this.dynamicResolution;
+    if (!config || !config.enabled || !Number.isFinite(delta) || delta <= 0) {
+      return;
+    }
+
+    if (!this.isRunning || this.isGameOver) {
+      config.sampleTime = 0;
+      config.frameCount = 0;
+      return;
+    }
+
+    config.sampleTime += delta;
+    config.frameCount += 1;
+    config.cooldown = Math.max(0, config.cooldown - delta);
+
+    if (config.sampleTime < 0.8) {
+      return;
+    }
+
+    const fps = config.frameCount / config.sampleTime;
+    config.sampleTime = 0;
+    config.frameCount = 0;
+
+    if (config.cooldown > 0) {
+      return;
+    }
+
+    const floorRatio = Math.max(
+      0.5,
+      Math.min(config.minRatio, this.maxPixelRatio)
+    );
+    let targetRatio = this.currentPixelRatio;
+
+    if (fps < 50 && this.currentPixelRatio > floorRatio) {
+      targetRatio = Math.max(floorRatio, this.currentPixelRatio - 0.1);
+      config.cooldown = 0.8;
+    } else if (fps > 58 && this.currentPixelRatio < this.maxPixelRatio) {
+      targetRatio = Math.min(this.maxPixelRatio, this.currentPixelRatio + 0.05);
+      config.cooldown = 1.5;
+    } else {
+      config.cooldown = 0.4;
+    }
+
+    if (Math.abs(targetRatio - this.currentPixelRatio) < 0.01) {
+      return;
+    }
+
+    this.currentPixelRatio = Number(targetRatio.toFixed(2));
+    this.renderer.setPixelRatio(this.currentPixelRatio);
+    this.renderer.setSize(window.innerWidth, window.innerHeight, false);
+  }
+
   onResize() {
     this.mobileEnabled = isLikelyTouchDevice();
+    if (this.dynamicResolution) {
+      this.dynamicResolution.minRatio = this.mobileEnabled ? 0.7 : 0.85;
+    }
     if (this.mobileEnabled && !this._mobileBound) {
       this.setupMobileControls();
     }
