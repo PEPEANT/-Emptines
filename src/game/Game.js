@@ -77,8 +77,10 @@ export class Game {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.06;
-    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.enabled = !likelyTouchDevice;
+    this.renderer.shadowMap.autoUpdate = !likelyTouchDevice;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.mobileEnabled = likelyTouchDevice;
 
     this.textureLoader = new THREE.TextureLoader();
     this.graphics = this.loadGraphics();
@@ -141,6 +143,7 @@ export class Game {
     this.deconstructCharacter = null;
     this.skyDome = null;
     this.skySun = new THREE.Vector3();
+    this.sunLight = null;
 
     this.isRunning = false;
     this.isGameOver = false;
@@ -177,7 +180,7 @@ export class Game {
     }
     this.dynamicResolution = {
       enabled: true,
-      minRatio: this.mobileEnabled ? 0.7 : 0.85,
+      minRatio: this.mobileEnabled ? 0.65 : 0.85,
       sampleTime: 0,
       frameCount: 0,
       cooldown: 0
@@ -303,6 +306,7 @@ export class Game {
 
   loadGraphics() {
     const maxAnisotropy = this.renderer.capabilities.getMaxAnisotropy();
+    const targetAnisotropy = this.mobileEnabled ? Math.min(4, maxAnisotropy) : maxAnisotropy;
 
     const configureColorTexture = (url, repeatX = 1, repeatY = 1) => {
       const texture = this.textureLoader.load(url);
@@ -310,7 +314,7 @@ export class Game {
       texture.wrapT = THREE.RepeatWrapping;
       texture.repeat.set(repeatX, repeatY);
       texture.colorSpace = THREE.SRGBColorSpace;
-      texture.anisotropy = maxAnisotropy;
+      texture.anisotropy = targetAnisotropy;
       return texture;
     };
 
@@ -337,8 +341,7 @@ export class Game {
     const sun = new THREE.DirectionalLight(0xffffff, 1.36);
     sun.position.set(68, 120, 38);
     sun.castShadow = true;
-    const shadowMapSize = this.mobileEnabled ? 1024 : 1536;
-    sun.shadow.mapSize.set(shadowMapSize, shadowMapSize);
+    sun.shadow.mapSize.set(1536, 1536);
     sun.shadow.camera.left = -280;
     sun.shadow.camera.right = 280;
     sun.shadow.camera.top = 280;
@@ -348,12 +351,32 @@ export class Game {
     sun.shadow.bias = -0.00018;
     sun.shadow.normalBias = 0.02;
     this.scene.add(sun);
+    this.sunLight = sun;
+    this.applyQualityProfile();
 
     const fill = new THREE.DirectionalLight(0xb7e0ff, 0.48);
     fill.position.set(-72, 56, -32);
     this.scene.add(fill);
     this.setupSky({ sunDirection: sun.position.clone().normalize() });
     this.buildDeconstructScaffold();
+  }
+
+  applyQualityProfile() {
+    const shadowEnabled = !this.mobileEnabled;
+    this.renderer.shadowMap.enabled = shadowEnabled;
+    this.renderer.shadowMap.autoUpdate = shadowEnabled;
+
+    if (this.sunLight) {
+      this.sunLight.castShadow = shadowEnabled;
+      const shadowMapSize = this.mobileEnabled ? 1024 : 1536;
+      if (
+        this.sunLight.shadow.mapSize.x !== shadowMapSize ||
+        this.sunLight.shadow.mapSize.y !== shadowMapSize
+      ) {
+        this.sunLight.shadow.mapSize.set(shadowMapSize, shadowMapSize);
+        this.sunLight.shadow.needsUpdate = true;
+      }
+    }
   }
 
   setWorldPhase(phase) {
@@ -398,13 +421,11 @@ export class Game {
 
   buildDeconstructScaffold() {
     if (!this.deconstructGround) {
-      const groundMap = this.graphics.groundMap.clone();
-      groundMap.needsUpdate = true;
       this.deconstructGround = new THREE.Mesh(
         new THREE.PlaneGeometry(160000, 160000, 1, 1),
         new THREE.MeshStandardMaterial({
           color: 0x8ed084,
-          map: groundMap,
+          map: this.graphics.groundMap,
           roughness: 0.96,
           metalness: 0,
           emissive: 0x1f6a39,
@@ -581,7 +602,18 @@ export class Game {
 
   setupSky(options = {}) {
     if (this.skyDome) {
+      const oldMaterial = this.skyDome.material;
+      const oldGeometry = this.skyDome.geometry;
       this.scene.remove(this.skyDome);
+      oldGeometry?.dispose?.();
+      if (Array.isArray(oldMaterial)) {
+        for (const material of oldMaterial) {
+          material?.dispose?.();
+        }
+      } else {
+        oldMaterial?.dispose?.();
+      }
+      this.skyDome = null;
     }
 
     const sky = new Sky();
@@ -3135,9 +3167,13 @@ export class Game {
   }
 
   onResize() {
+    const wasMobile = this.mobileEnabled;
     this.mobileEnabled = isLikelyTouchDevice();
+    if (this.mobileEnabled !== wasMobile) {
+      this.applyQualityProfile();
+    }
     if (this.dynamicResolution) {
-      this.dynamicResolution.minRatio = this.mobileEnabled ? 0.7 : 0.85;
+      this.dynamicResolution.minRatio = this.mobileEnabled ? 0.65 : 0.85;
     }
     if (this.mobileEnabled && !this._mobileBound) {
       this.setupMobileControls();

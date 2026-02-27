@@ -2,7 +2,10 @@
 
 function setText(el, value) {
   if (el) {
-    el.textContent = value;
+    const nextValue = String(value);
+    if (el.textContent !== nextValue) {
+      el.textContent = nextValue;
+    }
   }
 }
 
@@ -44,6 +47,8 @@ export class HUD {
     this.statusTimer = 0;
     this.damageOverlayTimeout = null;
     this.hitmarkerTimeout = null;
+    this.lastHealthBarWidth = "";
+    this.lastHealthBarColor = "";
   }
 
   update(delta, state) {
@@ -64,13 +69,20 @@ export class HUD {
 
     const hp = Math.max(0, Math.min(100, state.health));
     if (this.healthBarEl) {
-      this.healthBarEl.style.width = `${hp}%`;
+      const width = `${hp}%`;
+      if (this.lastHealthBarWidth !== width) {
+        this.healthBarEl.style.width = width;
+        this.lastHealthBarWidth = width;
+      }
+      let nextColor = "var(--ui-ok)";
       if (hp <= 25) {
-        this.healthBarEl.style.background = "#ff4444";
+        nextColor = "#ff4444";
       } else if (hp <= 50) {
-        this.healthBarEl.style.background = "var(--ui-alert)";
-      } else {
-        this.healthBarEl.style.background = "var(--ui-ok)";
+        nextColor = "var(--ui-alert)";
+      }
+      if (this.lastHealthBarColor !== nextColor) {
+        this.healthBarEl.style.background = nextColor;
+        this.lastHealthBarColor = nextColor;
       }
     }
 
