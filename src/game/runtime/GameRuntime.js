@@ -938,14 +938,6 @@ export class GameRuntime {
     shrineMiddleBeam.castShadow = !this.mobileEnabled;
     shrineMiddleBeam.receiveShadow = true;
 
-    const shrineLowerBeam = new THREE.Mesh(
-      new THREE.BoxGeometry(3.86, 0.24, 0.34),
-      shrineBeamMaterial
-    );
-    shrineLowerBeam.position.set(0, 2.5, 0);
-    shrineLowerBeam.castShadow = !this.mobileEnabled;
-    shrineLowerBeam.receiveShadow = true;
-
     const shrineRoofCore = new THREE.Mesh(
       new THREE.BoxGeometry(5.36, 0.18, 1.38),
       shrineTileMaterial
@@ -1018,7 +1010,6 @@ export class GameRuntime {
       shrineRightPost,
       shrineTopBeam,
       shrineMiddleBeam,
-      shrineLowerBeam,
       shrineRoofCore,
       shrineRoofFront,
       shrineRoofRidge,
@@ -1727,7 +1718,7 @@ export class GameRuntime {
   }
 
   canUsePointerLock() {
-    return this.canMovePlayer() && !this.portalTransitioning && this.activeTool !== "chalk";
+    return this.canMovePlayer() && !this.portalTransitioning;
   }
 
   updateHubFlow(delta) {
@@ -3206,6 +3197,7 @@ export class GameRuntime {
     });
 
     this.renderer.domElement.addEventListener("click", () => {
+      if (this.canDrawChalk()) return;
       this.tryPointerLock();
     });
     this.renderer.domElement.addEventListener("mousedown", (event) => {
