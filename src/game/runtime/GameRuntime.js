@@ -47,8 +47,6 @@ export class GameRuntime {
     this.worldContent = this.contentPack.world;
     this.handContent = this.contentPack.hands;
     this.networkContent = this.contentPack.network;
-    this.networkSyncInterval =
-      Number(this.networkContent.syncInterval) || GAME_CONSTANTS.REMOTE_SYNC_INTERVAL;
     this.remoteLerpSpeed =
       Number(this.networkContent.remoteLerpSpeed) || GAME_CONSTANTS.REMOTE_LERP_SPEED;
     this.remoteStaleTimeoutMs =
@@ -172,6 +170,16 @@ export class GameRuntime {
     this.pendingPlayerNameSync = false;
     this.remotePlayers = new Map();
     this.remoteSyncClock = 0;
+    this.localInputSeq = 0;
+    this.lastAckInputSeq = 0;
+    this.pendingInputQueue = [];
+    this.pendingJumpInput = false;
+    this.lastSentInput = null;
+    this.inputHeartbeatSeconds = 0.22;
+    this.inputSendBaseInterval = 1 / 20;
+    this.netPingTimer = null;
+    this.netPingNonce = 0;
+    this.netPingPending = new Map();
     this.remoteLabelDistanceSq =
       Math.pow(Number(RUNTIME_TUNING.REMOTE_LABEL_MAX_DISTANCE) || 42, 2);
     this.remoteMeshDistanceSq =
@@ -180,8 +188,6 @@ export class GameRuntime {
       Math.pow(Number(RUNTIME_TUNING.REMOTE_FAR_DISTANCE) || 70, 2);
     this.remoteHardCap = Math.max(16, Number(RUNTIME_TUNING.REMOTE_HARD_CAP) || 180);
     this.elapsedSeconds = 0;
-    this.lastSentState = null;
-    this.localSyncMinMoveSq = 0.0025;
     this.localSyncMinYaw = 0.012;
     this.localSyncMinPitch = 0.012;
     this.chatBubbleLifetimeMs = 4200;
@@ -1214,7 +1220,7 @@ export class GameRuntime {
 
   createPortalTimeBillboard() {
     const board = new THREE.Group();
-    board.position.set(0, 4, -10);
+    board.position.set(0, 7, 0);
     board.rotation.y = Math.PI;
 
     const glowBack = new THREE.Mesh(
@@ -1884,8 +1890,8 @@ export class GameRuntime {
 
     context.clearRect(0, 0, width, height);
     const bgGradient = context.createLinearGradient(0, 0, width, height);
-    bgGradient.addColorStop(0, "rgba(6, 16, 28, 0.96)");
-    bgGradient.addColorStop(1, "rgba(8, 24, 39, 0.98)");
+    bgGradient.addColorStop(0, "rgba(6, 16, 28, 0.50)");
+    bgGradient.addColorStop(1, "rgba(8, 24, 39, 0.58)");
     context.fillStyle = bgGradient;
     context.fillRect(0, 0, width, height);
 
@@ -3079,6 +3085,7 @@ export class GameRuntime {
       if (event.code === "Space" && this.onGround) {
         this.verticalVelocity = GAME_CONSTANTS.JUMP_FORCE;
         this.onGround = false;
+        this.pendingJumpInput = true;
       }
     });
 
@@ -3095,6 +3102,7 @@ export class GameRuntime {
       this.mobileLookTouchId = null;
       this.mobileSprintHeld = false;
       this.mobileJumpQueued = false;
+      this.pendingJumpInput = false;
       this.resetMobileMoveInput();
       this.mobileSprintBtnEl?.classList.remove("active");
       this.mobileJumpBtnEl?.classList.remove("active");
@@ -3296,6 +3304,7 @@ export class GameRuntime {
           return;
         }
         this.mobileJumpQueued = true;
+        this.pendingJumpInput = true;
         this.mobileJumpBtnEl.classList.add("active");
       });
       this.mobileJumpBtnEl.addEventListener("pointerup", clearJumpVisual);
@@ -3546,16 +3555,25 @@ export class GameRuntime {
       this.networkConnected = true;
       this.localPlayerId = socket.id;
       this.remoteSyncClock = 0;
-      this.lastSentState = null;
+      this.lastSentInput = null;
+      this.localInputSeq = 0;
+      this.lastAckInputSeq = 0;
+      this.pendingInputQueue.length = 0;
+      this.netPingPending.clear();
       this.hud.setStatus(this.getStatusText());
       this.syncPlayerNameIfConnected();
+      this.startNetworkPing();
     });
 
     socket.on("disconnect", () => {
       this.networkConnected = false;
       this.localPlayerId = null;
       this.remoteSyncClock = 0;
-      this.lastSentState = null;
+      this.lastSentInput = null;
+      this.pendingJumpInput = false;
+      this.pendingInputQueue.length = 0;
+      this.netPingPending.clear();
+      this.stopNetworkPing();
       this.clearRemotePlayers();
       this.hud.setStatus(this.getStatusText());
       this.hud.setPlayers(1);
@@ -3563,6 +3581,7 @@ export class GameRuntime {
 
     socket.on("connect_error", () => {
       this.networkConnected = false;
+      this.stopNetworkPing();
       this.hud.setStatus(this.getStatusText());
     });
 
@@ -3570,13 +3589,65 @@ export class GameRuntime {
       this.handleRoomUpdate(room);
     });
 
-    socket.on("player:sync", (payload) => {
-      this.handleRemoteSync(payload);
+    socket.on("snapshot:world", (payload) => {
+      this.handleWorldSnapshot(payload);
+    });
+
+    socket.on("ack:input", (payload) => {
+      this.handleInputAck(payload);
+    });
+
+    socket.on("net:pong", (payload) => {
+      const id = Math.trunc(Number(payload?.id) || 0);
+      if (!id) {
+        return;
+      }
+      const sentAt = this.netPingPending.get(id);
+      if (!Number.isFinite(sentAt)) {
+        return;
+      }
+      this.netPingPending.delete(id);
+      const rttMs = Math.max(0, performance.now() - sentAt);
+      if (this.socket && this.networkConnected) {
+        this.socket.emit("net:rtt", { rttMs: Math.round(rttMs) });
+      }
     });
 
     socket.on("chat:message", (payload) => {
       this.handleChatMessage(payload);
     });
+  }
+
+  startNetworkPing() {
+    this.stopNetworkPing();
+    if (!this.socket || !this.networkConnected) {
+      return;
+    }
+
+    const sendPing = () => {
+      if (!this.socket || !this.networkConnected) {
+        return;
+      }
+      const id = ++this.netPingNonce;
+      this.netPingPending.set(id, performance.now());
+      if (this.netPingPending.size > 6) {
+        const oldest = this.netPingPending.keys().next().value;
+        if (oldest) {
+          this.netPingPending.delete(oldest);
+        }
+      }
+      this.socket.emit("net:ping", { id, t: Date.now() });
+    };
+
+    sendPing();
+    this.netPingTimer = window.setInterval(sendPing, 5000);
+  }
+
+  stopNetworkPing() {
+    if (this.netPingTimer) {
+      window.clearInterval(this.netPingTimer);
+      this.netPingTimer = null;
+    }
   }
 
   resolveSocketEndpoint() {
@@ -3666,16 +3737,107 @@ export class GameRuntime {
     this.hud.setPlayers(this.remotePlayers.size + localPlayer);
   }
 
-  handleRemoteSync(payload) {
-    const id = String(payload?.id ?? "");
-    if (!id || id === this.localPlayerId) {
+  parsePackedSnapshotState(rawState) {
+    if (!Array.isArray(rawState) || rawState.length < 5) {
+      return null;
+    }
+    return {
+      x: Number(rawState[0]) || 0,
+      y: Number(rawState[1]) || GAME_CONSTANTS.PLAYER_HEIGHT,
+      z: Number(rawState[2]) || 0,
+      yaw: Number(rawState[3]) || 0,
+      pitch: Number(rawState[4]) || 0
+    };
+  }
+
+  handleInputAck(payload = {}) {
+    const ackSeq = Math.max(0, Math.trunc(Number(payload?.seq) || 0));
+    if (!ackSeq || ackSeq <= this.lastAckInputSeq) {
       return;
     }
-    if (!this.remotePlayers.has(id) && this.remotePlayers.size >= this.remoteHardCap) {
+    this.lastAckInputSeq = ackSeq;
+    if (this.pendingInputQueue.length > 0) {
+      this.pendingInputQueue = this.pendingInputQueue.filter((entry) => entry.seq > ackSeq);
+    }
+  }
+
+  applyAuthoritativeSelfState(state, ackSeq) {
+    if (!state || !this.networkConnected || !this.socket) {
       return;
     }
 
-    this.upsertRemotePlayer(id, payload.state ?? null, payload?.name);
+    if (ackSeq > 0) {
+      this.handleInputAck({ seq: ackSeq });
+    }
+
+    const targetY = Math.max(GAME_CONSTANTS.PLAYER_HEIGHT, Number(state.y) || GAME_CONSTANTS.PLAYER_HEIGHT);
+    const dx = (Number(state.x) || 0) - this.playerPosition.x;
+    const dy = targetY - this.playerPosition.y;
+    const dz = (Number(state.z) || 0) - this.playerPosition.z;
+    const errorSq = dx * dx + dy * dy + dz * dz;
+
+    if (errorSq > 25) {
+      this.playerPosition.set(Number(state.x) || 0, targetY, Number(state.z) || 0);
+      this.yaw = Number(state.yaw) || 0;
+      this.pitch = THREE.MathUtils.clamp(Number(state.pitch) || 0, -1.52, 1.52);
+      this.verticalVelocity = 0;
+      this.onGround = targetY <= GAME_CONSTANTS.PLAYER_HEIGHT + 0.001;
+      return;
+    }
+
+    const alpha = errorSq > 1 ? 0.4 : 0.22;
+    this.playerPosition.x += dx * alpha;
+    this.playerPosition.y += dy * alpha;
+    this.playerPosition.z += dz * alpha;
+    this.yaw = lerpAngle(this.yaw, Number(state.yaw) || 0, alpha);
+    this.pitch = THREE.MathUtils.lerp(
+      this.pitch,
+      THREE.MathUtils.clamp(Number(state.pitch) || 0, -1.52, 1.52),
+      alpha
+    );
+
+    if (Math.abs(dy) > 0.35) {
+      this.verticalVelocity = 0;
+    }
+  }
+
+  handleWorldSnapshot(payload) {
+    if (!payload || typeof payload !== "object") {
+      return;
+    }
+
+    const selfState = this.parsePackedSnapshotState(payload?.self?.s);
+    const selfSeq = Math.max(0, Math.trunc(Number(payload?.self?.seq) || 0));
+    if (selfState) {
+      this.applyAuthoritativeSelfState(selfState, selfSeq);
+    } else if (selfSeq > 0) {
+      this.handleInputAck({ seq: selfSeq });
+    }
+
+    const players = Array.isArray(payload?.players) ? payload.players : [];
+    for (const player of players) {
+      const id = String(player?.id ?? "");
+      if (!id || id === this.localPlayerId) {
+        continue;
+      }
+      if (!this.remotePlayers.has(id) && this.remotePlayers.size >= this.remoteHardCap) {
+        continue;
+      }
+
+      const nextState = this.parsePackedSnapshotState(player?.s);
+      const nextName = String(player?.n ?? "").trim();
+      this.upsertRemotePlayer(id, nextState, nextName || null);
+    }
+
+    const gone = Array.isArray(payload?.gone) ? payload.gone : [];
+    for (const idRaw of gone) {
+      const id = String(idRaw ?? "");
+      if (!id || id === this.localPlayerId) {
+        continue;
+      }
+      this.removeRemotePlayer(id);
+    }
+
     const localPlayer = this.networkConnected ? 1 : 0;
     this.hud.setPlayers(this.remotePlayers.size + localPlayer);
   }
@@ -3739,10 +3901,13 @@ export class GameRuntime {
       this.remotePlayers.set(id, remote);
     }
 
-    const nextName = this.formatPlayerName(name);
-    if (nextName !== remote.name) {
-      remote.name = nextName;
-      this.setTextLabel(remote.nameLabel, nextName, "name");
+    const hasName = typeof name === "string" && String(name).trim().length > 0;
+    if (hasName) {
+      const nextName = this.formatPlayerName(name);
+      if (nextName !== remote.name) {
+        remote.name = nextName;
+        this.setTextLabel(remote.nameLabel, nextName, "name");
+      }
     }
 
     if (state) {
@@ -3793,7 +3958,7 @@ export class GameRuntime {
     this.updateHud(delta);
   }
 
-  updateMovement(delta) {
+  getMovementIntent() {
     const movementEnabled = this.canMovePlayer();
     const keyboardForward = movementEnabled
       ? (this.keys.has("KeyW") || this.keys.has("ArrowUp") ? 1 : 0) -
@@ -3809,12 +3974,26 @@ export class GameRuntime {
     const mobileStrafe = movementEnabled && this.mobileEnabled
       ? THREE.MathUtils.clamp(this.mobileMoveVector.x, -1, 1)
       : 0;
-    const keyForward = THREE.MathUtils.clamp(keyboardForward + mobileForward, -1, 1);
-    const keyStrafe = THREE.MathUtils.clamp(keyboardStrafe + mobileStrafe, -1, 1);
-
+    const forward = THREE.MathUtils.clamp(keyboardForward + mobileForward, -1, 1);
+    const strafe = THREE.MathUtils.clamp(keyboardStrafe + mobileStrafe, -1, 1);
     const sprinting =
       movementEnabled &&
       (this.keys.has("ShiftLeft") || this.keys.has("ShiftRight") || this.mobileSprintHeld);
+
+    return {
+      movementEnabled,
+      forward,
+      strafe,
+      sprinting
+    };
+  }
+
+  updateMovement(delta) {
+    const movement = this.getMovementIntent();
+    const movementEnabled = movement.movementEnabled;
+    const keyForward = movement.forward;
+    const keyStrafe = movement.strafe;
+    const sprinting = movement.sprinting;
     const speed = sprinting ? GAME_CONSTANTS.PLAYER_SPRINT : GAME_CONSTANTS.PLAYER_SPEED;
 
     if (keyForward !== 0 || keyStrafe !== 0) {
@@ -4197,69 +4376,87 @@ export class GameRuntime {
       return;
     }
 
+    this.emitInputCommand(delta);
+  }
+
+  emitInputCommand(delta) {
     const crowdSize = this.remotePlayers.size;
     let intervalScale = 1;
     if (crowdSize >= 50) {
-      intervalScale = 1.9;
+      intervalScale = 1.55;
     } else if (crowdSize >= 30) {
-      intervalScale = 1.5;
+      intervalScale = 1.3;
     } else if (crowdSize >= 16) {
-      intervalScale = 1.25;
+      intervalScale = 1.12;
     }
-    const targetInterval = this.networkSyncInterval * intervalScale;
 
+    const targetInterval = this.inputSendBaseInterval * intervalScale;
     this.remoteSyncClock += delta;
     if (this.remoteSyncClock < targetInterval) {
       return;
     }
     this.remoteSyncClock = 0;
 
-    const outboundState = {
-      x: this.playerPosition.x,
-      y: this.playerPosition.y,
-      z: this.playerPosition.z,
+    const movement = this.getMovementIntent();
+    const outboundInput = {
+      moveX: movement.strafe,
+      moveZ: movement.forward,
+      sprint: movement.sprinting,
+      jump: Boolean(this.pendingJumpInput),
       yaw: this.yaw,
       pitch: this.pitch
     };
 
-    if (this.lastSentState) {
-      const dx = outboundState.x - this.lastSentState.x;
-      const dy = outboundState.y - this.lastSentState.y;
-      const dz = outboundState.z - this.lastSentState.z;
-      const movedSq = dx * dx + dy * dy + dz * dz;
+    if (this.lastSentInput) {
+      const moveXDelta = Math.abs(outboundInput.moveX - this.lastSentInput.moveX);
+      const moveZDelta = Math.abs(outboundInput.moveZ - this.lastSentInput.moveZ);
       const yawDelta = Math.abs(
         Math.atan2(
-          Math.sin(outboundState.yaw - this.lastSentState.yaw),
-          Math.cos(outboundState.yaw - this.lastSentState.yaw)
+          Math.sin(outboundInput.yaw - this.lastSentInput.yaw),
+          Math.cos(outboundInput.yaw - this.lastSentInput.yaw)
         )
       );
-      const pitchDelta = Math.abs(outboundState.pitch - this.lastSentState.pitch);
-      const heartbeatElapsed = this.elapsedSeconds - (Number(this.lastSentState.sentAt) || 0);
+      const pitchDelta = Math.abs(outboundInput.pitch - this.lastSentInput.pitch);
+      const heartbeatElapsed = this.elapsedSeconds - (Number(this.lastSentInput.sentAt) || 0);
+      const movementChanged =
+        moveXDelta >= 0.05 ||
+        moveZDelta >= 0.05 ||
+        yawDelta >= this.localSyncMinYaw ||
+        pitchDelta >= this.localSyncMinPitch ||
+        outboundInput.sprint !== this.lastSentInput.sprint;
 
-      if (
-        movedSq < this.localSyncMinMoveSq &&
-        yawDelta < this.localSyncMinYaw &&
-        pitchDelta < this.localSyncMinPitch &&
-        heartbeatElapsed < 0.9
-      ) {
+      if (!movementChanged && !outboundInput.jump && heartbeatElapsed < this.inputHeartbeatSeconds) {
         return;
       }
     }
 
     const quantize = (value, precision = 1000) =>
       Math.round((Number(value) || 0) * precision) / precision;
-    this.socket.emit("player:sync", {
-      x: quantize(outboundState.x, 1000),
-      y: quantize(outboundState.y, 1000),
-      z: quantize(outboundState.z, 1000),
-      yaw: quantize(outboundState.yaw, 10000),
-      pitch: quantize(outboundState.pitch, 10000)
+    const seq = ++this.localInputSeq;
+    this.socket.emit("input:cmd", {
+      seq,
+      moveX: quantize(outboundInput.moveX, 1000),
+      moveZ: quantize(outboundInput.moveZ, 1000),
+      sprint: outboundInput.sprint,
+      jump: outboundInput.jump,
+      yaw: quantize(outboundInput.yaw, 10000),
+      pitch: quantize(outboundInput.pitch, 10000),
+      t: Date.now()
     });
 
-    this.lastSentState = {
-      ...outboundState,
+    this.pendingInputQueue.push({
+      seq,
+      sentAt: this.elapsedSeconds
+    });
+    if (this.pendingInputQueue.length > 120) {
+      this.pendingInputQueue.splice(0, this.pendingInputQueue.length - 120);
+    }
+
+    this.lastSentInput = {
+      ...outboundInput,
       sentAt: this.elapsedSeconds
     };
+    this.pendingJumpInput = false;
   }
 
   updateHud(delta) {
