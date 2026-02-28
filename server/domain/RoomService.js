@@ -1,6 +1,9 @@
 import { sanitizeName, sanitizePlayerState } from "./playerState.js";
 import { chooseDistributedSpawnState } from "./spawn.js";
 
+const SURFACE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,96}$/;
+const MAX_SURFACE_IMAGE_CHARS = 1_400_000;
+
 function normalizeRoomPortalTarget(rawValue, fallback = "") {
   const text = String(rawValue ?? "").trim().slice(0, 2048);
   if (!text) {
@@ -22,6 +25,25 @@ function normalizeRoomPortalTarget(rawValue, fallback = "") {
   return parsed.toString();
 }
 
+function normalizeSurfaceId(rawValue) {
+  const value = String(rawValue ?? "").trim();
+  if (!value || !SURFACE_ID_PATTERN.test(value)) {
+    return "";
+  }
+  return value;
+}
+
+function normalizeSurfaceImageDataUrl(rawValue) {
+  const value = String(rawValue ?? "").trim();
+  if (!value || value.length > MAX_SURFACE_IMAGE_CHARS) {
+    return "";
+  }
+  if (!value.startsWith("data:image/")) {
+    return "";
+  }
+  return value;
+}
+
 function createPortalScheduleState() {
   return {
     mode: "idle",
@@ -39,6 +61,7 @@ function createPersistentRoom(code, defaultPortalTargetUrl) {
     hostId: null,
     portalTarget: defaultPortalTargetUrl,
     portalSchedule: createPortalScheduleState(),
+    surfacePaint: new Map(),
     players: new Map(),
     persistent: true,
     createdAt: Date.now()
@@ -160,6 +183,63 @@ export class RoomService {
 
   emitPortalScheduleUpdate(room) {
     this.io.to(room.code).emit("portal:schedule:update", this.serializePortalSchedule(room));
+  }
+
+  serializeSurfacePaint(room) {
+    if (!room?.surfacePaint || typeof room.surfacePaint.entries !== "function") {
+      return [];
+    }
+
+    const list = [];
+    for (const [surfaceIdRaw, imageDataUrlRaw] of room.surfacePaint.entries()) {
+      const surfaceId = normalizeSurfaceId(surfaceIdRaw);
+      const imageDataUrl = normalizeSurfaceImageDataUrl(imageDataUrlRaw);
+      if (!surfaceId || !imageDataUrl) {
+        continue;
+      }
+      list.push({ surfaceId, imageDataUrl });
+    }
+    return list;
+  }
+
+  setSurfacePaint(room, rawSurfaceId, rawImageDataUrl) {
+    if (!room) {
+      return { ok: false, error: "room not found" };
+    }
+
+    const surfaceId = normalizeSurfaceId(rawSurfaceId);
+    if (!surfaceId) {
+      return { ok: false, error: "invalid surface id" };
+    }
+
+    const imageDataUrl = normalizeSurfaceImageDataUrl(rawImageDataUrl);
+    if (!imageDataUrl) {
+      return { ok: false, error: "invalid image data" };
+    }
+
+    if (!room.surfacePaint || typeof room.surfacePaint.set !== "function") {
+      room.surfacePaint = new Map();
+    }
+
+    const previous = room.surfacePaint.get(surfaceId);
+    if (previous === imageDataUrl) {
+      return {
+        ok: true,
+        changed: false,
+        surfaceId,
+        imageDataUrl,
+        updatedAt: Date.now()
+      };
+    }
+
+    room.surfacePaint.set(surfaceId, imageDataUrl);
+    return {
+      ok: true,
+      changed: true,
+      surfaceId,
+      imageDataUrl,
+      updatedAt: Date.now()
+    };
   }
 
   updateHost(room) {

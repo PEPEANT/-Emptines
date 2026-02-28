@@ -101,6 +101,7 @@
         <button id="mobile-jump" class="mobile-action-btn" type="button">점프</button>
         <button id="mobile-sprint" class="mobile-action-btn" type="button">질주</button>
         <button id="mobile-chat" class="mobile-action-btn" type="button">채팅</button>
+        <button id="mobile-paint" class="mobile-action-btn hidden" type="button">PAINT</button>
       </div>
     </div>
 
@@ -128,6 +129,28 @@
 
     <div id="chalk-pickup-prompt" class="hidden" aria-live="polite">
       <kbd>F</kbd> 분필 줍기
+    </div>
+
+    <div id="surface-paint-prompt" class="hidden" aria-live="polite">
+      <kbd>F</kbd> 면 그리기
+    </div>
+
+    <div id="surface-painter" class="hidden" aria-modal="true" role="dialog" aria-label="Surface Painter">
+      <div id="surface-painter-panel">
+        <p id="surface-painter-title">SURFACE PAINT</p>
+        <canvas id="surface-painter-canvas" width="512" height="512"></canvas>
+        <div id="surface-painter-toolbar">
+          <label for="surface-painter-color">COLOR</label>
+          <input id="surface-painter-color" type="color" value="#111111" />
+          <label for="surface-painter-size">SIZE</label>
+          <input id="surface-painter-size" type="range" min="2" max="28" step="1" value="8" />
+        </div>
+        <div id="surface-painter-actions">
+          <button id="surface-painter-clear" type="button">CLEAR</button>
+          <button id="surface-painter-cancel" type="button">CLOSE</button>
+          <button id="surface-painter-save" type="button">SAVE</button>
+        </div>
+      </div>
     </div>
 
     <script type="module" src="/src/main.js"></script>

@@ -14,6 +14,25 @@ export function registerSocketHandlers({
   log = console
 }) {
   io.on("connection", (socket) => {
+    const emitSurfacePaintState = () => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        return;
+      }
+      socket.emit("paint:state", {
+        surfaces: roomService.serializeSurfacePaint(room)
+      });
+    };
+
+    const joinDefaultAndAck = (nameOverride, ackFn) => {
+      const result = roomService.joinDefaultRoom(socket, nameOverride);
+      if (result?.ok) {
+        emitSurfacePaintState();
+      }
+      ack(ackFn, result);
+      return result;
+    };
+
     const online = playerCounter.increment();
     socket.data.playerName = randomDefaultName();
     socket.data.roomCode = null;
@@ -22,6 +41,7 @@ export function registerSocketHandlers({
     log.log(`[+] player connected (${online}) ${socket.id}`);
 
     roomService.joinDefaultRoom(socket);
+    emitSurfacePaintState();
     roomService.emitRoomList(socket);
 
     socket.on("chat:send", ({ name, text }) => {
@@ -72,19 +92,58 @@ export function registerSocketHandlers({
     });
 
     socket.on("room:quick-join", (payload = {}, ackFn) => {
-      ack(ackFn, roomService.joinDefaultRoom(socket, payload.name));
+      joinDefaultAndAck(payload.name, ackFn);
     });
 
     socket.on("room:create", (payload = {}, ackFn) => {
-      ack(ackFn, roomService.joinDefaultRoom(socket, payload.name));
+      joinDefaultAndAck(payload.name, ackFn);
     });
 
     socket.on("room:join", (payload = {}, ackFn) => {
-      ack(ackFn, roomService.joinDefaultRoom(socket, payload.name));
+      joinDefaultAndAck(payload.name, ackFn);
     });
 
     socket.on("room:leave", (ackFn) => {
-      ack(ackFn, roomService.joinDefaultRoom(socket));
+      joinDefaultAndAck(null, ackFn);
+    });
+
+    socket.on("paint:surface:set", (payload = {}, ackFn) => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        ack(ackFn, { ok: false, error: "room not found" });
+        return;
+      }
+      if (!room.players?.has?.(socket.id)) {
+        ack(ackFn, { ok: false, error: "player not in room" });
+        return;
+      }
+
+      const result = roomService.setSurfacePaint(
+        room,
+        payload?.surfaceId,
+        payload?.imageDataUrl ?? payload?.dataUrl ?? ""
+      );
+      if (!result.ok) {
+        ack(ackFn, result);
+        return;
+      }
+
+      if (result.changed) {
+        io.to(room.code).emit("paint:surface:update", {
+          surfaceId: result.surfaceId,
+          imageDataUrl: result.imageDataUrl,
+          updatedAt: result.updatedAt,
+          authorId: socket.id
+        });
+      }
+
+      ack(ackFn, {
+        ok: true,
+        changed: Boolean(result.changed),
+        surfaceId: result.surfaceId,
+        imageDataUrl: result.imageDataUrl,
+        updatedAt: result.updatedAt
+      });
     });
 
     socket.on("room:host:claim", (payload = {}, ackFn) => {
