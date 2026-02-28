@@ -41,6 +41,17 @@
 
     <div id="host-controls" class="hidden" aria-label="호스팅 컨트롤">
       <button id="host-open-portal" type="button">포탈 열기</button>
+      <div id="host-schedule-controls">
+        <div class="host-delay-row">
+          <button class="host-delay-btn" type="button" data-delay-min="10">10분 후 시작</button>
+          <button class="host-delay-btn" type="button" data-delay-min="20">20분 후 시작</button>
+          <button class="host-delay-btn" type="button" data-delay-min="30">30분 후 시작</button>
+        </div>
+        <div class="host-custom-row">
+          <input id="host-delay-minutes" type="number" min="1" max="180" step="1" value="10" />
+          <button id="host-apply-delay" type="button">N분 후 시작</button>
+        </div>
+      </div>
     </div>
 
     <div id="hub-flow-ui" aria-live="polite">

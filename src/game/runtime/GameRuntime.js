@@ -35,7 +35,7 @@ function parseSeconds(raw, fallback, min = 0.1) {
 const NPC_GREETING_VIDEO_URL = new URL("../../../mp4/grok-video.webm", import.meta.url).href;
 const AD_BILLBOARD_IMAGE_URL = new URL("../../../png/AD.41415786.1.png", import.meta.url).href;
 const DEFAULT_PORTAL_TARGET_URL =
-  "https://www.turbosquid.com/ko/Search/3D-Models/free?file_type=159%2C191&page_num=9";
+  "http://localhost:5173/?server=http://localhost:3001&name=PLAYER";
 
 export class GameRuntime {
   constructor(mount, options = {}) {
@@ -242,9 +242,22 @@ export class GameRuntime {
     this.playerRosterListEl = document.getElementById("player-roster-list");
     this.hostControlsEl = document.getElementById("host-controls");
     this.hostOpenPortalBtnEl = document.getElementById("host-open-portal");
+    this.hostScheduleControlsEl = document.getElementById("host-schedule-controls");
+    this.hostDelayButtons = Array.from(document.querySelectorAll(".host-delay-btn[data-delay-min]"));
+    this.hostDelayMinutesInputEl = document.getElementById("host-delay-minutes");
+    this.hostApplyDelayBtnEl = document.getElementById("host-apply-delay");
     this.playerRosterVisible = false;
     this.roomPlayerSnapshot = [];
     this.portalForceOpenInFlight = false;
+    this.portalScheduleSetInFlight = false;
+    this.portalSchedule = {
+      mode: "idle",
+      startAtMs: 0,
+      openUntilMs: 0,
+      remainingSec: 0,
+      finalCountdownSeconds: 10,
+      updatedAt: Date.now()
+    };
     this.chatOpen = false;
     this.lastLocalChatEcho = "";
     this.lastLocalChatEchoAt = 0;
@@ -1780,6 +1793,62 @@ export class GameRuntime {
   }
 
   updatePortalPhase(delta) {
+    const now = Date.now();
+    const previousScheduleMode = String(this.portalSchedule?.mode ?? "idle");
+    const schedule = this.getPortalScheduleComputed(now);
+    const scheduleChanged =
+      schedule.mode !== previousScheduleMode ||
+      schedule.remainingSec !== Math.max(0, Math.trunc(Number(this.portalSchedule?.remainingSec) || 0)) ||
+      schedule.startAtMs !== Math.max(0, Math.trunc(Number(this.portalSchedule?.startAtMs) || 0)) ||
+      schedule.openUntilMs !== Math.max(0, Math.trunc(Number(this.portalSchedule?.openUntilMs) || 0));
+    if (scheduleChanged) {
+      this.portalSchedule = {
+        ...schedule,
+        updatedAt: now
+      };
+    }
+
+    if (schedule.mode !== "idle") {
+      if (schedule.mode === "open") {
+        this.portalPhase = "open";
+        this.portalPhaseClock = Math.max(0, Number(schedule.remainingSec) || 0);
+        if (this.portalTargetUrl) {
+          this.setFlowHeadline(
+            "포탈 개방",
+            `입장 가능 (${Math.ceil(this.portalPhaseClock)}초 남음)`
+          );
+        } else {
+          this.setFlowHeadline(
+            "포탈 개방 / 목적지 없음",
+            "?portal=https://... 로 목적지를 설정하세요"
+          );
+        }
+        return;
+      }
+
+      if (schedule.mode === "final_countdown") {
+        this.portalPhase = "warning";
+        this.portalPhaseClock = Math.max(0, Number(schedule.remainingSec) || 0);
+        this.setFlowHeadline("시작 카운트다운", `${Math.ceil(this.portalPhaseClock)}초 후 포탈 개방`);
+        return;
+      }
+
+      this.portalPhase = "cooldown";
+      this.portalPhaseClock = Math.max(0, Number(schedule.remainingSec) || 0);
+      if (this.portalPhaseClock >= 60) {
+        const remainingMinutes = Math.max(1, Math.ceil(this.portalPhaseClock / 60));
+        this.setFlowHeadline("시작 대기", `${remainingMinutes}분 후 포탈 개방`);
+      } else {
+        this.setFlowHeadline("시작 대기", `${Math.ceil(this.portalPhaseClock)}초 후 포탈 개방`);
+      }
+      return;
+    }
+
+    if (previousScheduleMode !== "idle") {
+      this.portalPhase = "cooldown";
+      this.portalPhaseClock = this.portalCooldownSeconds;
+    }
+
     this.portalPhaseClock = Math.max(0, this.portalPhaseClock - delta);
     if (this.portalPhase === "cooldown") {
       this.setFlowHeadline("도시 라이브", `다음 포탈까지 ${Math.ceil(this.portalPhaseClock)}초`);
@@ -1871,7 +1940,21 @@ export class GameRuntime {
     const minutes = String(now.getMinutes()).padStart(2, "0");
     const seconds = String(now.getSeconds()).padStart(2, "0");
     const localTime = `${hours}:${minutes}:${seconds}`;
-    const line1 = "시작시간 : ( 대 기 중 )";
+    const schedule = this.getPortalScheduleComputed(now.getTime());
+    let startLabel = "( 대 기 중 )";
+    if (schedule.mode === "open") {
+      startLabel = "입장 가능";
+    } else if (schedule.mode === "final_countdown") {
+      startLabel = `${Math.max(0, Math.trunc(Number(schedule.remainingSec) || 0))}초`;
+    } else if (schedule.mode === "waiting") {
+      const remainingSec = Math.max(0, Math.trunc(Number(schedule.remainingSec) || 0));
+      if (remainingSec >= 60) {
+        startLabel = `${Math.max(1, Math.ceil(remainingSec / 60))}분 후 시작`;
+      } else {
+        startLabel = `${remainingSec}초 후 시작`;
+      }
+    }
+    const line1 = `시작시간 : ${startLabel}`;
     const line2 = `현지 시간 : ${localTime}`;
     const line3 = "";
 
@@ -2252,18 +2335,173 @@ export class GameRuntime {
 
     const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
     const hasHostPrivilege = this.isRoomHost || localHostMode;
-    const visible =
-      this.hubFlowEnabled &&
-      hasHostPrivilege;
-    const canForceOpen = visible && this.flowStage === "city_live";
+    const visible = this.hubFlowEnabled && hasHostPrivilege;
+    const canControlPortal = visible && this.flowStage === "city_live";
+    const controlsBusy = this.portalForceOpenInFlight || this.portalScheduleSetInFlight;
 
     this.hostControlsEl.classList.toggle("hidden", !visible);
     if (this.hostOpenPortalBtnEl) {
-      this.hostOpenPortalBtnEl.disabled = !canForceOpen || this.portalForceOpenInFlight;
-      this.hostOpenPortalBtnEl.title = canForceOpen
+      this.hostOpenPortalBtnEl.disabled = !canControlPortal || controlsBusy;
+      this.hostOpenPortalBtnEl.title = canControlPortal
         ? "방장 포탈 즉시 개방"
         : "도시 라이브 단계에서만 사용 가능";
     }
+
+    for (const button of this.hostDelayButtons) {
+      button.disabled = !canControlPortal || controlsBusy;
+    }
+    if (this.hostDelayMinutesInputEl) {
+      this.hostDelayMinutesInputEl.disabled = !canControlPortal || controlsBusy;
+    }
+    if (this.hostApplyDelayBtnEl) {
+      this.hostApplyDelayBtnEl.disabled = !canControlPortal || controlsBusy;
+    }
+  }
+
+  normalizePortalSchedule(raw = {}) {
+    const modeRaw = String(raw?.mode ?? "idle").trim().toLowerCase();
+    const mode = ["idle", "waiting", "final_countdown", "open"].includes(modeRaw)
+      ? modeRaw
+      : "idle";
+    const finalCountdownSeconds = THREE.MathUtils.clamp(
+      Math.trunc(Number(raw?.finalCountdownSeconds) || 10),
+      3,
+      30
+    );
+
+    let startAtMs = Math.max(0, Math.trunc(Number(raw?.startAtMs) || 0));
+    let openUntilMs = Math.max(0, Math.trunc(Number(raw?.openUntilMs) || 0));
+    let remainingSec = Math.max(0, Math.trunc(Number(raw?.remainingSec) || 0));
+    const updatedAt = Math.max(0, Math.trunc(Number(raw?.updatedAt) || Date.now()));
+
+    if ((mode === "waiting" || mode === "final_countdown") && startAtMs <= 0 && remainingSec > 0) {
+      startAtMs = Date.now() + remainingSec * 1000;
+    }
+    if (mode === "open" && openUntilMs <= 0 && remainingSec > 0) {
+      openUntilMs = Date.now() + remainingSec * 1000;
+    }
+
+    return {
+      mode,
+      startAtMs,
+      openUntilMs,
+      remainingSec,
+      finalCountdownSeconds,
+      updatedAt
+    };
+  }
+
+  getPortalScheduleComputed(now = Date.now()) {
+    const state = this.normalizePortalSchedule(this.portalSchedule ?? {});
+    let mode = state.mode;
+    let remainingSec = state.remainingSec;
+
+    if (mode === "waiting" || mode === "final_countdown") {
+      const byStartAt = state.startAtMs > 0 ? Math.max(0, Math.ceil((state.startAtMs - now) / 1000)) : 0;
+      if (byStartAt > 0 || state.startAtMs > 0) {
+        remainingSec = byStartAt;
+      }
+
+      if (remainingSec <= 0) {
+        mode = "open";
+        const byOpenUntil = state.openUntilMs > now
+          ? Math.max(0, Math.ceil((state.openUntilMs - now) / 1000))
+          : this.portalOpenSeconds;
+        remainingSec = Math.max(1, byOpenUntil);
+      } else {
+        mode = remainingSec <= state.finalCountdownSeconds ? "final_countdown" : "waiting";
+      }
+    } else if (mode === "open") {
+      const byOpenUntil = state.openUntilMs > 0 ? Math.max(0, Math.ceil((state.openUntilMs - now) / 1000)) : 0;
+      if (byOpenUntil > 0 || state.openUntilMs > 0) {
+        remainingSec = byOpenUntil;
+      }
+      if (remainingSec <= 0) {
+        mode = "idle";
+        remainingSec = 0;
+      }
+    } else {
+      mode = "idle";
+      remainingSec = 0;
+    }
+
+    return {
+      ...state,
+      mode,
+      remainingSec
+    };
+  }
+
+  applyPortalScheduleUpdate(raw = {}, { announce = false } = {}) {
+    const next = this.normalizePortalSchedule(raw);
+    this.portalSchedule = next;
+    this.updatePortalTimeBillboard(0, true);
+    this.syncHostControls();
+
+    if (announce && next.mode === "open") {
+      this.appendChatLine("", "방장이 포탈을 즉시 개방했습니다.", "system");
+    }
+  }
+
+  requestPortalScheduleSet(delaySeconds) {
+    const requestedDelay = Math.trunc(Number(delaySeconds) || 0);
+    if (requestedDelay <= 0) {
+      this.appendChatLine("", "예약 시간(분)을 다시 입력하세요.", "system");
+      return;
+    }
+    const delay = Math.max(10, Math.min(6 * 60 * 60, requestedDelay));
+
+    const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
+    if (!this.socket || !this.networkConnected) {
+      if (!localHostMode) {
+        this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
+        return;
+      }
+
+      const now = Date.now();
+      this.applyPortalScheduleUpdate(
+        {
+          mode: delay <= 10 ? "final_countdown" : "waiting",
+          startAtMs: now + delay * 1000,
+          openUntilMs: 0,
+          remainingSec: delay,
+          finalCountdownSeconds: 10,
+          updatedAt: now
+        },
+        { announce: false }
+      );
+      const delayLabel = delay >= 60 ? `${Math.ceil(delay / 60)}분` : `${delay}초`;
+      this.appendChatLine("", `${delayLabel} 후 시작 예약 완료`, "system");
+      return;
+    }
+    if (!this.isRoomHost) {
+      this.appendChatLine("", "시작 시간 설정은 방장만 가능합니다.", "system");
+      return;
+    }
+    if (!this.hubFlowEnabled || this.flowStage !== "city_live") {
+      this.appendChatLine("", "도시 라이브 단계에서만 예약 가능합니다.", "system");
+      return;
+    }
+    if (this.portalScheduleSetInFlight) {
+      return;
+    }
+
+    this.portalScheduleSetInFlight = true;
+    this.syncHostControls();
+    this.socket.emit("portal:schedule:set", { delaySeconds: delay }, (response = {}) => {
+      this.portalScheduleSetInFlight = false;
+      this.syncHostControls();
+
+      if (!response?.ok) {
+        const reason = String(response?.error ?? "").trim() || "unknown error";
+        this.appendChatLine("", `시작 예약 실패: ${reason}`, "system");
+        return;
+      }
+
+      this.applyPortalScheduleUpdate(response?.schedule ?? {}, { announce: false });
+      const delayLabel = delay >= 60 ? `${Math.ceil(delay / 60)}분` : `${delay}초`;
+      this.appendChatLine("", `${delayLabel} 후 시작 예약 완료`, "system");
+    });
   }
 
   handlePortalForceOpen(_payload = {}, { announce = true } = {}) {
@@ -2271,9 +2509,20 @@ export class GameRuntime {
       return;
     }
 
+    const now = Date.now();
+    const fallbackSchedule = {
+      mode: "open",
+      startAtMs: now,
+      openUntilMs: now + this.portalOpenSeconds * 1000,
+      remainingSec: this.portalOpenSeconds,
+      finalCountdownSeconds: 10,
+      updatedAt: now
+    };
+    const schedule = _payload?.schedule ?? fallbackSchedule;
+    this.applyPortalScheduleUpdate(schedule, { announce: false });
+    const computed = this.getPortalScheduleComputed();
     this.portalPhase = "open";
-    this.portalPhaseClock = this.portalOpenSeconds;
-    this.updatePortalTimeBillboard(0, true);
+    this.portalPhaseClock = Math.max(1, Number(computed.remainingSec) || this.portalOpenSeconds);
     this.updatePortalVisual();
 
     if (announce) {
@@ -3730,6 +3979,39 @@ export class GameRuntime {
         this.requestPortalForceOpen();
       });
     }
+    if (this.hostScheduleControlsEl) {
+      this.hostScheduleControlsEl.addEventListener("click", (event) => {
+        const button = event.target?.closest?.(".host-delay-btn[data-delay-min]");
+        if (!button) {
+          return;
+        }
+        const delayMinutes = Math.trunc(Number(button.dataset.delayMin) || 0);
+        if (delayMinutes <= 0) {
+          return;
+        }
+        this.requestPortalScheduleSet(delayMinutes * 60);
+      });
+    }
+    if (this.hostApplyDelayBtnEl) {
+      this.hostApplyDelayBtnEl.addEventListener("click", () => {
+        const delayMinutes = Math.trunc(Number(this.hostDelayMinutesInputEl?.value) || 0);
+        if (delayMinutes <= 0) {
+          this.appendChatLine("", "예약 시간(분)을 다시 입력하세요.", "system");
+          this.hostDelayMinutesInputEl?.focus?.();
+          return;
+        }
+        this.requestPortalScheduleSet(delayMinutes * 60);
+      });
+    }
+    if (this.hostDelayMinutesInputEl) {
+      this.hostDelayMinutesInputEl.addEventListener("keydown", (event) => {
+        if (event.code !== "Enter") {
+          return;
+        }
+        event.preventDefault();
+        this.hostApplyDelayBtnEl?.click?.();
+      });
+    }
   }
 
   resolveUiElements() {
@@ -3807,6 +4089,18 @@ export class GameRuntime {
     }
     if (!this.hostOpenPortalBtnEl) {
       this.hostOpenPortalBtnEl = document.getElementById("host-open-portal");
+    }
+    if (!this.hostScheduleControlsEl) {
+      this.hostScheduleControlsEl = document.getElementById("host-schedule-controls");
+    }
+    if (!this.hostDelayButtons || this.hostDelayButtons.length === 0) {
+      this.hostDelayButtons = Array.from(document.querySelectorAll(".host-delay-btn[data-delay-min]"));
+    }
+    if (!this.hostDelayMinutesInputEl) {
+      this.hostDelayMinutesInputEl = document.getElementById("host-delay-minutes");
+    }
+    if (!this.hostApplyDelayBtnEl) {
+      this.hostApplyDelayBtnEl = document.getElementById("host-apply-delay");
     }
     if (!this.playerRosterEl) {
       this.playerRosterEl = document.getElementById("player-roster");
@@ -3984,6 +4278,7 @@ export class GameRuntime {
       this.hostPortalTargetSynced = false;
       this.portalTargetSetInFlight = false;
       this.portalForceOpenInFlight = false;
+      this.portalScheduleSetInFlight = false;
       this.remoteSyncClock = 0;
       this.lastSentInput = null;
       this.localInputSeq = 0;
@@ -4007,6 +4302,7 @@ export class GameRuntime {
       this.hostPortalTargetSynced = false;
       this.portalTargetSetInFlight = false;
       this.portalForceOpenInFlight = false;
+      this.portalScheduleSetInFlight = false;
       this.remoteSyncClock = 0;
       this.lastSentInput = null;
       this.pendingJumpInput = false;
@@ -4026,6 +4322,7 @@ export class GameRuntime {
       this.localPlayerId = null;
       this.roomHostId = null;
       this.isRoomHost = false;
+      this.portalScheduleSetInFlight = false;
       this.portalForceOpenInFlight = false;
       this.remoteSyncClock = 0;
       this.lastSentInput = null;
@@ -4049,6 +4346,10 @@ export class GameRuntime {
       if (changed) {
         this.updatePortalTimeBillboard(0, true);
       }
+    });
+
+    socket.on("portal:schedule:update", (payload = {}) => {
+      this.applyPortalScheduleUpdate(payload ?? {}, { announce: false });
     });
 
     socket.on("portal:force-open", (payload = {}) => {
@@ -4170,6 +4471,9 @@ export class GameRuntime {
       if (portalTargetChanged) {
         this.updatePortalTimeBillboard(0, true);
       }
+    }
+    if (room?.portalSchedule && typeof room.portalSchedule === "object") {
+      this.applyPortalScheduleUpdate(room.portalSchedule, { announce: false });
     }
 
     const players = Array.isArray(room?.players) ? room.players : [];

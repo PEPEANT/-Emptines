@@ -145,10 +145,12 @@ canvas {
   left: 14px;
   z-index: 36;
   pointer-events: auto;
+  display: grid;
+  gap: 6px;
 }
 
 #host-open-portal {
-  min-width: 126px;
+  min-width: 148px;
   height: 34px;
   border: 1px solid rgba(167, 211, 242, 0.68);
   border-radius: 8px;
@@ -166,6 +168,76 @@ canvas {
 
 #host-open-portal:disabled {
   opacity: 0.65;
+  cursor: default;
+}
+
+#host-schedule-controls {
+  display: grid;
+  gap: 6px;
+  padding: 7px 8px;
+  border: 1px solid rgba(148, 196, 230, 0.46);
+  border-radius: 9px;
+  background: rgba(8, 22, 35, 0.72);
+}
+
+.host-delay-row {
+  display: flex;
+  gap: 4px;
+}
+
+.host-delay-btn {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  border: 1px solid rgba(161, 203, 235, 0.58);
+  border-radius: 7px;
+  background: rgba(10, 26, 40, 0.82);
+  color: #dcefff;
+  font: 700 0.64rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.host-delay-btn:hover {
+  border-color: rgba(199, 229, 250, 0.9);
+}
+
+.host-delay-btn:disabled {
+  opacity: 0.62;
+  cursor: default;
+}
+
+.host-custom-row {
+  display: flex;
+  gap: 4px;
+}
+
+#host-delay-minutes {
+  width: 64px;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid rgba(163, 206, 239, 0.62);
+  border-radius: 7px;
+  background: rgba(10, 24, 37, 0.9);
+  color: #e6f5ff;
+  font: 700 0.68rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+}
+
+#host-apply-delay {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  border: 1px solid rgba(161, 203, 235, 0.58);
+  border-radius: 7px;
+  background: rgba(10, 26, 40, 0.82);
+  color: #dcefff;
+  font: 700 0.64rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+#host-apply-delay:disabled {
+  opacity: 0.62;
   cursor: default;
 }
 
@@ -694,6 +766,23 @@ canvas {
     min-width: 112px;
     height: 31px;
     font-size: 0.67rem;
+  }
+
+  #host-schedule-controls {
+    padding: 6px;
+    gap: 4px;
+  }
+
+  .host-delay-btn,
+  #host-apply-delay {
+    height: 26px;
+    font-size: 0.6rem;
+  }
+
+  #host-delay-minutes {
+    width: 56px;
+    height: 26px;
+    font-size: 0.62rem;
   }
 
   .hud-row {
