@@ -20,19 +20,23 @@ export const BASE_VOID_PACK = {
     },
     clouds: {
       enabled: true,
-      count: 10,
-      area: 900,
-      minHeight: 120,
-      maxHeight: 180,
-      minScale: 16,
-      maxScale: 34,
+      count: 26,
+      area: 2400,
+      minHeight: 130,
+      maxHeight: 250,
+      minScale: 24,
+      maxScale: 56,
       color: 0xfdfefe,
-      opacity: 0.84,
-      driftMin: 0.28,
-      driftMax: 0.78,
+      opacity: 0.68,
+      driftMin: 0.12,
+      driftMax: 0.36,
+      minPuffs: 5,
+      maxPuffs: 8,
+      puffSpread: 1.95,
+      puffHeightSpread: 0.16,
       mobileCountScale: 0.55,
       emissive: 0x304a63,
-      emissiveIntensity: 0.03
+      emissiveIntensity: 0.02
     },
     lights: {
       hemisphere: {

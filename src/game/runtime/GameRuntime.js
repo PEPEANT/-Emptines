@@ -1851,27 +1851,34 @@ export class GameRuntime {
     const maxHeight = Number(cloudConfig.maxHeight) || 260;
     const driftMin = Number(cloudConfig.driftMin) || 0.4;
     const driftMax = Number(cloudConfig.driftMax) || 1.1;
+    const minPuffs = Math.max(3, Math.trunc(Number(cloudConfig.minPuffs) || 5));
+    const maxPuffs = Math.max(minPuffs, Math.trunc(Number(cloudConfig.maxPuffs) || 8));
+    const puffSpread = Math.max(0.8, Number(cloudConfig.puffSpread) || 1.8);
+    const puffHeightSpread = Math.max(0.04, Number(cloudConfig.puffHeightSpread) || 0.18);
 
     for (let i = 0; i < count; i += 1) {
       const cloud = new THREE.Group();
-      const puffCount = 3 + Math.floor(Math.random() * 2);
+      const puffCount = minPuffs + Math.floor(Math.random() * (maxPuffs - minPuffs + 1));
 
       for (let p = 0; p < puffCount; p += 1) {
         const puff = new THREE.Mesh(puffGeometry, puffMaterial);
-        const offsetX = (p - (puffCount - 1) * 0.5) * (0.95 + Math.random() * 0.4);
-        const offsetY = (Math.random() - 0.5) * 0.25;
-        const offsetZ = (Math.random() - 0.5) * 0.55;
+        const angle = (p / puffCount) * Math.PI * 2 + Math.random() * 0.7;
+        const radial = (0.35 + Math.random() * 0.9) * puffSpread;
+        const offsetX = Math.cos(angle) * radial + (Math.random() - 0.5) * 0.45;
+        const offsetY = (Math.random() - 0.5) * puffHeightSpread;
+        const offsetZ = Math.sin(angle) * radial * 0.56 + (Math.random() - 0.5) * 0.34;
         puff.position.set(offsetX, offsetY, offsetZ);
         puff.scale.set(
-          0.9 + Math.random() * 0.45,
-          0.45 + Math.random() * 0.25,
-          0.7 + Math.random() * 0.45
+          0.9 + Math.random() * 0.58,
+          0.34 + Math.random() * 0.22,
+          0.68 + Math.random() * 0.52
         );
         cloud.add(puff);
       }
 
       const cloudScale = minScale + Math.random() * Math.max(1, maxScale - minScale);
-      cloud.scale.set(cloudScale, cloudScale * 0.44, cloudScale * 0.8);
+      cloud.scale.set(cloudScale, cloudScale * 0.3, cloudScale * 0.82);
+      cloud.rotation.y = Math.random() * Math.PI * 2;
       cloud.position.set(
         (Math.random() * 2 - 1) * halfArea,
         minHeight + Math.random() * Math.max(1, maxHeight - minHeight),
