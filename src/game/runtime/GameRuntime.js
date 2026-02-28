@@ -1069,9 +1069,23 @@ export class GameRuntime {
       side: THREE.DoubleSide,
       toneMapped: false
     });
+    const boardScale = this.mobileEnabled ? 1.2 : 1.5;
+    const columnHeight = 8.6 * boardScale;
+    const columnWidth = 0.44 * boardScale;
+    const frameWidth = 8.6 * boardScale;
+    const frameHeight = 5.1 * boardScale;
+    const frameDepth = 0.52 * boardScale;
+    const screenWidth = 7.8 * boardScale;
+    const screenHeight = 4.3 * boardScale;
+    const glowWidth = 8.2 * boardScale;
+    const glowHeight = 4.7 * boardScale;
+    const columnOffsetX = 3.6 * boardScale;
+    const frameY = 7.2 * boardScale;
+    const frameZ = -0.22 * boardScale;
     const placements = [
-      { x: -42, z: 8, yaw: 0.42 },
-      { x: 42, z: 8, yaw: -0.42 }
+      // Move all legged boards to the plaza center and face incoming players.
+      { x: -8.8, z: 14.6, yaw: Math.PI },
+      { x: 8.8, z: 14.6, yaw: Math.PI }
     ];
 
     for (const placement of placements) {
@@ -1079,25 +1093,31 @@ export class GameRuntime {
       board.position.set(placement.x, 0, placement.z);
       board.rotation.y = placement.yaw;
 
-      const leftColumn = new THREE.Mesh(new THREE.BoxGeometry(0.44, 8.6, 0.44), supportMaterial);
-      leftColumn.position.set(-3.6, 4.3, -0.22);
+      const leftColumn = new THREE.Mesh(
+        new THREE.BoxGeometry(columnWidth, columnHeight, columnWidth),
+        supportMaterial
+      );
+      leftColumn.position.set(-columnOffsetX, columnHeight * 0.5, frameZ);
       leftColumn.castShadow = !this.mobileEnabled;
       leftColumn.receiveShadow = true;
 
       const rightColumn = leftColumn.clone();
-      rightColumn.position.x = 3.6;
+      rightColumn.position.x = columnOffsetX;
 
-      const frame = new THREE.Mesh(new THREE.BoxGeometry(8.6, 5.1, 0.52), frameMaterial);
-      frame.position.set(0, 7.2, -0.22);
+      const frame = new THREE.Mesh(
+        new THREE.BoxGeometry(frameWidth, frameHeight, frameDepth),
+        frameMaterial
+      );
+      frame.position.set(0, frameY, frameZ);
       frame.castShadow = !this.mobileEnabled;
       frame.receiveShadow = true;
 
-      const screen = new THREE.Mesh(new THREE.PlaneGeometry(7.8, 4.3), screenMaterial);
-      screen.position.set(0, 7.2, 0.09);
+      const screen = new THREE.Mesh(new THREE.PlaneGeometry(screenWidth, screenHeight), screenMaterial);
+      screen.position.set(0, frameY, 0.09 * boardScale);
       screen.renderOrder = 15;
 
-      const glow = new THREE.Mesh(new THREE.PlaneGeometry(8.2, 4.7), glowMaterial);
-      glow.position.set(0, 7.2, 0.07);
+      const glow = new THREE.Mesh(new THREE.PlaneGeometry(glowWidth, glowHeight), glowMaterial);
+      glow.position.set(0, frameY, 0.07 * boardScale);
       glow.renderOrder = 14;
 
       board.add(leftColumn, rightColumn, frame, glow, screen);
@@ -1189,11 +1209,11 @@ export class GameRuntime {
 
   createPortalTimeBillboard() {
     const board = new THREE.Group();
-    board.position.set(0, 7, 0);
+    board.position.set(0, 7.4, 0);
     board.rotation.y = Math.PI;
 
     const glowBack = new THREE.Mesh(
-      new THREE.PlaneGeometry(10.1, 2.08),
+      new THREE.PlaneGeometry(12.6, 2.72),
       new THREE.MeshBasicMaterial({
         color: 0x4fc8ff,
         transparent: true,
@@ -1204,12 +1224,12 @@ export class GameRuntime {
         toneMapped: false
       })
     );
-    glowBack.position.set(0, 5.15, 0.02);
+    glowBack.position.set(0, 5.3, 0.02);
     glowBack.renderOrder = 13;
 
     const canvas = document.createElement("canvas");
-    canvas.width = 1024;
-    canvas.height = 256;
+    canvas.width = 1280;
+    canvas.height = 320;
     const context = canvas.getContext("2d");
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
@@ -1218,7 +1238,7 @@ export class GameRuntime {
     texture.generateMipmaps = false;
 
     const screen = new THREE.Mesh(
-      new THREE.PlaneGeometry(9.6, 2.0),
+      new THREE.PlaneGeometry(12.0, 2.58),
       new THREE.MeshBasicMaterial({
         map: texture,
         transparent: true,
@@ -1226,7 +1246,7 @@ export class GameRuntime {
         side: THREE.DoubleSide
       })
     );
-    screen.position.set(0, 5.15, 0.08);
+    screen.position.set(0, 5.3, 0.08);
     screen.renderOrder = 14;
 
     board.add(glowBack, screen);
@@ -1839,9 +1859,9 @@ export class GameRuntime {
       this.portalPhase === "idle"
         ? "--:--"
         : this.formatPortalCountdown(Math.ceil(this.portalPhaseClock));
-    const line1 = "리클레임 포탈";
-    const line2 = `${phaseLabel}  ${countdown}`;
-    const line3 = `현지 시간  ${localTime}`;
+    const line1 = "특이점 OX 퀴즈 대회";
+    const line2 = "시작시간 : ( 대 기 중 )";
+    const line3 = `${phaseLabel}  ${countdown}  |  현지 시간  ${localTime}`;
 
     if (
       !force &&
@@ -1878,18 +1898,18 @@ export class GameRuntime {
     context.shadowColor = "rgba(90, 199, 255, 0.65)";
     context.shadowBlur = 12;
     context.fillStyle = "#d8f2ff";
-    context.font = "700 62px Bahnschrift";
-    context.fillText(line1, width * 0.5, 66);
+    context.font = "700 70px Bahnschrift";
+    context.fillText(line1, width * 0.5, 84);
 
     context.shadowBlur = 10;
     context.fillStyle = "#9de7ff";
-    context.font = "700 58px Bahnschrift";
-    context.fillText(line2, width * 0.5, 142);
+    context.font = "700 62px Bahnschrift";
+    context.fillText(line2, width * 0.5, 178);
 
     context.shadowBlur = 8;
     context.fillStyle = "#bfe8ff";
-    context.font = "700 40px Bahnschrift";
-    context.fillText(line3, width * 0.5, 210);
+    context.font = "700 44px Bahnschrift";
+    context.fillText(line3, width * 0.5, 266);
 
     this.portalBillboardTexture.needsUpdate = true;
     this.portalBillboardCache = { line1, line2, line3 };
