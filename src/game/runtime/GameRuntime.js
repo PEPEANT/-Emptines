@@ -873,110 +873,6 @@ export class GameRuntime {
     mirrorGate.position.set(this.bridgeMirrorPosition.x, 0, this.bridgeMirrorPosition.z);
     mirrorGate.visible = false;
 
-    const shrinePillarMaterial = new THREE.MeshStandardMaterial({
-      color: 0x8f3a2d,
-      roughness: 0.56,
-      metalness: 0.1,
-      emissive: 0x361611,
-      emissiveIntensity: 0.11
-    });
-    const shrineBeamMaterial = new THREE.MeshStandardMaterial({
-      color: 0x25445f,
-      roughness: 0.5,
-      metalness: 0.18,
-      emissive: 0x112435,
-      emissiveIntensity: 0.12
-    });
-    const shrineTileMaterial = new THREE.MeshStandardMaterial({
-      color: 0x3d4a5a,
-      roughness: 0.44,
-      metalness: 0.2,
-      emissive: 0x1a2430,
-      emissiveIntensity: 0.1
-    });
-    const shrineStoneMaterial = new THREE.MeshStandardMaterial({
-      color: 0x8b9098,
-      roughness: 0.76,
-      metalness: 0.04
-    });
-
-    const shrineLeftPost = new THREE.Mesh(
-      new THREE.BoxGeometry(0.52, 4.9, 0.52),
-      shrinePillarMaterial
-    );
-    shrineLeftPost.position.set(-1.72, 2.45, 0);
-    shrineLeftPost.castShadow = !this.mobileEnabled;
-    shrineLeftPost.receiveShadow = true;
-
-    const shrineRightPost = shrineLeftPost.clone();
-    shrineRightPost.position.x = 1.72;
-
-    const shrineLeftBase = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.5, 0.56, 0.26, this.mobileEnabled ? 12 : 18),
-      shrineStoneMaterial
-    );
-    shrineLeftBase.position.set(-1.72, 0.13, 0);
-    shrineLeftBase.castShadow = !this.mobileEnabled;
-    shrineLeftBase.receiveShadow = true;
-
-    const shrineRightBase = shrineLeftBase.clone();
-    shrineRightBase.position.x = 1.72;
-
-    const shrineTopBeam = new THREE.Mesh(
-      new THREE.BoxGeometry(5.12, 0.34, 0.56),
-      shrinePillarMaterial
-    );
-    shrineTopBeam.position.set(0, 3.72, 0);
-    shrineTopBeam.castShadow = !this.mobileEnabled;
-    shrineTopBeam.receiveShadow = true;
-
-    const shrineMiddleBeam = new THREE.Mesh(
-      new THREE.BoxGeometry(4.46, 0.28, 0.44),
-      shrineBeamMaterial
-    );
-    shrineMiddleBeam.position.set(0, 3.26, 0);
-    shrineMiddleBeam.castShadow = !this.mobileEnabled;
-    shrineMiddleBeam.receiveShadow = true;
-
-    const shrineRoofCore = new THREE.Mesh(
-      new THREE.BoxGeometry(5.36, 0.18, 1.38),
-      shrineTileMaterial
-    );
-    shrineRoofCore.position.set(0, 4.02, 0);
-    shrineRoofCore.castShadow = !this.mobileEnabled;
-    shrineRoofCore.receiveShadow = true;
-
-    const shrineRoofFront = new THREE.Mesh(
-      new THREE.BoxGeometry(5.64, 0.16, 0.46),
-      shrineTileMaterial
-    );
-    shrineRoofFront.position.set(0, 3.94, 0.72);
-    shrineRoofFront.rotation.x = 0.22;
-    shrineRoofFront.castShadow = !this.mobileEnabled;
-    shrineRoofFront.receiveShadow = true;
-
-    const shrineRoofRidge = new THREE.Mesh(
-      new THREE.BoxGeometry(4.96, 0.16, 0.34),
-      shrineTileMaterial
-    );
-    shrineRoofRidge.position.set(0, 4.18, 0);
-    shrineRoofRidge.castShadow = !this.mobileEnabled;
-    shrineRoofRidge.receiveShadow = true;
-
-    const shrinePlaque = new THREE.Mesh(
-      new THREE.BoxGeometry(0.72, 0.88, 0.1),
-      new THREE.MeshStandardMaterial({
-        color: 0xe8dbc1,
-        roughness: 0.36,
-        metalness: 0.12,
-        emissive: 0x4d442f,
-        emissiveIntensity: 0.08
-      })
-    );
-    shrinePlaque.position.set(0, 3.02, 0.28);
-    shrinePlaque.castShadow = !this.mobileEnabled;
-    shrinePlaque.receiveShadow = true;
-
     const shrineAura = new THREE.Mesh(
       new THREE.RingGeometry(1.34, 1.95, this.mobileEnabled ? 28 : 44),
       new THREE.MeshBasicMaterial({
@@ -1004,16 +900,6 @@ export class GameRuntime {
     mirrorPad.position.y = 0.04;
 
     mirrorGate.add(
-      shrineLeftBase,
-      shrineRightBase,
-      shrineLeftPost,
-      shrineRightPost,
-      shrineTopBeam,
-      shrineMiddleBeam,
-      shrineRoofCore,
-      shrineRoofFront,
-      shrineRoofRidge,
-      shrinePlaque,
       shrineAura,
       mirrorPad
     );
