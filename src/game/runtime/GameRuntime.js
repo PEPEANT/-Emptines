@@ -197,17 +197,27 @@ export class GameRuntime {
     const cityConfig = hubFlowConfig?.city ?? {};
     const portalConfig = hubFlowConfig?.portal ?? {};
     this.hubFlowEnabled = Boolean(hubFlowConfig?.enabled);
-    this.flowStage = this.hubFlowEnabled ? "bridge_name" : "city_live";
+    this.flowStage = this.hubFlowEnabled ? "bridge_approach" : "city_live";
     this.flowClock = 0;
     this.hubIntroDuration = parseSeconds(hubFlowConfig?.introSeconds, 4.8, 0.8);
+    this.bridgeApproachSpawn = parseVec3(
+      bridgeConfig?.approachSpawn,
+      [0, GAME_CONSTANTS.PLAYER_HEIGHT, -98]
+    );
     this.bridgeSpawn = parseVec3(
       bridgeConfig?.spawn,
-      [0, GAME_CONSTANTS.PLAYER_HEIGHT, -78]
+      [0, GAME_CONSTANTS.PLAYER_HEIGHT, -86]
     );
+    this.bridgeNpcPosition = parseVec3(bridgeConfig?.npcPosition, [0, 0, -82]);
+    this.bridgeNpcTriggerRadius = Math.max(2.5, Number(bridgeConfig?.npcTriggerRadius) || 5);
+    this.bridgeMirrorPosition = parseVec3(bridgeConfig?.mirrorPosition, [0, 1.72, -76]);
+    this.bridgeMirrorLookSeconds = parseSeconds(bridgeConfig?.mirrorLookSeconds, 1.5, 0.4);
+    this.mirrorLookClock = 0;
     this.bridgeCityEntry = parseVec3(
       bridgeConfig?.cityEntry,
       [0, GAME_CONSTANTS.PLAYER_HEIGHT, -18]
     );
+    this.bridgeBoundaryRadius = Math.max(1.4, Number(bridgeConfig?.boundaryRadius) || 3.2);
     this.citySpawn = parseVec3(
       cityConfig?.spawn,
       [0, GAME_CONSTANTS.PLAYER_HEIGHT, -8]
@@ -225,13 +235,25 @@ export class GameRuntime {
     this.portalPhaseClock = this.portalCooldownSeconds;
     this.portalTransitioning = false;
     this.portalPulseClock = 0;
+    this.waterDeltaSmoothed = 1 / 60;
     this.hubFlowGroup = null;
     this.portalGroup = null;
     this.portalRing = null;
     this.portalCore = null;
+    this.npcGuideGroup = null;
+    this.mirrorGateGroup = null;
+    this.mirrorGatePanel = null;
+    this.bridgeBoundaryMarker = null;
+    this.bridgeBoundaryRing = null;
+    this.bridgeBoundaryHalo = null;
+    this.bridgeBoundaryBeam = null;
+    this.bridgeBoundaryDingClock = 0;
+    this.bridgeBoundaryDingTriggered = false;
     this.hubFlowUiBound = false;
     this.cityIntroStart = new THREE.Vector3();
     this.cityIntroEnd = new THREE.Vector3();
+    this.tempVecA = new THREE.Vector3();
+    this.tempVecB = new THREE.Vector3();
     this.flowHeadlineCache = {
       title: "",
       subtitle: ""
@@ -431,6 +453,13 @@ export class GameRuntime {
     this.portalGroup = null;
     this.portalRing = null;
     this.portalCore = null;
+    this.npcGuideGroup = null;
+    this.mirrorGateGroup = null;
+    this.mirrorGatePanel = null;
+    this.bridgeBoundaryMarker = null;
+    this.bridgeBoundaryRing = null;
+    this.bridgeBoundaryHalo = null;
+    this.bridgeBoundaryBeam = null;
   }
 
   setupHubFlowWorld() {
@@ -472,13 +501,6 @@ export class GameRuntime {
       emissive: 0x171d23,
       emissiveIntensity: 0.1
     });
-    const bridgeRailMaterial = new THREE.MeshStandardMaterial({
-      color: this.bridgeRailColor,
-      roughness: 0.48,
-      metalness: 0.35,
-      emissive: 0x253445,
-      emissiveIntensity: 0.12
-    });
     const bridgeDeck = new THREE.Mesh(
       new THREE.BoxGeometry(this.bridgeWidth, 0.32, bridgeDeckLength),
       bridgeDeckMaterial
@@ -486,40 +508,6 @@ export class GameRuntime {
     bridgeDeck.castShadow = !this.mobileEnabled;
     bridgeDeck.receiveShadow = true;
     bridgeGroup.add(bridgeDeck);
-
-    const railHeight = 1.35;
-    const railThickness = 0.26;
-    const bridgeRailLeft = new THREE.Mesh(
-      new THREE.BoxGeometry(railThickness, railHeight, bridgeDeckLength),
-      bridgeRailMaterial
-    );
-    bridgeRailLeft.position.set(-this.bridgeWidth * 0.5 + railThickness * 0.5, railHeight * 0.5, 0);
-    bridgeRailLeft.castShadow = !this.mobileEnabled;
-    bridgeRailLeft.receiveShadow = true;
-    bridgeGroup.add(bridgeRailLeft);
-
-    const bridgeRailRight = bridgeRailLeft.clone();
-    bridgeRailRight.position.x = this.bridgeWidth * 0.5 - railThickness * 0.5;
-    bridgeGroup.add(bridgeRailRight);
-
-    const beaconMaterial = new THREE.MeshStandardMaterial({
-      color: 0x9edcff,
-      roughness: 0.16,
-      metalness: 0.14,
-      emissive: 0x6dc8ff,
-      emissiveIntensity: 0.82
-    });
-    const beaconGeometry = new THREE.BoxGeometry(0.34, 0.24, 0.34);
-    const lightCount = Math.max(8, Math.round(bridgeDeckLength / 8));
-    for (let i = 0; i <= lightCount; i += 1) {
-      const ratio = lightCount <= 0 ? 0 : i / lightCount;
-      const z = -bridgeDeckLength * 0.5 + ratio * bridgeDeckLength;
-      const leftBeacon = new THREE.Mesh(beaconGeometry, beaconMaterial);
-      leftBeacon.position.set(-this.bridgeWidth * 0.5 + 0.7, 0.45, z);
-      const rightBeacon = leftBeacon.clone();
-      rightBeacon.position.x = this.bridgeWidth * 0.5 - 0.7;
-      bridgeGroup.add(leftBeacon, rightBeacon);
-    }
 
     const cityGroup = new THREE.Group();
     cityGroup.position.set(this.citySpawn.x, 0, this.citySpawn.z + 4);
@@ -574,6 +562,143 @@ export class GameRuntime {
       cityGroup.add(tower);
     }
 
+    const npcGuide = new THREE.Group();
+    npcGuide.position.set(this.bridgeNpcPosition.x, 0, this.bridgeNpcPosition.z);
+
+    const npcBody = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.32, 0.86, 4, 8),
+      new THREE.MeshStandardMaterial({
+        color: 0x516578,
+        roughness: 0.44,
+        metalness: 0.18,
+        emissive: 0x2a4159,
+        emissiveIntensity: 0.26
+      })
+    );
+    npcBody.position.y = 0.92;
+    npcBody.castShadow = !this.mobileEnabled;
+    npcBody.receiveShadow = true;
+
+    const npcHead = new THREE.Mesh(
+      new THREE.SphereGeometry(0.24, 14, 14),
+      new THREE.MeshStandardMaterial({
+        color: 0x84a4c2,
+        roughness: 0.3,
+        metalness: 0.18,
+        emissive: 0x3d6184,
+        emissiveIntensity: 0.32
+      })
+    );
+    npcHead.position.y = 1.65;
+    npcHead.castShadow = !this.mobileEnabled;
+    npcHead.receiveShadow = true;
+
+    const npcPad = new THREE.Mesh(
+      new THREE.RingGeometry(0.82, 1.18, this.mobileEnabled ? 24 : 36),
+      new THREE.MeshBasicMaterial({
+        color: 0x9ad6ff,
+        transparent: true,
+        opacity: 0.78,
+        side: THREE.DoubleSide,
+        depthWrite: false
+      })
+    );
+    npcPad.rotation.x = -Math.PI / 2;
+    npcPad.position.y = 0.04;
+
+    npcGuide.add(npcBody, npcHead, npcPad);
+
+    const mirrorGate = new THREE.Group();
+    mirrorGate.position.set(this.bridgeMirrorPosition.x, 0, this.bridgeMirrorPosition.z);
+    mirrorGate.visible = false;
+
+    const mirrorFrame = new THREE.Mesh(
+      new THREE.BoxGeometry(2.6, 3.9, 0.22),
+      new THREE.MeshStandardMaterial({
+        color: 0x3d4d5f,
+        roughness: 0.34,
+        metalness: 0.58,
+        emissive: 0x1d3348,
+        emissiveIntensity: 0.24
+      })
+    );
+    mirrorFrame.position.y = this.bridgeMirrorPosition.y;
+    mirrorFrame.castShadow = !this.mobileEnabled;
+    mirrorFrame.receiveShadow = true;
+
+    const mirrorPanel = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.08, 3.34),
+      new THREE.MeshStandardMaterial({
+        color: 0xdaf5ff,
+        roughness: 0.08,
+        metalness: 0.96,
+        emissive: 0x4fa7d4,
+        emissiveIntensity: 0.22,
+        transparent: true,
+        opacity: 0.86
+      })
+    );
+    mirrorPanel.position.set(0, this.bridgeMirrorPosition.y, 0.12);
+    mirrorPanel.rotation.y = Math.PI;
+    mirrorPanel.receiveShadow = false;
+
+    const mirrorPad = new THREE.Mesh(
+      new THREE.RingGeometry(1.2, 1.65, this.mobileEnabled ? 24 : 36),
+      new THREE.MeshBasicMaterial({
+        color: 0x7df0ff,
+        transparent: true,
+        opacity: 0.74,
+        side: THREE.DoubleSide,
+        depthWrite: false
+      })
+    );
+    mirrorPad.rotation.x = -Math.PI / 2;
+    mirrorPad.position.y = 0.05;
+
+    mirrorGate.add(mirrorFrame, mirrorPanel, mirrorPad);
+
+    const boundaryMarker = new THREE.Group();
+    boundaryMarker.position.set(this.bridgeCityEntry.x, 0, this.bridgeCityEntry.z);
+
+    const boundaryRing = new THREE.Mesh(
+      new THREE.TorusGeometry(this.bridgeWidth * 0.54, 0.19, 20, this.mobileEnabled ? 30 : 54),
+      new THREE.MeshStandardMaterial({
+        color: 0x9ce5ff,
+        roughness: 0.18,
+        metalness: 0.38,
+        emissive: 0x53c8ff,
+        emissiveIntensity: 0.32,
+        transparent: true,
+        opacity: 0.68
+      })
+    );
+    boundaryRing.rotation.x = Math.PI / 2;
+    boundaryRing.position.y = 0.34;
+
+    const boundaryHalo = new THREE.Mesh(
+      new THREE.RingGeometry(this.bridgeWidth * 0.34, this.bridgeWidth * 0.72, this.mobileEnabled ? 30 : 52),
+      new THREE.MeshBasicMaterial({
+        color: 0x89f2ff,
+        transparent: true,
+        opacity: 0.22,
+        side: THREE.DoubleSide,
+        depthWrite: false
+      })
+    );
+    boundaryHalo.rotation.x = -Math.PI / 2;
+    boundaryHalo.position.y = 0.06;
+
+    const boundaryBeam = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.08, 0.08, 2.7, this.mobileEnabled ? 10 : 14),
+      new THREE.MeshBasicMaterial({
+        color: 0x8fe9ff,
+        transparent: true,
+        opacity: 0.22,
+        depthWrite: false
+      })
+    );
+    boundaryBeam.position.y = 1.46;
+
     const portalGroup = new THREE.Group();
     portalGroup.position.copy(this.portalFloorPosition);
     portalGroup.position.y = 0;
@@ -624,9 +749,19 @@ export class GameRuntime {
     this.portalGroup = portalGroup;
     this.portalRing = portalRing;
     this.portalCore = portalCore;
+    this.npcGuideGroup = npcGuide;
+    this.mirrorGateGroup = mirrorGate;
+    this.mirrorGatePanel = mirrorPanel;
+    this.bridgeBoundaryMarker = boundaryMarker;
+    this.bridgeBoundaryRing = boundaryRing;
+    this.bridgeBoundaryHalo = boundaryHalo;
+    this.bridgeBoundaryBeam = boundaryBeam;
 
-    group.add(bridgeGroup, cityGroup, portalGroup);
+    boundaryMarker.add(boundaryRing, boundaryHalo, boundaryBeam);
+    group.add(bridgeGroup, cityGroup, npcGuide, mirrorGate, boundaryMarker, portalGroup);
     this.scene.add(group);
+    this.setMirrorGateVisible(this.flowStage === "bridge_mirror");
+    this.updateBridgeBoundaryMarker(0);
     this.updatePortalVisual();
   }
 
@@ -638,19 +773,23 @@ export class GameRuntime {
       return;
     }
 
-    this.flowStage = "bridge_name";
+    this.flowStage = "bridge_approach";
     this.flowClock = 0;
+    this.mirrorLookClock = 0;
+    this.bridgeBoundaryDingClock = 0;
+    this.bridgeBoundaryDingTriggered = false;
     this.portalPhase = "cooldown";
     this.portalPhaseClock = this.portalCooldownSeconds;
-    this.playerPosition.copy(this.bridgeSpawn);
-    this.yaw = this.getLookYaw(this.bridgeSpawn, this.bridgeCityEntry);
+    this.playerPosition.copy(this.bridgeApproachSpawn);
+    this.yaw = this.getLookYaw(this.bridgeApproachSpawn, this.bridgeNpcPosition);
     this.pitch = -0.03;
     this.setFlowHeadline(
-      "Bridge Checkpoint",
-      "Pick your callsign. Access to the city opens after registration."
+      "다리 입구",
+      "검문소 안내원 쪽으로 이동하세요."
     );
     this.hud.setStatus(this.getStatusText());
-    this.showNicknameGate();
+    this.hideNicknameGate();
+    this.setMirrorGateVisible(false);
   }
 
   bindHubFlowUiEvents() {
@@ -672,7 +811,10 @@ export class GameRuntime {
     this.nicknameGateEl.classList.remove("hidden");
     this.setNicknameError("");
     if (this.nicknameInputEl) {
-      const nextName = this.localPlayerName === "PLAYER" ? "" : this.localPlayerName;
+      const nextName =
+        /^PLAYER(?:_\d+)?$/i.test(this.localPlayerName) || /^플레이어(?:_\d+)?$/i.test(this.localPlayerName)
+          ? ""
+          : this.localPlayerName;
       this.nicknameInputEl.value = nextName;
       window.setTimeout(() => {
         this.nicknameInputEl?.focus();
@@ -702,7 +844,7 @@ export class GameRuntime {
 
     const raw = String(this.nicknameInputEl?.value ?? "").trim();
     if (raw.length < 2) {
-      this.setNicknameError("Callsign must use at least 2 characters.");
+      this.setNicknameError("호출명은 최소 2자 이상이어야 합니다.");
       return;
     }
 
@@ -711,18 +853,16 @@ export class GameRuntime {
     this.pendingPlayerNameSync = true;
     this.syncPlayerNameIfConnected();
 
-    this.cityIntroStart.copy(this.playerPosition);
-    this.cityIntroEnd.copy(this.citySpawn);
     this.hideNicknameGate();
-    this.flowStage = "city_intro";
+    this.flowStage = "bridge_mirror";
+    this.mirrorLookClock = 0;
     this.flowClock = 0;
     this.keys.clear();
     this.chalkDrawingActive = false;
     this.chalkLastStamp = null;
-    if (document.pointerLockElement === this.renderer.domElement) {
-      document.exitPointerLock?.();
-    }
-    this.setFlowHeadline("Transit Sequence", "City gate opening...");
+    this.setMirrorGateVisible(true);
+    this.yaw = this.getLookYaw(this.playerPosition, this.bridgeMirrorPosition);
+    this.setFlowHeadline("거울 확인", "거울을 바라보면 이동 승인이 완료됩니다.");
     this.hud.setStatus(this.getStatusText());
     this.syncGameplayUiForFlow();
   }
@@ -734,6 +874,60 @@ export class GameRuntime {
     if (!gameplayEnabled) {
       this.setChatOpen(false);
     }
+  }
+
+  setMirrorGateVisible(visible) {
+    if (this.mirrorGateGroup) {
+      this.mirrorGateGroup.visible = Boolean(visible);
+    }
+  }
+
+  getNpcDistance() {
+    const dx = this.playerPosition.x - this.bridgeNpcPosition.x;
+    const dz = this.playerPosition.z - this.bridgeNpcPosition.z;
+    return Math.hypot(dx, dz);
+  }
+
+  evaluateMirrorFocus() {
+    const dx = this.playerPosition.x - this.bridgeMirrorPosition.x;
+    const dz = this.playerPosition.z - this.bridgeMirrorPosition.z;
+    const distance = Math.hypot(dx, dz);
+    if (distance > 5.2) {
+      return 0;
+    }
+
+    this.tempVecA.set(this.bridgeMirrorPosition.x, this.bridgeMirrorPosition.y, this.bridgeMirrorPosition.z);
+    this.tempVecA.sub(this.camera.position).normalize();
+    this.camera.getWorldDirection(this.tempVecB);
+    const alignment = this.tempVecA.dot(this.tempVecB);
+    return THREE.MathUtils.clamp((alignment - 0.86) / 0.14, 0, 1);
+  }
+
+  triggerBridgeBoundaryDing() {
+    this.bridgeBoundaryDingClock = 0.72;
+    this.bridgeBoundaryDingTriggered = true;
+  }
+
+  updateBridgeBoundaryMarker(delta) {
+    if (!this.bridgeBoundaryMarker || !this.bridgeBoundaryRing || !this.bridgeBoundaryHalo || !this.bridgeBoundaryBeam) {
+      return;
+    }
+
+    this.bridgeBoundaryDingClock = Math.max(0, this.bridgeBoundaryDingClock - delta);
+    const dingAlpha = THREE.MathUtils.clamp(this.bridgeBoundaryDingClock / 0.72, 0, 1);
+    const pulse = 0.5 + 0.5 * Math.sin(this.portalPulseClock * 5.2);
+
+    const ringMaterial = this.bridgeBoundaryRing.material;
+    const haloMaterial = this.bridgeBoundaryHalo.material;
+    const beamMaterial = this.bridgeBoundaryBeam.material;
+
+    ringMaterial.emissiveIntensity = 0.24 + pulse * 0.24 + dingAlpha * 1.32;
+    ringMaterial.opacity = 0.6 + pulse * 0.12 + dingAlpha * 0.24;
+    haloMaterial.opacity = 0.18 + pulse * 0.2 + dingAlpha * 0.44;
+    beamMaterial.opacity = 0.16 + pulse * 0.18 + dingAlpha * 0.38;
+
+    const scale = 1 + dingAlpha * 0.22;
+    this.bridgeBoundaryMarker.scale.set(scale, 1 + dingAlpha * 0.06, scale);
   }
 
   setFlowHeadline(title, subtitle) {
@@ -765,12 +959,23 @@ export class GameRuntime {
     return Math.atan2(-dx, -dz);
   }
 
+  canMovePlayer() {
+    if (!this.hubFlowEnabled) {
+      return true;
+    }
+    return (
+      this.flowStage === "bridge_approach" ||
+      this.flowStage === "bridge_mirror" ||
+      this.flowStage === "city_live"
+    );
+  }
+
   canUseGameplayControls() {
     return !this.hubFlowEnabled || this.flowStage === "city_live";
   }
 
   canUsePointerLock() {
-    return this.canUseGameplayControls() && !this.portalTransitioning;
+    return this.canMovePlayer() && !this.portalTransitioning;
   }
 
   updateHubFlow(delta) {
@@ -779,9 +984,82 @@ export class GameRuntime {
     }
 
     this.portalPulseClock += delta;
+    this.updateBridgeBoundaryMarker(delta);
+
+    if (this.flowStage === "bridge_approach") {
+      const half = Math.max(1.8, this.bridgeWidth * 0.5 - 0.72);
+      this.playerPosition.x = THREE.MathUtils.clamp(
+        this.playerPosition.x,
+        this.bridgeSpawn.x - half,
+        this.bridgeSpawn.x + half
+      );
+      const npcDistance = this.getNpcDistance();
+      this.setFlowHeadline(
+        "다리 입구",
+        `검문소 안내원까지 ${Math.max(0, Math.ceil(npcDistance))}m`
+      );
+      this.updatePortalVisual();
+      if (npcDistance <= this.bridgeNpcTriggerRadius) {
+        this.flowStage = "bridge_name";
+        this.keys.clear();
+        this.chalkDrawingActive = false;
+        this.chalkLastStamp = null;
+        if (document.pointerLockElement === this.renderer.domElement) {
+          document.exitPointerLock?.();
+        }
+        this.showNicknameGate();
+        this.setFlowHeadline("검문소 등록", "안내원 앞에서 호출명을 등록하세요.");
+        this.hud.setStatus(this.getStatusText());
+      }
+      return;
+    }
 
     if (this.flowStage === "bridge_name") {
       this.updatePortalVisual();
+      return;
+    }
+
+    if (this.flowStage === "bridge_mirror") {
+      const half = Math.max(1.8, this.bridgeWidth * 0.5 - 0.72);
+      this.playerPosition.x = THREE.MathUtils.clamp(
+        this.playerPosition.x,
+        this.bridgeSpawn.x - half,
+        this.bridgeSpawn.x + half
+      );
+      const focus = this.evaluateMirrorFocus();
+      if (focus > 0.35) {
+        this.mirrorLookClock = Math.min(
+          this.bridgeMirrorLookSeconds,
+          this.mirrorLookClock + delta * focus
+        );
+      } else {
+        this.mirrorLookClock = Math.max(0, this.mirrorLookClock - delta * 0.7);
+      }
+      const progress = THREE.MathUtils.clamp(
+        this.mirrorLookClock / this.bridgeMirrorLookSeconds,
+        0,
+        1
+      );
+      this.setFlowHeadline(
+        "거울 확인",
+        `반사 정렬 진행률 ${Math.round(progress * 100)}%`
+      );
+      this.updatePortalVisual();
+      if (progress >= 1) {
+        this.cityIntroStart.copy(this.playerPosition);
+        this.cityIntroEnd.copy(this.citySpawn);
+        this.flowStage = "city_intro";
+        this.flowClock = 0;
+        this.bridgeBoundaryDingTriggered = false;
+        this.bridgeBoundaryDingClock = 0;
+        this.keys.clear();
+        this.setMirrorGateVisible(false);
+        if (document.pointerLockElement === this.renderer.domElement) {
+          document.exitPointerLock?.();
+        }
+        this.setFlowHeadline("이동 시퀀스", "도시 게이트를 여는 중...");
+        this.hud.setStatus(this.getStatusText());
+      }
       return;
     }
 
@@ -790,7 +1068,14 @@ export class GameRuntime {
       const alpha = THREE.MathUtils.clamp(this.flowClock / this.hubIntroDuration, 0, 1);
       this.playerPosition.lerpVectors(this.cityIntroStart, this.cityIntroEnd, alpha);
       const secondsLeft = Math.max(0, Math.ceil(this.hubIntroDuration - this.flowClock));
-      this.setFlowHeadline("Transit Sequence", `City gate opening in ${secondsLeft}s`);
+      this.setFlowHeadline("이동 시퀀스", `${secondsLeft}초 후 도시 게이트 개방`);
+      if (!this.bridgeBoundaryDingTriggered) {
+        const dx = this.playerPosition.x - this.bridgeCityEntry.x;
+        const dz = this.playerPosition.z - this.bridgeCityEntry.z;
+        if (dx * dx + dz * dz <= this.bridgeBoundaryRadius * this.bridgeBoundaryRadius) {
+          this.triggerBridgeBoundaryDing();
+        }
+      }
       this.updatePortalVisual();
       if (alpha >= 1) {
         this.flowStage = "city_live";
@@ -818,7 +1103,7 @@ export class GameRuntime {
   updatePortalPhase(delta) {
     this.portalPhaseClock = Math.max(0, this.portalPhaseClock - delta);
     if (this.portalPhase === "cooldown") {
-      this.setFlowHeadline("City Live", `Next portal event in ${Math.ceil(this.portalPhaseClock)}s`);
+      this.setFlowHeadline("도시 운영 중", `다음 포탈 이벤트까지 ${Math.ceil(this.portalPhaseClock)}초`);
       if (this.portalPhaseClock <= 0) {
         this.portalPhase = "warning";
         this.portalPhaseClock = this.portalWarningSeconds;
@@ -827,7 +1112,7 @@ export class GameRuntime {
     }
 
     if (this.portalPhase === "warning") {
-      this.setFlowHeadline("Anomaly Rising", `Portal opening in ${Math.ceil(this.portalPhaseClock)}s`);
+      this.setFlowHeadline("이상 징후 감지", `${Math.ceil(this.portalPhaseClock)}초 후 포탈 개방`);
       if (this.portalPhaseClock <= 0) {
         this.portalPhase = "open";
         this.portalPhaseClock = this.portalOpenSeconds;
@@ -838,13 +1123,13 @@ export class GameRuntime {
     if (this.portalPhase === "open") {
       if (this.portalTargetUrl) {
         this.setFlowHeadline(
-          "Portal Open",
-          `Enter the gate now (${Math.ceil(this.portalPhaseClock)}s left)`
+          "포탈 개방",
+          `지금 게이트에 진입하세요 (남은 시간 ${Math.ceil(this.portalPhaseClock)}초)`
         );
       } else {
         this.setFlowHeadline(
-          "Portal Open / No Target",
-          "Set ?portal=https://... to enable deployment route."
+          "포탈 개방 / 대상 없음",
+          "?portal=https://... 값을 지정해 이동 경로를 설정하세요."
         );
       }
       if (this.portalPhaseClock <= 0) {
@@ -951,8 +1236,8 @@ export class GameRuntime {
       this.portalPhase = "cooldown";
       this.portalPhaseClock = this.portalCooldownSeconds;
       this.setFlowHeadline(
-        "Portal Link Missing",
-        "Set a deployment URL with ?portal=https://... then retry."
+        "포탈 링크 누락",
+        "?portal=https://... 로 이동 주소를 지정한 뒤 다시 시도하세요."
       );
       return;
     }
@@ -961,7 +1246,7 @@ export class GameRuntime {
     this.flowStage = "portal_transfer";
     this.hud.setStatus(this.getStatusText());
     this.syncGameplayUiForFlow();
-    this.setPortalTransition(true, "Portal sync in progress...");
+    this.setPortalTransition(true, "포탈 동기화 중...");
 
     window.setTimeout(() => {
       window.location.assign(destination);
@@ -1211,10 +1496,12 @@ export class GameRuntime {
   setupBoundaryWalls(config = {}) {
     this.clearBoundaryWalls();
     if (!config?.enabled) {
-      this.playerBoundsHalfExtent = Math.max(
-        4,
-        GAME_CONSTANTS.WORLD_LIMIT - this.playerCollisionRadius
-      );
+      const groundSize = Number(this.worldContent?.ground?.size);
+      const fallbackHalfExtent =
+        Number.isFinite(groundSize) && groundSize > 20
+          ? groundSize * 0.5 - this.playerCollisionRadius
+          : GAME_CONSTANTS.WORLD_LIMIT - this.playerCollisionRadius;
+      this.playerBoundsHalfExtent = Math.max(4, fallbackHalfExtent);
       return;
     }
 
@@ -1473,9 +1760,23 @@ export class GameRuntime {
       return texture;
     };
 
-    const shorelineX = Number(config.shorelineX ?? oceanConfig.shorelineX ?? 12000);
-    const width = Math.max(200, Number(config.width) || 7800);
-    const depth = Math.max(2000, Number(config.depth) || 220000);
+    const width = Math.max(40, Number(config.width) || 7800);
+    const depth = Math.max(60, Number(config.depth) || 220000);
+    const shoreDirectionRaw = Number(config.shoreDirection ?? oceanConfig.shoreDirection ?? 1);
+    const shoreDirection = shoreDirectionRaw < 0 ? -1 : 1;
+    const shorelineCandidate = Number(config.shorelineX ?? oceanConfig.shorelineX);
+    const explicitCenterX = Number(config.positionX);
+    const hasCenterX = Number.isFinite(explicitCenterX);
+    const beachCenterX = hasCenterX
+      ? explicitCenterX
+      : Number.isFinite(shorelineCandidate)
+        ? shorelineCandidate - shoreDirection * width * 0.5
+        : 12000 - shoreDirection * width * 0.5;
+    const shorelineX = Number.isFinite(shorelineCandidate)
+      ? shorelineCandidate
+      : beachCenterX + shoreDirection * width * 0.5;
+    const explicitZ = Number(config.positionZ ?? oceanConfig.positionZ);
+    const beachZ = Number.isFinite(explicitZ) ? explicitZ : 0;
     const repeatX = Number(config.repeatX) || 56;
     const repeatY = Number(config.repeatY) || 950;
 
@@ -1517,9 +1818,9 @@ export class GameRuntime {
     );
     beach.rotation.x = -Math.PI / 2;
     beach.position.set(
-      shorelineX - width * 0.5,
+      beachCenterX,
       Number(config.positionY) || 0.025,
-      Number(config.positionZ) || 0
+      beachZ
     );
     beach.receiveShadow = true;
     beach.renderOrder = 4;
@@ -1539,7 +1840,11 @@ export class GameRuntime {
       })
     );
     foam.rotation.x = -Math.PI / 2;
-    foam.position.set(shorelineX + foamWidth * 0.4, beach.position.y + 0.015, Number(config.positionZ) || 0);
+    foam.position.set(
+      shorelineX + shoreDirection * foamWidth * 0.4,
+      beach.position.y + 0.015,
+      beachZ
+    );
     foam.userData.baseOpacity = foam.material.opacity;
     foam.userData.elapsed = 0;
     foam.material.toneMapped = false;
@@ -1560,7 +1865,11 @@ export class GameRuntime {
       })
     );
     wetBand.rotation.x = -Math.PI / 2;
-    wetBand.position.set(shorelineX - wetBandWidth * 0.32, beach.position.y + 0.01, Number(config.positionZ) || 0);
+    wetBand.position.set(
+      shorelineX - shoreDirection * wetBandWidth * 0.32,
+      beach.position.y + 0.01,
+      beachZ
+    );
     wetBand.userData.baseOpacity = wetBand.material.opacity;
     wetBand.userData.elapsed = 0;
     wetBand.material.toneMapped = false;
@@ -1594,12 +1903,19 @@ export class GameRuntime {
       return;
     }
 
-    const width = Math.max(2000, Number(config.width) || 120000);
-    const depth = Math.max(2000, Number(config.depth) || 220000);
+    const width = Math.max(40, Number(config.width) || 120000);
+    const depth = Math.max(60, Number(config.depth) || 220000);
+    const shoreDirectionRaw = Number(config.shoreDirection ?? 1);
+    const shoreDirection = shoreDirectionRaw < 0 ? -1 : 1;
     const shorelineX = Number(config.shorelineX);
-    const centerX = Number.isFinite(shorelineX)
-      ? shorelineX + width * 0.5
-      : Number(config.positionX) || 60000;
+    const explicitCenterX = Number(config.positionX);
+    const centerX = Number.isFinite(explicitCenterX)
+      ? explicitCenterX
+      : Number.isFinite(shorelineX)
+        ? shorelineX + shoreDirection * width * 0.5
+        : 60000;
+    const explicitZ = Number(config.positionZ);
+    const centerZ = Number.isFinite(explicitZ) ? explicitZ : 0;
     const normalMapUrl =
       String(config.normalTextureUrl ?? "").trim() ||
       "/assets/graphics/world/textures/oss-water/waternormals.jpg";
@@ -1621,27 +1937,28 @@ export class GameRuntime {
       distortionScale: Number(config.distortionScale) || 2.2,
       fog: Boolean(this.scene.fog),
       alpha: THREE.MathUtils.clamp(Number(config.opacity) || 0.92, 0.75, 1),
-      side: THREE.DoubleSide
+      side: THREE.FrontSide
     });
 
     water.rotation.x = -Math.PI / 2;
     water.position.set(
       centerX,
       Number(config.positionY) || 0.05,
-      Number(config.positionZ) || 0
+      centerZ
     );
     water.receiveShadow = false;
     water.renderOrder = 3;
     water.frustumCulled = false;
-    water.material.depthWrite = true;
+    water.material.depthWrite = false;
     water.material.depthTest = true;
-    water.material.transparent = false;
     water.userData.timeScale = Number(config.timeScale) || 0.33;
     water.userData.basePositionY = water.position.y;
     water.userData.bobAmplitude = Number(config.bobAmplitude) || 0.05;
     water.userData.bobFrequency = Number(config.bobFrequency) || 0.45;
     water.userData.elapsed = 0;
-    water.userData.shorelineX = Number.isFinite(shorelineX) ? shorelineX : null;
+    water.userData.shorelineX = Number.isFinite(shorelineX)
+      ? shorelineX
+      : centerX - shoreDirection * width * 0.5;
 
     const oceanBase = new THREE.Mesh(
       new THREE.PlaneGeometry(width, depth),
@@ -1670,10 +1987,13 @@ export class GameRuntime {
     if (!uniforms?.time) {
       return;
     }
+    const deltaClamped = THREE.MathUtils.clamp(delta, 1 / 180, 1 / 24);
+    this.waterDeltaSmoothed = THREE.MathUtils.lerp(this.waterDeltaSmoothed, deltaClamped, 0.18);
+    const waterDelta = this.waterDeltaSmoothed;
     const timeScale = Number(this.ocean.userData.timeScale) || 0.33;
-    uniforms.time.value += delta * timeScale;
+    uniforms.time.value += waterDelta * timeScale;
 
-    this.ocean.userData.elapsed = (Number(this.ocean.userData.elapsed) || 0) + delta;
+    this.ocean.userData.elapsed = (Number(this.ocean.userData.elapsed) || 0) + waterDelta;
     const amplitude = Number(this.ocean.userData.bobAmplitude) || 0;
     const frequency = Number(this.ocean.userData.bobFrequency) || 0;
     const baseY = Number(this.ocean.userData.basePositionY) || 0;
@@ -1682,14 +2002,16 @@ export class GameRuntime {
     }
 
     if (this.shoreFoam?.material) {
-      this.shoreFoam.userData.elapsed = (Number(this.shoreFoam.userData.elapsed) || 0) + delta;
+      this.shoreFoam.userData.elapsed =
+        (Number(this.shoreFoam.userData.elapsed) || 0) + waterDelta;
       const pulse = 0.85 + Math.sin(this.shoreFoam.userData.elapsed * 1.4) * 0.15;
       const baseOpacity = Number(this.shoreFoam.userData.baseOpacity) || 0.42;
       this.shoreFoam.material.opacity = THREE.MathUtils.clamp(baseOpacity * pulse, 0.08, 0.95);
       this.shoreFoam.position.y = Math.max(this.ocean.position.y + 0.015, (this.beach?.position.y ?? 0) + 0.01);
     }
     if (this.shoreWetBand?.material) {
-      this.shoreWetBand.userData.elapsed = (Number(this.shoreWetBand.userData.elapsed) || 0) + delta;
+      this.shoreWetBand.userData.elapsed =
+        (Number(this.shoreWetBand.userData.elapsed) || 0) + waterDelta;
       const pulse = 0.9 + Math.sin(this.shoreWetBand.userData.elapsed * 0.7) * 0.1;
       const baseOpacity = Number(this.shoreWetBand.userData.baseOpacity) || 0.28;
       this.shoreWetBand.material.opacity = THREE.MathUtils.clamp(baseOpacity * pulse, 0.06, 0.8);
@@ -1840,23 +2162,27 @@ export class GameRuntime {
         return;
       }
 
-      if (!this.canUseGameplayControls()) {
+      if (!this.canMovePlayer()) {
         return;
       }
 
-      if (event.code === RUNTIME_TUNING.CHAT_OPEN_KEY && this.chatInputEl) {
+      if (
+        event.code === RUNTIME_TUNING.CHAT_OPEN_KEY &&
+        this.chatInputEl &&
+        this.canUseGameplayControls()
+      ) {
         event.preventDefault();
         this.focusChatInput();
         return;
       }
 
-      if (event.code === "KeyB") {
+      if (event.code === "KeyB" && this.canUseGameplayControls()) {
         event.preventDefault();
         this.setActiveTool(this.activeTool === "chalk" ? "move" : "chalk");
         return;
       }
 
-      const colorIndex = this.getColorDigitIndex(event.code);
+      const colorIndex = this.canUseGameplayControls() ? this.getColorDigitIndex(event.code) : -1;
       if (colorIndex >= 0) {
         this.setChalkColorByIndex(colorIndex);
         return;
@@ -2144,7 +2470,7 @@ export class GameRuntime {
     const maybePromise = this.renderer.domElement.requestPointerLock();
     if (maybePromise && typeof maybePromise.catch === "function") {
       maybePromise.catch(() => {
-        this.hud.setStatus(this.networkConnected ? "ONLINE" : "OFFLINE");
+        this.hud.setStatus(this.getStatusText());
       });
     }
   }
@@ -2314,7 +2640,7 @@ export class GameRuntime {
       head.castShadow = true;
       head.receiveShadow = true;
 
-      const nameLabel = this.createTextLabel("PLAYER", "name");
+      const nameLabel = this.createTextLabel("플레이어", "name");
       nameLabel.position.set(0, 2.12, 0);
 
       const chatLabel = this.createTextLabel("", "chat");
@@ -2329,7 +2655,7 @@ export class GameRuntime {
         mesh: root,
         nameLabel,
         chatLabel,
-        name: "PLAYER",
+        name: "플레이어",
         chatExpireAt: 0,
         targetPosition: new THREE.Vector3(0, 0, 0),
         targetYaw: 0,
@@ -2391,7 +2717,7 @@ export class GameRuntime {
   }
 
   updateMovement(delta) {
-    const movementEnabled = this.canUseGameplayControls();
+    const movementEnabled = this.canMovePlayer();
     const keyForward = movementEnabled
       ? (this.keys.has("KeyW") || this.keys.has("ArrowUp") ? 1 : 0) -
         (this.keys.has("KeyS") || this.keys.has("ArrowDown") ? 1 : 0)
@@ -2625,7 +2951,13 @@ export class GameRuntime {
       .trim()
       .replace(/\s+/g, "_")
       .slice(0, 16);
-    return name || "PLAYER";
+    if (!name) {
+      return "플레이어";
+    }
+    if (/^PLAYER(?:_\d+)?$/i.test(name)) {
+      return name.replace(/^PLAYER/i, "플레이어");
+    }
+    return name;
   }
 
   createTextLabel(text, kind = "name") {
@@ -2668,7 +3000,7 @@ export class GameRuntime {
     }
 
     const maxLength = kind === "chat" ? 120 : 16;
-    const fallback = kind === "name" ? "PLAYER" : "";
+    const fallback = kind === "name" ? "플레이어" : "";
     const text = String(rawText ?? "").trim().slice(0, maxLength) || fallback;
     if (label.userData.text === text) {
       return;
@@ -2782,24 +3114,30 @@ export class GameRuntime {
 
   getStatusText() {
     if (this.hubFlowEnabled) {
+      if (this.flowStage === "bridge_approach") {
+        return this.networkConnected ? "온라인 / 접근 중" : "오프라인 / 접근 중";
+      }
       if (this.flowStage === "bridge_name") {
-        return this.networkConnected ? "ONLINE / BRIDGE REG" : "OFFLINE / BRIDGE REG";
+        return this.networkConnected ? "온라인 / 이름 확인" : "오프라인 / 이름 확인";
+      }
+      if (this.flowStage === "bridge_mirror") {
+        return this.networkConnected ? "온라인 / 거울 확인" : "오프라인 / 거울 확인";
       }
       if (this.flowStage === "city_intro") {
-        return this.networkConnected ? "ONLINE / CITY TRANSIT" : "OFFLINE / CITY TRANSIT";
+        return this.networkConnected ? "온라인 / 도시 이동" : "오프라인 / 도시 이동";
       }
       if (this.flowStage === "portal_transfer") {
-        return "PORTAL / TRANSFER";
+        return "포탈 / 이동 중";
       }
     }
 
     if (!this.networkConnected) {
-      return this.socketEndpoint ? "OFFLINE" : "OFFLINE / SET SERVER";
+      return this.socketEndpoint ? "오프라인" : "오프라인 / 서버 필요";
     }
     if (this.pointerLockSupported && !this.pointerLocked && !this.mobileEnabled) {
-      return "ONLINE / CLICK";
+      return "온라인 / 클릭";
     }
-    return "ONLINE";
+    return "온라인";
   }
 
   loop() {
