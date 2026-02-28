@@ -359,6 +359,73 @@ canvas {
     0 0 0 5px rgba(124, 172, 216, 0.35);
 }
 
+#mobile-ui {
+  position: fixed;
+  left: 14px;
+  right: 14px;
+  bottom: 14px;
+  z-index: 40;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  pointer-events: none;
+}
+
+#mobile-move-pad {
+  position: relative;
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+  border: 1px solid rgba(169, 203, 234, 0.58);
+  background:
+    radial-gradient(circle at 38% 35%, rgba(145, 194, 237, 0.2), rgba(12, 30, 46, 0.84)),
+    rgba(8, 22, 35, 0.78);
+  box-shadow:
+    0 0 0 1px rgba(116, 156, 191, 0.2),
+    0 8px 22px rgba(2, 8, 13, 0.46);
+  backdrop-filter: blur(5px);
+  pointer-events: auto;
+  touch-action: none;
+}
+
+#mobile-move-stick {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(198, 226, 250, 0.74);
+  background: radial-gradient(circle at 32% 28%, rgba(227, 244, 255, 0.9), rgba(84, 136, 183, 0.86));
+  box-shadow: 0 6px 14px rgba(5, 14, 22, 0.45);
+}
+
+#mobile-actions {
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+  pointer-events: auto;
+}
+
+.mobile-action-btn {
+  min-width: 88px;
+  height: 38px;
+  border: 1px solid rgba(172, 204, 233, 0.64);
+  border-radius: 9px;
+  background: rgba(10, 24, 39, 0.84);
+  color: #e1f1ff;
+  font: 700 0.72rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mobile-action-btn.active {
+  border-color: rgba(202, 229, 249, 0.9);
+  background: rgba(20, 53, 83, 0.92);
+  box-shadow: 0 0 0 2px rgba(132, 176, 216, 0.24);
+}
+
 #chat-ui {
   position: fixed;
   left: 14px;
@@ -511,7 +578,7 @@ canvas {
   #chat-ui {
     left: 10px;
     right: 10px;
-    bottom: 110px;
+    bottom: 122px;
     width: auto;
   }
 
@@ -521,5 +588,27 @@ canvas {
 
   #chat-input {
     font-size: 0.8rem;
+  }
+
+  #mobile-ui {
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+  }
+
+  #mobile-move-pad {
+    width: 118px;
+    height: 118px;
+  }
+
+  #mobile-move-stick {
+    width: 50px;
+    height: 50px;
+  }
+
+  .mobile-action-btn {
+    min-width: 82px;
+    height: 36px;
+    font-size: 0.67rem;
   }
 }

@@ -33,6 +33,8 @@ function parseSeconds(raw, fallback, min = 0.1) {
 }
 
 const NPC_GREETING_VIDEO_URL = new URL("../../../mp4/grok-video.webm", import.meta.url).href;
+const AD_BILLBOARD_IMAGE_URL = new URL("../../../png/AD.41415786.1.png", import.meta.url).href;
+const DEFAULT_PORTAL_TARGET_URL = "https://github.com/PEPEANT/singularity_ox";
 
 export class GameRuntime {
   constructor(mount, options = {}) {
@@ -170,6 +172,18 @@ export class GameRuntime {
     this.pendingPlayerNameSync = false;
     this.remotePlayers = new Map();
     this.remoteSyncClock = 0;
+    this.remoteLabelDistanceSq =
+      Math.pow(Number(RUNTIME_TUNING.REMOTE_LABEL_MAX_DISTANCE) || 42, 2);
+    this.remoteMeshDistanceSq =
+      Math.pow(Number(RUNTIME_TUNING.REMOTE_MESH_MAX_DISTANCE) || 145, 2);
+    this.remoteFarDistanceSq =
+      Math.pow(Number(RUNTIME_TUNING.REMOTE_FAR_DISTANCE) || 70, 2);
+    this.remoteHardCap = Math.max(16, Number(RUNTIME_TUNING.REMOTE_HARD_CAP) || 180);
+    this.elapsedSeconds = 0;
+    this.lastSentState = null;
+    this.localSyncMinMoveSq = 0.0025;
+    this.localSyncMinYaw = 0.012;
+    this.localSyncMinPitch = 0.012;
     this.chatBubbleLifetimeMs = 4200;
     this.chatLogMaxEntries = RUNTIME_TUNING.CHAT_LOG_MAX_ENTRIES;
     this.chatLogEl = document.getElementById("chat-log");
@@ -179,6 +193,12 @@ export class GameRuntime {
     this.chalkColorsEl = document.getElementById("chalk-colors");
     this.chalkColorButtons = [];
     this.toolButtons = [];
+    this.mobileUiEl = document.getElementById("mobile-ui");
+    this.mobileMovePadEl = document.getElementById("mobile-move-pad");
+    this.mobileMoveStickEl = document.getElementById("mobile-move-stick");
+    this.mobileJumpBtnEl = document.getElementById("mobile-jump");
+    this.mobileSprintBtnEl = document.getElementById("mobile-sprint");
+    this.mobileChatBtnEl = document.getElementById("mobile-chat");
     this.chatOpen = false;
     this.lastLocalChatEcho = "";
     this.lastLocalChatEchoAt = 0;
@@ -238,6 +258,7 @@ export class GameRuntime {
     this.portalPhaseClock = this.portalCooldownSeconds;
     this.portalTransitioning = false;
     this.portalPulseClock = 0;
+    this.portalBillboardUpdateClock = 0;
     this.waterDeltaSmoothed = 1 / 60;
     this.boundaryReturnDelaySeconds = 1.8;
     this.boundaryReturnNoticeSeconds = 1.2;
@@ -249,6 +270,15 @@ export class GameRuntime {
     this.portalGroup = null;
     this.portalRing = null;
     this.portalCore = null;
+    this.portalBillboardGroup = null;
+    this.portalBillboardCanvas = null;
+    this.portalBillboardContext = null;
+    this.portalBillboardTexture = null;
+    this.portalBillboardCache = {
+      line1: "",
+      line2: "",
+      line3: ""
+    };
     this.npcGuideGroup = null;
     this.npcGreetingScreen = null;
     this.npcGreetingVideoEl = null;
@@ -271,6 +301,14 @@ export class GameRuntime {
       title: "",
       subtitle: ""
     };
+    this.mobileMovePointerId = null;
+    this.mobileMoveVector = new THREE.Vector2(0, 0);
+    this.mobileMoveStickRadius = 34;
+    this.mobileLookTouchId = null;
+    this.mobileLookLastX = 0;
+    this.mobileLookLastY = 0;
+    this.mobileJumpQueued = false;
+    this.mobileSprintHeld = false;
 
     this._initialized = false;
   }
@@ -302,6 +340,7 @@ export class GameRuntime {
     this.camera.position.copy(this.playerPosition);
     this.lastSafePosition.copy(this.playerPosition);
     this.syncGameplayUiForFlow();
+    this.syncMobileUiState();
 
     this.hud.update({
       status: this.getStatusText(),
@@ -472,6 +511,19 @@ export class GameRuntime {
     }
     this.npcGreetingScreen = null;
     this.npcGreetingPlayed = false;
+    if (this.portalBillboardTexture) {
+      this.portalBillboardTexture.dispose?.();
+      this.portalBillboardTexture = null;
+    }
+    this.portalBillboardCanvas = null;
+    this.portalBillboardContext = null;
+    this.portalBillboardGroup = null;
+    this.portalBillboardUpdateClock = 0;
+    this.portalBillboardCache = {
+      line1: "",
+      line2: "",
+      line3: ""
+    };
 
     if (!this.hubFlowGroup) {
       return;
@@ -482,6 +534,7 @@ export class GameRuntime {
     this.portalGroup = null;
     this.portalRing = null;
     this.portalCore = null;
+    this.portalBillboardGroup = null;
     this.npcGuideGroup = null;
     this.npcGreetingScreen = null;
     this.mirrorGateGroup = null;
@@ -635,6 +688,7 @@ export class GameRuntime {
       towerCap.receiveShadow = true;
       cityGroup.add(towerCap);
     }
+    this.addPlazaBillboards(cityGroup);
 
     const npcGuide = new THREE.Group();
     npcGuide.position.set(this.bridgeNpcPosition.x, 0, this.bridgeNpcPosition.z);
@@ -990,11 +1044,14 @@ export class GameRuntime {
     );
     portalCore.position.y = 2.45;
     portalGroup.add(portalCore);
+    const portalBillboard = this.createPortalTimeBillboard();
+    portalGroup.add(portalBillboard);
 
     this.hubFlowGroup = group;
     this.portalGroup = portalGroup;
     this.portalRing = portalRing;
     this.portalCore = portalCore;
+    this.portalBillboardGroup = portalBillboard;
     this.npcGuideGroup = npcGuide;
     this.mirrorGateGroup = mirrorGate;
     this.mirrorGatePanel = null;
@@ -1009,6 +1066,163 @@ export class GameRuntime {
     this.setMirrorGateVisible(this.flowStage === "bridge_mirror");
     this.updateBridgeBoundaryMarker(0);
     this.updatePortalVisual();
+  }
+
+  addPlazaBillboards(cityGroup) {
+    if (!cityGroup) {
+      return;
+    }
+
+    const maxAnisotropy = this.renderer?.capabilities?.getMaxAnisotropy?.() ?? 1;
+    const adTexture = this.textureLoader.load(AD_BILLBOARD_IMAGE_URL);
+    adTexture.colorSpace = THREE.SRGBColorSpace;
+    adTexture.anisotropy = this.mobileEnabled ? Math.min(2, maxAnisotropy) : Math.min(8, maxAnisotropy);
+
+    const supportMaterial = new THREE.MeshStandardMaterial({
+      color: 0x2f3946,
+      roughness: 0.52,
+      metalness: 0.24,
+      emissive: 0x121a23,
+      emissiveIntensity: 0.15
+    });
+    const frameMaterial = new THREE.MeshStandardMaterial({
+      color: 0x0f141b,
+      roughness: 0.32,
+      metalness: 0.42,
+      emissive: 0x213041,
+      emissiveIntensity: 0.22
+    });
+    const screenMaterial = new THREE.MeshBasicMaterial({
+      map: adTexture,
+      color: 0xffffff,
+      toneMapped: false
+    });
+    const glowMaterial = new THREE.MeshBasicMaterial({
+      color: 0x5ecbff,
+      transparent: true,
+      opacity: 0.1,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      toneMapped: false
+    });
+    const placements = [
+      { x: -42, z: 8, yaw: 0.42 },
+      { x: 42, z: 8, yaw: -0.42 }
+    ];
+
+    for (const placement of placements) {
+      const board = new THREE.Group();
+      board.position.set(placement.x, 0, placement.z);
+      board.rotation.y = placement.yaw;
+
+      const leftColumn = new THREE.Mesh(new THREE.BoxGeometry(0.44, 8.6, 0.44), supportMaterial);
+      leftColumn.position.set(-3.6, 4.3, -0.22);
+      leftColumn.castShadow = !this.mobileEnabled;
+      leftColumn.receiveShadow = true;
+
+      const rightColumn = leftColumn.clone();
+      rightColumn.position.x = 3.6;
+
+      const frame = new THREE.Mesh(new THREE.BoxGeometry(8.6, 5.1, 0.52), frameMaterial);
+      frame.position.set(0, 7.2, -0.22);
+      frame.castShadow = !this.mobileEnabled;
+      frame.receiveShadow = true;
+
+      const screen = new THREE.Mesh(new THREE.PlaneGeometry(7.8, 4.3), screenMaterial);
+      screen.position.set(0, 7.2, 0.09);
+      screen.renderOrder = 15;
+
+      const glow = new THREE.Mesh(new THREE.PlaneGeometry(8.2, 4.7), glowMaterial);
+      glow.position.set(0, 7.2, 0.07);
+      glow.renderOrder = 14;
+
+      board.add(leftColumn, rightColumn, frame, glow, screen);
+      cityGroup.add(board);
+    }
+  }
+
+  createPortalTimeBillboard() {
+    const board = new THREE.Group();
+    board.position.set(0, 0, 0);
+
+    const supportMaterial = new THREE.MeshStandardMaterial({
+      color: 0x2f3a48,
+      roughness: 0.52,
+      metalness: 0.24,
+      emissive: 0x131b24,
+      emissiveIntensity: 0.12
+    });
+    const frameMaterial = new THREE.MeshStandardMaterial({
+      color: 0x111822,
+      roughness: 0.34,
+      metalness: 0.38,
+      emissive: 0x21374d,
+      emissiveIntensity: 0.18
+    });
+
+    const leftPost = new THREE.Mesh(new THREE.BoxGeometry(0.54, 5.4, 0.54), supportMaterial);
+    leftPost.position.set(-4.6, 2.7, 0);
+    leftPost.castShadow = !this.mobileEnabled;
+    leftPost.receiveShadow = true;
+
+    const rightPost = leftPost.clone();
+    rightPost.position.x = 4.6;
+
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(10.8, 2.7, 0.42), frameMaterial);
+    frame.position.set(0, 5.15, 0);
+    frame.castShadow = !this.mobileEnabled;
+    frame.receiveShadow = true;
+
+    const glowBack = new THREE.Mesh(
+      new THREE.PlaneGeometry(10.1, 2.08),
+      new THREE.MeshBasicMaterial({
+        color: 0x4fc8ff,
+        transparent: true,
+        opacity: 0.12,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        toneMapped: false
+      })
+    );
+    glowBack.position.set(0, 5.15, 0.02);
+    glowBack.renderOrder = 13;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = 1024;
+    canvas.height = 256;
+    const context = canvas.getContext("2d");
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.generateMipmaps = false;
+
+    const screen = new THREE.Mesh(
+      new THREE.PlaneGeometry(9.6, 2.0),
+      new THREE.MeshBasicMaterial({
+        map: texture,
+        transparent: true,
+        toneMapped: false,
+        side: THREE.DoubleSide
+      })
+    );
+    screen.position.set(0, 5.15, 0.08);
+    screen.renderOrder = 14;
+
+    board.add(leftPost, rightPost, frame, glowBack, screen);
+
+    this.portalBillboardCanvas = canvas;
+    this.portalBillboardContext = context;
+    this.portalBillboardTexture = texture;
+    this.portalBillboardUpdateClock = 0;
+    this.portalBillboardCache = {
+      line1: "",
+      line2: "",
+      line3: ""
+    };
+    this.updatePortalTimeBillboard(1, true);
+    return board;
   }
 
   applyInitialFlowSpawn() {
@@ -1122,6 +1336,72 @@ export class GameRuntime {
     if (!gameplayEnabled) {
       this.setChatOpen(false);
     }
+    this.syncMobileUiState();
+  }
+
+  syncMobileUiState() {
+    if (!this.mobileUiEl) {
+      return;
+    }
+    const visible =
+      this.mobileEnabled &&
+      this.canMovePlayer() &&
+      this.flowStage !== "portal_transfer" &&
+      (this.nicknameGateEl?.classList.contains("hidden") ?? true);
+    this.mobileUiEl.classList.toggle("hidden", !visible);
+    if (!visible) {
+      this.resetMobileMoveInput();
+      this.mobileSprintHeld = false;
+      this.mobileJumpQueued = false;
+      this.mobileLookTouchId = null;
+      this.mobileSprintBtnEl?.classList.remove("active");
+      this.mobileJumpBtnEl?.classList.remove("active");
+    }
+  }
+
+  resetMobileMoveInput() {
+    this.mobileMovePointerId = null;
+    this.mobileMoveVector.set(0, 0);
+    if (this.mobileMoveStickEl) {
+      this.mobileMoveStickEl.style.transform = "translate(-50%, -50%)";
+    }
+  }
+
+  updateMobileMoveFromPointer(clientX, clientY) {
+    if (!this.mobileMovePadEl) {
+      return;
+    }
+    const rect = this.mobileMovePadEl.getBoundingClientRect();
+    const centerX = rect.left + rect.width * 0.5;
+    const centerY = rect.top + rect.height * 0.5;
+    const radius = Math.max(18, Math.min(rect.width, rect.height) * 0.34);
+    const dx = clientX - centerX;
+    const dy = clientY - centerY;
+    const distance = Math.hypot(dx, dy);
+    const ratio = distance > radius ? radius / Math.max(distance, 0.0001) : 1;
+    const normalizedX = (dx * ratio) / radius;
+    const normalizedY = (dy * ratio) / radius;
+    this.mobileMoveVector.set(
+      THREE.MathUtils.clamp(normalizedX, -1, 1),
+      THREE.MathUtils.clamp(normalizedY, -1, 1)
+    );
+    this.mobileMoveStickRadius = radius;
+    if (this.mobileMoveStickEl) {
+      const stickX = this.mobileMoveVector.x * radius;
+      const stickY = this.mobileMoveVector.y * radius;
+      this.mobileMoveStickEl.style.transform = `translate(calc(-50% + ${stickX}px), calc(-50% + ${stickY}px))`;
+    }
+  }
+
+  updateMobileLookFromTouch(touch) {
+    const deltaX = touch.clientX - this.mobileLookLastX;
+    const deltaY = touch.clientY - this.mobileLookLastY;
+    this.mobileLookLastX = touch.clientX;
+    this.mobileLookLastY = touch.clientY;
+
+    this.yaw -= deltaX * 0.003;
+    this.pitch -= deltaY * 0.0024;
+    this.pitch = THREE.MathUtils.clamp(this.pitch, -1.52, 1.52);
   }
 
   setMirrorGateVisible(visible) {
@@ -1519,6 +1799,103 @@ export class GameRuntime {
     this.portalGroup.scale.set(1, 1, 1);
   }
 
+  getPortalPhaseLabel() {
+    if (this.portalPhase === "open") {
+      return "PORTAL OPEN";
+    }
+    if (this.portalPhase === "warning") {
+      return "PORTAL ALERT";
+    }
+    if (this.portalPhase === "cooldown") {
+      return "NEXT PORTAL";
+    }
+    return "SYSTEM READY";
+  }
+
+  formatPortalCountdown(totalSeconds) {
+    const safeSeconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+    const minutes = Math.floor(safeSeconds / 60);
+    const seconds = safeSeconds % 60;
+    return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  }
+
+  updatePortalTimeBillboard(delta = 0, force = false) {
+    if (!this.portalBillboardContext || !this.portalBillboardTexture || !this.portalBillboardCanvas) {
+      return;
+    }
+
+    this.portalBillboardUpdateClock += Math.max(0, Number(delta) || 0);
+    if (!force && this.portalBillboardUpdateClock < 0.2) {
+      return;
+    }
+    this.portalBillboardUpdateClock = 0;
+
+    const now = new Date();
+    const hours = String(now.getHours()).padStart(2, "0");
+    const minutes = String(now.getMinutes()).padStart(2, "0");
+    const seconds = String(now.getSeconds()).padStart(2, "0");
+    const localTime = `${hours}:${minutes}:${seconds}`;
+    const phaseLabel = this.getPortalPhaseLabel();
+    const countdown =
+      this.portalPhase === "idle"
+        ? "--:--"
+        : this.formatPortalCountdown(Math.ceil(this.portalPhaseClock));
+    const line1 = "RECLAIM PORTAL";
+    const line2 = `${phaseLabel}  ${countdown}`;
+    const line3 = `LOCAL ${localTime}`;
+
+    if (
+      !force &&
+      this.portalBillboardCache.line1 === line1 &&
+      this.portalBillboardCache.line2 === line2 &&
+      this.portalBillboardCache.line3 === line3
+    ) {
+      return;
+    }
+
+    const context = this.portalBillboardContext;
+    const canvas = this.portalBillboardCanvas;
+    const width = canvas.width;
+    const height = canvas.height;
+
+    context.clearRect(0, 0, width, height);
+    const bgGradient = context.createLinearGradient(0, 0, width, height);
+    bgGradient.addColorStop(0, "rgba(6, 16, 28, 0.96)");
+    bgGradient.addColorStop(1, "rgba(8, 24, 39, 0.98)");
+    context.fillStyle = bgGradient;
+    context.fillRect(0, 0, width, height);
+
+    context.strokeStyle = "rgba(122, 191, 235, 0.72)";
+    context.lineWidth = 6;
+    context.strokeRect(8, 8, width - 16, height - 16);
+
+    context.fillStyle = "rgba(88, 150, 198, 0.12)";
+    for (let y = 22; y < height; y += 8) {
+      context.fillRect(14, y, width - 28, 1);
+    }
+
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.shadowColor = "rgba(90, 199, 255, 0.65)";
+    context.shadowBlur = 12;
+    context.fillStyle = "#d8f2ff";
+    context.font = "700 62px Bahnschrift";
+    context.fillText(line1, width * 0.5, 66);
+
+    context.shadowBlur = 10;
+    context.fillStyle = "#9de7ff";
+    context.font = "700 58px Bahnschrift";
+    context.fillText(line2, width * 0.5, 142);
+
+    context.shadowBlur = 8;
+    context.fillStyle = "#bfe8ff";
+    context.font = "700 40px Bahnschrift";
+    context.fillText(line3, width * 0.5, 210);
+
+    this.portalBillboardTexture.needsUpdate = true;
+    this.portalBillboardCache = { line1, line2, line3 };
+  }
+
   isPlayerInPortalZone() {
     const dx = this.playerPosition.x - this.portalFloorPosition.x;
     const dz = this.playerPosition.z - this.portalFloorPosition.z;
@@ -1635,7 +2012,10 @@ export class GameRuntime {
     }
 
     const configTarget = String(defaultTarget ?? "").trim();
-    return configTarget || null;
+    if (configTarget) {
+      return configTarget;
+    }
+    return DEFAULT_PORTAL_TARGET_URL;
   }
 
   buildPortalTransferUrl() {
@@ -2058,10 +2438,21 @@ export class GameRuntime {
     if (this.chatOpen) {
       return false;
     }
-    if (!this.mobileEnabled && !this.pointerLocked) {
-      return false;
-    }
     return true;
+  }
+
+  updateChalkPointerFromClient(clientX, clientY) {
+    const canvas = this.renderer?.domElement;
+    if (!canvas) {
+      return;
+    }
+    const rect = canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) {
+      return;
+    }
+    const nx = ((clientX - rect.left) / rect.width) * 2 - 1;
+    const ny = -((clientY - rect.top) / rect.height) * 2 + 1;
+    this.chalkPointer.set(THREE.MathUtils.clamp(nx, -1, 1), THREE.MathUtils.clamp(ny, -1, 1));
   }
 
   tryDrawChalkMark() {
@@ -2365,20 +2756,37 @@ export class GameRuntime {
     normalMap.repeat.set(Number(config.normalRepeatX) || 20, Number(config.normalRepeatY) || 20);
     normalMap.anisotropy = this.mobileEnabled ? 2 : 4;
 
-    const water = new Water(new THREE.PlaneGeometry(width, depth), {
-      textureWidth: this.mobileEnabled ? 512 : 1024,
-      textureHeight: this.mobileEnabled ? 512 : 1024,
-      waterNormals: normalMap,
-      sunDirection: this.sunLight
-        ? this.sunLight.position.clone().normalize()
-        : new THREE.Vector3(0.4, 0.8, 0.2),
-      sunColor: config.sunColor ?? 0xffffff,
-      waterColor: config.color ?? 0x2f8ed9,
-      distortionScale: Number(config.distortionScale) || 2.2,
-      fog: Boolean(this.scene.fog),
-      alpha: THREE.MathUtils.clamp(Number(config.opacity) || 0.92, 0.75, 1),
-      side: THREE.FrontSide
-    });
+    let water;
+    try {
+      water = new Water(new THREE.PlaneGeometry(width, depth), {
+        textureWidth: this.mobileEnabled ? 256 : 768,
+        textureHeight: this.mobileEnabled ? 256 : 768,
+        waterNormals: normalMap,
+        sunDirection: this.sunLight
+          ? this.sunLight.position.clone().normalize()
+          : new THREE.Vector3(0.4, 0.8, 0.2),
+        sunColor: config.sunColor ?? 0xffffff,
+        waterColor: config.color ?? 0x2f8ed9,
+        distortionScale: Number(config.distortionScale) || 2.2,
+        fog: Boolean(this.scene.fog),
+        alpha: THREE.MathUtils.clamp(Number(config.opacity) || 0.92, 0.72, 1),
+        side: THREE.DoubleSide
+      });
+    } catch {
+      normalMap.dispose?.();
+      water = new THREE.Mesh(
+        new THREE.PlaneGeometry(width, depth),
+        new THREE.MeshPhysicalMaterial({
+          color: config.color ?? 0x2f8ed9,
+          roughness: 0.12,
+          metalness: 0.08,
+          transmission: 0.04,
+          transparent: true,
+          opacity: THREE.MathUtils.clamp(Number(config.opacity) || 0.92, 0.72, 1),
+          side: THREE.DoubleSide
+        })
+      );
+    }
 
     water.rotation.x = -Math.PI / 2;
     water.position.set(
@@ -2649,12 +3057,23 @@ export class GameRuntime {
     window.addEventListener("blur", () => {
       this.keys.clear();
       this.chalkDrawingActive = false;
+      this.mobileLookTouchId = null;
+      this.mobileSprintHeld = false;
+      this.mobileJumpQueued = false;
+      this.resetMobileMoveInput();
+      this.mobileSprintBtnEl?.classList.remove("active");
+      this.mobileJumpBtnEl?.classList.remove("active");
     });
 
     this.renderer.domElement.addEventListener("click", () => {
       this.tryPointerLock();
     });
     this.renderer.domElement.addEventListener("mousedown", (event) => {
+      if (!this.pointerLocked) {
+        this.updateChalkPointerFromClient(event.clientX, event.clientY);
+      } else {
+        this.chalkPointer.set(0, 0);
+      }
       if (event.button !== 0 || !this.canDrawChalk()) {
         return;
       }
@@ -2669,9 +3088,77 @@ export class GameRuntime {
       this.chalkDrawingActive = false;
       this.chalkLastStamp = null;
     });
+    this.renderer.domElement.addEventListener(
+      "touchstart",
+      (event) => {
+        const touch = event.changedTouches?.[0] ?? event.touches?.[0];
+        if (!touch) {
+          return;
+        }
+        if (this.canDrawChalk()) {
+          this.updateChalkPointerFromClient(touch.clientX, touch.clientY);
+          this.chalkDrawingActive = true;
+          this.chalkLastStamp = null;
+          this.tryDrawChalkMark();
+          return;
+        }
+        if (this.mobileEnabled && this.mobileLookTouchId === null) {
+          this.mobileLookTouchId = touch.identifier;
+          this.mobileLookLastX = touch.clientX;
+          this.mobileLookLastY = touch.clientY;
+        }
+      },
+      { passive: true }
+    );
+    this.renderer.domElement.addEventListener(
+      "touchmove",
+      (event) => {
+        if (this.canDrawChalk()) {
+          const drawTouch = event.touches?.[0];
+          if (!drawTouch) {
+            return;
+          }
+          this.updateChalkPointerFromClient(drawTouch.clientX, drawTouch.clientY);
+          if (this.chalkDrawingActive) {
+            this.tryDrawChalkMark();
+          }
+          return;
+        }
+        if (!this.mobileEnabled || this.mobileLookTouchId === null) {
+          return;
+        }
+        const lookTouch = Array.from(event.touches ?? []).find(
+          (candidate) => candidate.identifier === this.mobileLookTouchId
+        );
+        if (lookTouch) {
+          this.updateMobileLookFromTouch(lookTouch);
+        }
+      },
+      { passive: true }
+    );
+    window.addEventListener(
+      "touchend",
+      (event) => {
+        if (this.mobileLookTouchId !== null) {
+          const endedTouches = Array.from(event.changedTouches ?? []);
+          const ended = endedTouches.some(
+            (touch) => touch.identifier === this.mobileLookTouchId
+          );
+          if (ended) {
+            this.mobileLookTouchId = null;
+          }
+        }
+        this.chalkDrawingActive = false;
+        this.chalkLastStamp = null;
+      },
+      { passive: true }
+    );
 
     document.addEventListener("pointerlockchange", () => {
       this.pointerLocked = document.pointerLockElement === this.renderer.domElement;
+      if (this.pointerLocked) {
+        this.chalkPointer.set(0, 0);
+      }
       this.hud.setStatus(this.getStatusText());
       if (!this.pointerLocked) {
         this.chalkDrawingActive = false;
@@ -2683,7 +3170,11 @@ export class GameRuntime {
       "mousemove",
       (event) => {
         if (!this.pointerLocked && !this.mobileEnabled) {
+          this.updateChalkPointerFromClient(event.clientX, event.clientY);
           return;
+        }
+        if (this.pointerLocked) {
+          this.chalkPointer.set(0, 0);
         }
         const sensitivityX = this.mobileEnabled ? 0.0018 : 0.0023;
         const sensitivityY = this.mobileEnabled ? 0.0016 : 0.002;
@@ -2733,6 +3224,67 @@ export class GameRuntime {
           return;
         }
         this.setChalkColor(String(button.dataset.color || this.selectedChalkColor));
+      });
+    }
+
+    if (this.mobileMovePadEl) {
+      this.mobileMovePadEl.addEventListener("pointerdown", (event) => {
+        if (!this.mobileEnabled || !this.canMovePlayer()) {
+          return;
+        }
+        this.mobileMovePointerId = event.pointerId;
+        this.mobileMovePadEl.setPointerCapture?.(event.pointerId);
+        this.updateMobileMoveFromPointer(event.clientX, event.clientY);
+      });
+      this.mobileMovePadEl.addEventListener("pointermove", (event) => {
+        if (!this.mobileEnabled || event.pointerId !== this.mobileMovePointerId) {
+          return;
+        }
+        this.updateMobileMoveFromPointer(event.clientX, event.clientY);
+      });
+      const clearMovePointer = (event) => {
+        if (event.pointerId !== this.mobileMovePointerId) {
+          return;
+        }
+        this.mobileMovePadEl.releasePointerCapture?.(event.pointerId);
+        this.resetMobileMoveInput();
+      };
+      this.mobileMovePadEl.addEventListener("pointerup", clearMovePointer);
+      this.mobileMovePadEl.addEventListener("pointercancel", clearMovePointer);
+      this.mobileMovePadEl.addEventListener("pointerleave", clearMovePointer);
+    }
+
+    if (this.mobileJumpBtnEl) {
+      const clearJumpVisual = () => this.mobileJumpBtnEl.classList.remove("active");
+      this.mobileJumpBtnEl.addEventListener("pointerdown", () => {
+        if (!this.mobileEnabled || !this.canMovePlayer()) {
+          return;
+        }
+        this.mobileJumpQueued = true;
+        this.mobileJumpBtnEl.classList.add("active");
+      });
+      this.mobileJumpBtnEl.addEventListener("pointerup", clearJumpVisual);
+      this.mobileJumpBtnEl.addEventListener("pointercancel", clearJumpVisual);
+      this.mobileJumpBtnEl.addEventListener("pointerleave", clearJumpVisual);
+    }
+
+    if (this.mobileSprintBtnEl) {
+      const setSprint = (active) => {
+        this.mobileSprintHeld = Boolean(active && this.mobileEnabled && this.canMovePlayer());
+        this.mobileSprintBtnEl.classList.toggle("active", this.mobileSprintHeld);
+      };
+      this.mobileSprintBtnEl.addEventListener("pointerdown", () => setSprint(true));
+      this.mobileSprintBtnEl.addEventListener("pointerup", () => setSprint(false));
+      this.mobileSprintBtnEl.addEventListener("pointercancel", () => setSprint(false));
+      this.mobileSprintBtnEl.addEventListener("pointerleave", () => setSprint(false));
+    }
+
+    if (this.mobileChatBtnEl) {
+      this.mobileChatBtnEl.addEventListener("pointerdown", () => {
+        if (!this.mobileEnabled || !this.canUseGameplayControls()) {
+          return;
+        }
+        this.focusChatInput();
       });
     }
   }
@@ -2788,6 +3340,24 @@ export class GameRuntime {
     }
     if (!this.chalkColorsEl) {
       this.chalkColorsEl = document.getElementById("chalk-colors");
+    }
+    if (!this.mobileUiEl) {
+      this.mobileUiEl = document.getElementById("mobile-ui");
+    }
+    if (!this.mobileMovePadEl) {
+      this.mobileMovePadEl = document.getElementById("mobile-move-pad");
+    }
+    if (!this.mobileMoveStickEl) {
+      this.mobileMoveStickEl = document.getElementById("mobile-move-stick");
+    }
+    if (!this.mobileJumpBtnEl) {
+      this.mobileJumpBtnEl = document.getElementById("mobile-jump");
+    }
+    if (!this.mobileSprintBtnEl) {
+      this.mobileSprintBtnEl = document.getElementById("mobile-sprint");
+    }
+    if (!this.mobileChatBtnEl) {
+      this.mobileChatBtnEl = document.getElementById("mobile-chat");
     }
     this.chalkColorButtons = Array.from(document.querySelectorAll(".chalk-color[data-color]"));
     this.toolButtons = Array.from(document.querySelectorAll(".tool-slot[data-tool]"));
@@ -2940,6 +3510,8 @@ export class GameRuntime {
     socket.on("connect", () => {
       this.networkConnected = true;
       this.localPlayerId = socket.id;
+      this.remoteSyncClock = 0;
+      this.lastSentState = null;
       this.hud.setStatus(this.getStatusText());
       this.syncPlayerNameIfConnected();
     });
@@ -2947,6 +3519,8 @@ export class GameRuntime {
     socket.on("disconnect", () => {
       this.networkConnected = false;
       this.localPlayerId = null;
+      this.remoteSyncClock = 0;
+      this.lastSentState = null;
       this.clearRemotePlayers();
       this.hud.setStatus(this.getStatusText());
       this.hud.setPlayers(1);
@@ -3015,6 +3589,7 @@ export class GameRuntime {
   handleRoomUpdate(room) {
     const players = Array.isArray(room?.players) ? room.players : [];
     const seen = new Set();
+    const remotePool = [];
 
     for (const player of players) {
       const id = String(player?.id ?? "");
@@ -3023,6 +3598,23 @@ export class GameRuntime {
       }
       if (id === this.localPlayerId) {
         this.localPlayerName = this.formatPlayerName(player?.name);
+        continue;
+      }
+      remotePool.push(player);
+    }
+
+    if (remotePool.length > this.remoteHardCap) {
+      remotePool.sort((a, b) => {
+        const da = this.getRemoteDistanceScore(a?.state);
+        const db = this.getRemoteDistanceScore(b?.state);
+        return da - db;
+      });
+      remotePool.length = this.remoteHardCap;
+    }
+
+    for (const player of remotePool) {
+      const id = String(player?.id ?? "");
+      if (!id) {
         continue;
       }
       seen.add(id);
@@ -3042,6 +3634,9 @@ export class GameRuntime {
   handleRemoteSync(payload) {
     const id = String(payload?.id ?? "");
     if (!id || id === this.localPlayerId) {
+      return;
+    }
+    if (!this.remotePlayers.has(id) && this.remotePlayers.size >= this.remoteHardCap) {
       return;
     }
 
@@ -3066,8 +3661,8 @@ export class GameRuntime {
         })
       );
       body.position.y = 0.92;
-      body.castShadow = true;
-      body.receiveShadow = true;
+      body.castShadow = false;
+      body.receiveShadow = false;
 
       const head = new THREE.Mesh(
         new THREE.SphereGeometry(0.22, 12, 12),
@@ -3080,8 +3675,8 @@ export class GameRuntime {
         })
       );
       head.position.y = 1.62;
-      head.castShadow = true;
-      head.receiveShadow = true;
+      head.castShadow = false;
+      head.receiveShadow = false;
 
       const nameLabel = this.createTextLabel("플레이어", "name");
       nameLabel.position.set(0, 2.12, 0);
@@ -3102,6 +3697,7 @@ export class GameRuntime {
         chatExpireAt: 0,
         targetPosition: new THREE.Vector3(0, 0, 0),
         targetYaw: 0,
+        nextLodUpdateAt: 0,
         lastSeen: performance.now()
       };
 
@@ -3148,8 +3744,11 @@ export class GameRuntime {
   }
 
   tick(delta) {
+    this.elapsedSeconds += delta;
     this.updateMovement(delta);
     this.updateHubFlow(delta);
+    this.updatePortalTimeBillboard(delta);
+    this.syncMobileUiState();
     this.updateChalkDrawing();
     this.updateCloudLayer(delta);
     this.updateOcean(delta);
@@ -3161,17 +3760,26 @@ export class GameRuntime {
 
   updateMovement(delta) {
     const movementEnabled = this.canMovePlayer();
-    const keyForward = movementEnabled
+    const keyboardForward = movementEnabled
       ? (this.keys.has("KeyW") || this.keys.has("ArrowUp") ? 1 : 0) -
         (this.keys.has("KeyS") || this.keys.has("ArrowDown") ? 1 : 0)
       : 0;
-    const keyStrafe = movementEnabled
+    const keyboardStrafe = movementEnabled
       ? (this.keys.has("KeyD") || this.keys.has("ArrowRight") ? 1 : 0) -
         (this.keys.has("KeyA") || this.keys.has("ArrowLeft") ? 1 : 0)
       : 0;
+    const mobileForward = movementEnabled && this.mobileEnabled
+      ? THREE.MathUtils.clamp(-this.mobileMoveVector.y, -1, 1)
+      : 0;
+    const mobileStrafe = movementEnabled && this.mobileEnabled
+      ? THREE.MathUtils.clamp(this.mobileMoveVector.x, -1, 1)
+      : 0;
+    const keyForward = THREE.MathUtils.clamp(keyboardForward + mobileForward, -1, 1);
+    const keyStrafe = THREE.MathUtils.clamp(keyboardStrafe + mobileStrafe, -1, 1);
 
     const sprinting =
-      movementEnabled && (this.keys.has("ShiftLeft") || this.keys.has("ShiftRight"));
+      movementEnabled &&
+      (this.keys.has("ShiftLeft") || this.keys.has("ShiftRight") || this.mobileSprintHeld);
     const speed = sprinting ? GAME_CONSTANTS.PLAYER_SPRINT : GAME_CONSTANTS.PLAYER_SPEED;
 
     if (keyForward !== 0 || keyStrafe !== 0) {
@@ -3211,9 +3819,14 @@ export class GameRuntime {
       this.playerPosition.y = GAME_CONSTANTS.PLAYER_HEIGHT;
       this.verticalVelocity = 0;
       this.onGround = true;
+      if (movementEnabled && this.mobileJumpQueued) {
+        this.verticalVelocity = GAME_CONSTANTS.JUMP_FORCE;
+        this.onGround = false;
+      }
     } else {
       this.onGround = false;
     }
+    this.mobileJumpQueued = false;
 
     this.updateBoundaryGuard(delta);
     this.camera.position.copy(this.playerPosition);
@@ -3224,10 +3837,38 @@ export class GameRuntime {
   updateRemotePlayers(delta) {
     const alpha = THREE.MathUtils.clamp(1 - Math.exp(-this.remoteLerpSpeed * delta), 0, 1);
     const now = performance.now();
+    const nowSec = this.elapsedSeconds;
 
     for (const [id, remote] of this.remotePlayers) {
-      remote.mesh.position.lerp(remote.targetPosition, alpha);
-      remote.mesh.rotation.y = lerpAngle(remote.mesh.rotation.y, remote.targetYaw, alpha);
+      const distanceScore = this.getRemoteDistanceScore(remote.targetPosition);
+      const meshVisible = distanceScore <= this.remoteMeshDistanceSq;
+      remote.mesh.visible = meshVisible;
+      if (!meshVisible) {
+        remote.chatLabel.visible = false;
+      } else {
+        const labelVisible = distanceScore <= this.remoteLabelDistanceSq;
+        remote.nameLabel.visible = labelVisible;
+        if (!labelVisible) {
+          remote.chatLabel.visible = false;
+        }
+
+        let shouldUpdateTransform = true;
+        if (distanceScore > this.remoteFarDistanceSq) {
+          if (nowSec < (Number(remote.nextLodUpdateAt) || 0)) {
+            shouldUpdateTransform = false;
+          } else {
+            remote.nextLodUpdateAt =
+              nowSec + (Number(RUNTIME_TUNING.REMOTE_FAR_UPDATE_INTERVAL_SECONDS) || 0.11);
+          }
+        } else {
+          remote.nextLodUpdateAt = nowSec;
+        }
+
+        if (shouldUpdateTransform) {
+          remote.mesh.position.lerp(remote.targetPosition, alpha);
+          remote.mesh.rotation.y = lerpAngle(remote.mesh.rotation.y, remote.targetYaw, alpha);
+        }
+      }
 
       if (remote.chatLabel.visible && now >= remote.chatExpireAt) {
         remote.chatLabel.visible = false;
@@ -3390,6 +4031,17 @@ export class GameRuntime {
     return null;
   }
 
+  getRemoteDistanceScore(state) {
+    const sx = Number(state?.x);
+    const sz = Number(state?.z);
+    if (!Number.isFinite(sx) || !Number.isFinite(sz)) {
+      return Number.POSITIVE_INFINITY;
+    }
+    const dx = sx - this.playerPosition.x;
+    const dz = sz - this.playerPosition.z;
+    return dx * dx + dz * dz;
+  }
+
   formatPlayerName(rawName) {
     const name = String(rawName ?? "")
       .trim()
@@ -3510,19 +4162,69 @@ export class GameRuntime {
       return;
     }
 
+    const crowdSize = this.remotePlayers.size;
+    let intervalScale = 1;
+    if (crowdSize >= 50) {
+      intervalScale = 1.9;
+    } else if (crowdSize >= 30) {
+      intervalScale = 1.5;
+    } else if (crowdSize >= 16) {
+      intervalScale = 1.25;
+    }
+    const targetInterval = this.networkSyncInterval * intervalScale;
+
     this.remoteSyncClock += delta;
-    if (this.remoteSyncClock < this.networkSyncInterval) {
+    if (this.remoteSyncClock < targetInterval) {
       return;
     }
     this.remoteSyncClock = 0;
 
-    this.socket.emit("player:sync", {
+    const outboundState = {
       x: this.playerPosition.x,
       y: this.playerPosition.y,
       z: this.playerPosition.z,
       yaw: this.yaw,
       pitch: this.pitch
+    };
+
+    if (this.lastSentState) {
+      const dx = outboundState.x - this.lastSentState.x;
+      const dy = outboundState.y - this.lastSentState.y;
+      const dz = outboundState.z - this.lastSentState.z;
+      const movedSq = dx * dx + dy * dy + dz * dz;
+      const yawDelta = Math.abs(
+        Math.atan2(
+          Math.sin(outboundState.yaw - this.lastSentState.yaw),
+          Math.cos(outboundState.yaw - this.lastSentState.yaw)
+        )
+      );
+      const pitchDelta = Math.abs(outboundState.pitch - this.lastSentState.pitch);
+      const heartbeatElapsed = this.elapsedSeconds - (Number(this.lastSentState.sentAt) || 0);
+
+      if (
+        movedSq < this.localSyncMinMoveSq &&
+        yawDelta < this.localSyncMinYaw &&
+        pitchDelta < this.localSyncMinPitch &&
+        heartbeatElapsed < 0.9
+      ) {
+        return;
+      }
+    }
+
+    const quantize = (value, precision = 1000) =>
+      Math.round((Number(value) || 0) * precision) / precision;
+    this.socket.emit("player:sync", {
+      x: quantize(outboundState.x, 1000),
+      y: quantize(outboundState.y, 1000),
+      z: quantize(outboundState.z, 1000),
+      yaw: quantize(outboundState.yaw, 10000),
+      pitch: quantize(outboundState.pitch, 10000)
     });
+
+    this.lastSentState = {
+      ...outboundState,
+      sentAt: this.elapsedSeconds
+    };
   }
 
   updateHud(delta) {
@@ -3701,5 +4403,6 @@ export class GameRuntime {
       this.composer.setPixelRatio(this.currentPixelRatio);
       this.composer.setSize(window.innerWidth, window.innerHeight);
     }
+    this.syncMobileUiState();
   }
 }

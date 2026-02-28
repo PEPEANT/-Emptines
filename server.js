@@ -45,7 +45,15 @@ async function probeExistingServer(port) {
 }
 
 const DEFAULT_ROOM_CODE = "GLOBAL";
-const MAX_ROOM_PLAYERS = 50;
+const parsedRoomCap = Number(process.env.MAX_ROOM_PLAYERS ?? 120);
+const MAX_ROOM_PLAYERS = Number.isFinite(parsedRoomCap)
+  ? Math.max(16, Math.min(256, Math.trunc(parsedRoomCap)))
+  : 120;
+const PLAYER_SYNC_MIN_INTERVAL_MS = 80;
+const PLAYER_SYNC_HEARTBEAT_MS = 450;
+const PLAYER_SYNC_MIN_MOVE_SQ = 0.0009;
+const PLAYER_SYNC_MIN_YAW_DELTA = 0.006;
+const PLAYER_SYNC_MIN_PITCH_DELTA = 0.006;
 
 const rooms = new Map();
 let playerCount = 0;
@@ -95,6 +103,43 @@ function sanitizePlayerState(raw = {}) {
     yaw: clampNumber(raw.yaw, -Math.PI, Math.PI, 0),
     pitch: clampNumber(raw.pitch, -1.55, 1.55, 0),
     updatedAt: Date.now()
+  };
+}
+
+function angleDelta(a, b) {
+  return Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+}
+
+function hasMeaningfulStateChange(prev, next) {
+  if (!prev) {
+    return true;
+  }
+  const dx = next.x - prev.x;
+  const dy = next.y - prev.y;
+  const dz = next.z - prev.z;
+  const moveSq = dx * dx + dy * dy + dz * dz;
+  if (moveSq >= PLAYER_SYNC_MIN_MOVE_SQ) {
+    return true;
+  }
+  if (angleDelta(next.yaw, prev.yaw) >= PLAYER_SYNC_MIN_YAW_DELTA) {
+    return true;
+  }
+  if (Math.abs(next.pitch - prev.pitch) >= PLAYER_SYNC_MIN_PITCH_DELTA) {
+    return true;
+  }
+  return false;
+}
+
+function quantizeState(state) {
+  const q3 = (value) => Math.round((Number(value) || 0) * 1000) / 1000;
+  const q4 = (value) => Math.round((Number(value) || 0) * 10000) / 10000;
+  return {
+    x: q3(state.x),
+    y: q3(state.y),
+    z: q3(state.z),
+    yaw: q4(state.yaw),
+    pitch: q4(state.pitch),
+    updatedAt: state.updatedAt
   };
 }
 
@@ -276,6 +321,8 @@ io.on("connection", (socket) => {
   playerCount += 1;
   socket.data.playerName = `PLAYER_${Math.floor(Math.random() * 9000 + 1000)}`;
   socket.data.roomCode = null;
+  socket.data.lastSyncAt = 0;
+  socket.data.lastSyncedState = null;
 
   console.log(`[+] player connected (${playerCount}) ${socket.id}`);
 
@@ -322,13 +369,28 @@ io.on("connection", (socket) => {
       return;
     }
 
+    const now = Date.now();
+    const lastSyncAt = Number(socket.data.lastSyncAt) || 0;
+    if (now - lastSyncAt < PLAYER_SYNC_MIN_INTERVAL_MS) {
+      return;
+    }
+
     const nextState = sanitizePlayerState(payload);
-    player.state = nextState;
+    const previousState = socket.data.lastSyncedState;
+    const changed = hasMeaningfulStateChange(previousState, nextState);
+    if (!changed && now - lastSyncAt < PLAYER_SYNC_HEARTBEAT_MS) {
+      return;
+    }
+
+    const outboundState = quantizeState(nextState);
+    socket.data.lastSyncAt = now;
+    socket.data.lastSyncedState = outboundState;
+    player.state = outboundState;
 
     socket.to(room.code).emit("player:sync", {
       id: player.id,
       name: player.name,
-      state: nextState
+      state: outboundState
     });
   });
 

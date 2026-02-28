@@ -69,7 +69,7 @@ export const BASE_VOID_PACK = {
       aoTextureUrl: "",
       repeatX: 1,
       repeatY: 1,
-      size: 900,
+      size: 240,
       color: 0xb0b5bb,
       roughness: 0.9,
       metalness: 0,
@@ -105,23 +105,23 @@ export const BASE_VOID_PACK = {
     },
     ocean: {
       enabled: true,
-      width: 58,
-      depth: 168,
-      shorelineX: -28,
+      width: 560,
+      depth: 560,
+      shorelineX: -120,
       shoreDirection: -1,
       positionX: 0,
       positionY: 0.06,
-      positionZ: -52,
+      positionZ: -18,
       normalTextureUrl: "/assets/graphics/world/textures/oss-water/waternormals.jpg",
       normalRepeatX: 20,
       normalRepeatY: 20,
       color: 0x2f8ed9,
       sunColor: 0xffffff,
       opacity: 1,
-      distortionScale: 1.5,
-      timeScale: -0.33,
-      bobAmplitude: 0,
-      bobFrequency: 0.35
+      distortionScale: 1.28,
+      timeScale: 0.22,
+      bobAmplitude: 0.014,
+      bobFrequency: 0.42
     },
     beach: {
       enabled: false,
@@ -189,7 +189,7 @@ export const BASE_VOID_PACK = {
         cooldownSeconds: 60,
         warningSeconds: 16,
         openSeconds: 24,
-        targetUrl: ""
+        targetUrl: "https://github.com/PEPEANT/singularity_ox"
       }
     },
     postProcessing: {
