@@ -1,4 +1,4 @@
-import * as THREE from "three";
+﻿import * as THREE from "three";
 import { io } from "socket.io-client";
 import { Sky } from "three/addons/objects/Sky.js";
 import { Water } from "three/addons/objects/Water.js";
@@ -246,10 +246,16 @@ export class GameRuntime {
       [0, GAME_CONSTANTS.PLAYER_HEIGHT, -8]
     );
     this.bridgeWidth = Math.max(4, Number(bridgeConfig?.width) || 10);
+    this.bridgeGateHalfWidth = Math.max(1.5, this.bridgeWidth * 0.28);
+    this.bridgeGateTriggerDepth = Math.max(0.5, Number(bridgeConfig?.gateTriggerDepth) || 0.8);
     this.bridgeDeckColor = bridgeConfig?.deckColor ?? 0x4f5660;
     this.bridgeRailColor = bridgeConfig?.railColor ?? 0x8fa2b8;
     this.portalFloorPosition = parseVec3(portalConfig?.position, [0, 0.08, 22]);
     this.portalRadius = Math.max(2.2, Number(portalConfig?.radius) || 4.4);
+    this.shrinePortalPosition = parseVec3(
+      bridgeConfig?.shrinePortalPosition,
+      [this.bridgeMirrorPosition.x, 0.08, this.bridgeMirrorPosition.z + 4.8]
+    );
     this.portalCooldownSeconds = parseSeconds(portalConfig?.cooldownSeconds, 60, 8);
     this.portalWarningSeconds = parseSeconds(portalConfig?.warningSeconds, 16, 4);
     this.portalOpenSeconds = parseSeconds(portalConfig?.openSeconds, 24, 5);
@@ -270,6 +276,9 @@ export class GameRuntime {
     this.portalGroup = null;
     this.portalRing = null;
     this.portalCore = null;
+    this.portalReplicaGroup = null;
+    this.portalReplicaRing = null;
+    this.portalReplicaCore = null;
     this.portalBillboardGroup = null;
     this.portalBillboardCanvas = null;
     this.portalBillboardContext = null;
@@ -534,6 +543,9 @@ export class GameRuntime {
     this.portalGroup = null;
     this.portalRing = null;
     this.portalCore = null;
+    this.portalReplicaGroup = null;
+    this.portalReplicaRing = null;
+    this.portalReplicaCore = null;
     this.portalBillboardGroup = null;
     this.npcGuideGroup = null;
     this.npcGreetingScreen = null;
@@ -887,10 +899,6 @@ export class GameRuntime {
     shrineRoofFront.castShadow = !this.mobileEnabled;
     shrineRoofFront.receiveShadow = true;
 
-    const shrineRoofBack = shrineRoofFront.clone();
-    shrineRoofBack.position.z = -0.72;
-    shrineRoofBack.rotation.x = -0.22;
-
     const shrineRoofRidge = new THREE.Mesh(
       new THREE.BoxGeometry(4.96, 0.16, 0.34),
       shrineTileMaterial
@@ -949,7 +957,6 @@ export class GameRuntime {
       shrineLowerBeam,
       shrineRoofCore,
       shrineRoofFront,
-      shrineRoofBack,
       shrineRoofRidge,
       shrinePlaque,
       shrineAura,
@@ -1047,10 +1054,22 @@ export class GameRuntime {
     const portalBillboard = this.createPortalTimeBillboard();
     portalGroup.add(portalBillboard);
 
+    const portalReplicaGroup = new THREE.Group();
+    portalReplicaGroup.position.copy(this.shrinePortalPosition);
+    portalReplicaGroup.position.y = 0;
+
+    const portalReplicaBase = portalBase.clone();
+    const portalReplicaRing = portalRing.clone();
+    const portalReplicaCore = portalCore.clone();
+    portalReplicaGroup.add(portalReplicaBase, portalReplicaRing, portalReplicaCore);
+
     this.hubFlowGroup = group;
     this.portalGroup = portalGroup;
     this.portalRing = portalRing;
     this.portalCore = portalCore;
+    this.portalReplicaGroup = portalReplicaGroup;
+    this.portalReplicaRing = portalReplicaRing;
+    this.portalReplicaCore = portalReplicaCore;
     this.portalBillboardGroup = portalBillboard;
     this.npcGuideGroup = npcGuide;
     this.mirrorGateGroup = mirrorGate;
@@ -1061,7 +1080,7 @@ export class GameRuntime {
     this.bridgeBoundaryBeam = boundaryBeam;
 
     boundaryMarker.add(boundaryRing, boundaryHalo, boundaryBeam);
-    group.add(bridgeGroup, cityGroup, npcGuide, mirrorGate, boundaryMarker, portalGroup);
+    group.add(bridgeGroup, cityGroup, npcGuide, mirrorGate, boundaryMarker, portalGroup, portalReplicaGroup);
     this.scene.add(group);
     this.setMirrorGateVisible(this.flowStage === "bridge_mirror");
     this.updateBridgeBoundaryMarker(0);
@@ -1143,35 +1162,22 @@ export class GameRuntime {
 
   createPortalTimeBillboard() {
     const board = new THREE.Group();
-    board.position.set(0, 0, 0);
+    board.position.set(0, 0, -6.2);
+    board.rotation.y = Math.PI;
 
-    const supportMaterial = new THREE.MeshStandardMaterial({
-      color: 0x2f3a48,
-      roughness: 0.52,
-      metalness: 0.24,
-      emissive: 0x131b24,
-      emissiveIntensity: 0.12
-    });
-    const frameMaterial = new THREE.MeshStandardMaterial({
-      color: 0x111822,
-      roughness: 0.34,
-      metalness: 0.38,
-      emissive: 0x21374d,
-      emissiveIntensity: 0.18
-    });
-
-    const leftPost = new THREE.Mesh(new THREE.BoxGeometry(0.54, 5.4, 0.54), supportMaterial);
-    leftPost.position.set(-4.6, 2.7, 0);
-    leftPost.castShadow = !this.mobileEnabled;
-    leftPost.receiveShadow = true;
-
-    const rightPost = leftPost.clone();
-    rightPost.position.x = 4.6;
-
-    const frame = new THREE.Mesh(new THREE.BoxGeometry(10.8, 2.7, 0.42), frameMaterial);
-    frame.position.set(0, 5.15, 0);
-    frame.castShadow = !this.mobileEnabled;
-    frame.receiveShadow = true;
+    const backing = new THREE.Mesh(
+      new THREE.BoxGeometry(10.5, 2.5, 0.24),
+      new THREE.MeshStandardMaterial({
+        color: 0x111822,
+        roughness: 0.34,
+        metalness: 0.38,
+        emissive: 0x21374d,
+        emissiveIntensity: 0.18
+      })
+    );
+    backing.position.set(0, 5.1, -0.04);
+    backing.castShadow = !this.mobileEnabled;
+    backing.receiveShadow = true;
 
     const glowBack = new THREE.Mesh(
       new THREE.PlaneGeometry(10.1, 2.08),
@@ -1210,7 +1216,7 @@ export class GameRuntime {
     screen.position.set(0, 5.15, 0.08);
     screen.renderOrder = 14;
 
-    board.add(leftPost, rightPost, frame, glowBack, screen);
+    board.add(backing, glowBack, screen);
 
     this.portalBillboardCanvas = canvas;
     this.portalBillboardContext = context;
@@ -1245,8 +1251,8 @@ export class GameRuntime {
     this.yaw = this.getLookYaw(this.bridgeApproachSpawn, this.bridgeNpcPosition);
     this.pitch = -0.03;
     this.setFlowHeadline(
-      "다리 입구",
-      "검문소 안내원 쪽으로 이동하세요."
+      "BRIDGE ENTRY",
+      "Move toward the checkpoint NPC."
     );
     this.hud.setStatus(this.getStatusText());
     this.hideNicknameGate();
@@ -1273,10 +1279,7 @@ export class GameRuntime {
     this.nicknameGateEl.classList.remove("hidden");
     this.setNicknameError("");
     if (this.nicknameInputEl) {
-      const nextName =
-        /^PLAYER(?:_\d+)?$/i.test(this.localPlayerName) || /^플레이어(?:_\d+)?$/i.test(this.localPlayerName)
-          ? ""
-          : this.localPlayerName;
+      const nextName = /^PLAYER(?:_\d+)?$/i.test(this.localPlayerName) ? "" : this.localPlayerName;
       this.nicknameInputEl.value = nextName;
       window.setTimeout(() => {
         this.nicknameInputEl?.focus();
@@ -1306,7 +1309,7 @@ export class GameRuntime {
 
     const raw = String(this.nicknameInputEl?.value ?? "").trim();
     if (raw.length < 2) {
-      this.setNicknameError("호출명은 최소 2자 이상이어야 합니다.");
+      this.setNicknameError("Callsign must be at least 2 characters.");
       return;
     }
 
@@ -1324,7 +1327,7 @@ export class GameRuntime {
     this.chalkLastStamp = null;
     this.setMirrorGateVisible(true);
     this.yaw = this.getLookYaw(this.playerPosition, this.bridgeMirrorPosition);
-    this.setFlowHeadline("입구 확인", "사찰 입구를 바라보면 이동 승인이 완료됩니다.");
+    this.setFlowHeadline("ENTRY SYNC", "Pass under the shrine gate to continue.");
     this.hud.setStatus(this.getStatusText());
     this.syncGameplayUiForFlow();
   }
@@ -1419,7 +1422,7 @@ export class GameRuntime {
     this.chalkDrawingActive = false;
     this.chalkLastStamp = null;
     this.showNicknameGate();
-    this.setFlowHeadline("검문소 등록", "안내원 앞에서 호출명을 등록하세요.");
+    this.setFlowHeadline("CHECKPOINT REGISTRATION", "Register your callsign with the terminal.");
     this.hud.setStatus(this.getStatusText());
   }
 
@@ -1508,19 +1511,16 @@ export class GameRuntime {
     return Math.hypot(dx, dz);
   }
 
-  evaluateGateFocus() {
-    const dx = this.playerPosition.x - this.bridgeMirrorPosition.x;
-    const dz = this.playerPosition.z - this.bridgeMirrorPosition.z;
-    const distance = Math.hypot(dx, dz);
-    if (distance > 5.2) {
-      return 0;
+  isPlayerPassingShrineGate() {
+    const dx = Math.abs(this.playerPosition.x - this.bridgeMirrorPosition.x);
+    if (dx > this.bridgeGateHalfWidth) {
+      return false;
     }
-
-    this.tempVecA.set(this.bridgeMirrorPosition.x, this.bridgeMirrorPosition.y, this.bridgeMirrorPosition.z);
-    this.tempVecA.sub(this.camera.position).normalize();
-    this.camera.getWorldDirection(this.tempVecB);
-    const alignment = this.tempVecA.dot(this.tempVecB);
-    return THREE.MathUtils.clamp((alignment - 0.86) / 0.14, 0, 1);
+    const dz = this.playerPosition.z - this.bridgeMirrorPosition.z;
+    if (Math.abs(dz) > 6.5) {
+      return false;
+    }
+    return dz >= this.bridgeGateTriggerDepth;
   }
 
   triggerBridgeBoundaryDing() {
@@ -1607,16 +1607,10 @@ export class GameRuntime {
     this.updateBridgeBoundaryMarker(delta);
 
     if (this.flowStage === "bridge_approach") {
-      const half = Math.max(1.8, this.bridgeWidth * 0.5 - 0.72);
-      this.playerPosition.x = THREE.MathUtils.clamp(
-        this.playerPosition.x,
-        this.bridgeSpawn.x - half,
-        this.bridgeSpawn.x + half
-      );
       const npcDistance = this.getNpcDistance();
       this.setFlowHeadline(
-        "다리 입구",
-        `검문소 안내원까지 ${Math.max(0, Math.ceil(npcDistance))}m`
+        "BRIDGE ENTRY",
+        `Distance to checkpoint NPC: ${Math.max(0, Math.ceil(npcDistance))}m`
       );
       this.updatePortalVisual();
       if (npcDistance <= this.bridgeNpcTriggerRadius) {
@@ -1628,7 +1622,7 @@ export class GameRuntime {
           document.exitPointerLock?.();
         }
         this.playNpcGreeting();
-        this.setFlowHeadline("검문소 안내", "안내원 인사말 수신 중...");
+        this.setFlowHeadline("CHECKPOINT BRIEFING", "Receiving NPC greeting...");
         this.hud.setStatus(this.getStatusText());
       }
       return;
@@ -1645,32 +1639,21 @@ export class GameRuntime {
     }
 
     if (this.flowStage === "bridge_mirror") {
-      const half = Math.max(1.8, this.bridgeWidth * 0.5 - 0.72);
-      this.playerPosition.x = THREE.MathUtils.clamp(
-        this.playerPosition.x,
-        this.bridgeSpawn.x - half,
-        this.bridgeSpawn.x + half
-      );
-      const focus = this.evaluateGateFocus();
-      if (focus > 0.35) {
-        this.mirrorLookClock = Math.min(
-          this.bridgeMirrorLookSeconds,
-          this.mirrorLookClock + delta * focus
-        );
-      } else {
-        this.mirrorLookClock = Math.max(0, this.mirrorLookClock - delta * 0.7);
-      }
-      const progress = THREE.MathUtils.clamp(
-        this.mirrorLookClock / this.bridgeMirrorLookSeconds,
+      const gateDistance = Math.max(
         0,
-        1
+        Math.ceil(
+          Math.hypot(
+            this.playerPosition.x - this.bridgeMirrorPosition.x,
+            this.playerPosition.z - this.bridgeMirrorPosition.z
+          )
+        )
       );
       this.setFlowHeadline(
-        "입구 확인",
-        `입구 동기화 진행률 ${Math.round(progress * 100)}%`
+        "ENTRY SYNC",
+        `Pass under the shrine gate (${gateDistance}m)`
       );
       this.updatePortalVisual();
-      if (progress >= 1) {
+      if (this.isPlayerPassingShrineGate()) {
         this.cityIntroStart.copy(this.playerPosition);
         this.cityIntroEnd.copy(this.citySpawn);
         this.flowStage = "city_intro";
@@ -1682,7 +1665,7 @@ export class GameRuntime {
         if (document.pointerLockElement === this.renderer.domElement) {
           document.exitPointerLock?.();
         }
-        this.setFlowHeadline("이동 시퀀스", "도시 게이트를 여는 중...");
+        this.setFlowHeadline("CITY TRANSIT", "Moving to city gate...");
         this.hud.setStatus(this.getStatusText());
       }
       return;
@@ -1693,7 +1676,7 @@ export class GameRuntime {
       const alpha = THREE.MathUtils.clamp(this.flowClock / this.hubIntroDuration, 0, 1);
       this.playerPosition.lerpVectors(this.cityIntroStart, this.cityIntroEnd, alpha);
       const secondsLeft = Math.max(0, Math.ceil(this.hubIntroDuration - this.flowClock));
-      this.setFlowHeadline("이동 시퀀스", `${secondsLeft}초 후 도시 게이트 개방`);
+      this.setFlowHeadline("CITY TRANSIT", `City gate opens in ${secondsLeft}s`);
       if (!this.bridgeBoundaryDingTriggered) {
         const dx = this.playerPosition.x - this.bridgeCityEntry.x;
         const dz = this.playerPosition.z - this.bridgeCityEntry.z;
@@ -1729,7 +1712,7 @@ export class GameRuntime {
   updatePortalPhase(delta) {
     this.portalPhaseClock = Math.max(0, this.portalPhaseClock - delta);
     if (this.portalPhase === "cooldown") {
-      this.setFlowHeadline("도시 운영 중", `다음 포탈 이벤트까지 ${Math.ceil(this.portalPhaseClock)}초`);
+      this.setFlowHeadline("CITY LIVE", `Next portal event in ${Math.ceil(this.portalPhaseClock)}s`);
       if (this.portalPhaseClock <= 0) {
         this.portalPhase = "warning";
         this.portalPhaseClock = this.portalWarningSeconds;
@@ -1738,7 +1721,7 @@ export class GameRuntime {
     }
 
     if (this.portalPhase === "warning") {
-      this.setFlowHeadline("이상 징후 감지", `${Math.ceil(this.portalPhaseClock)}초 후 포탈 개방`);
+      this.setFlowHeadline("ANOMALY DETECTED", `Portal opening in ${Math.ceil(this.portalPhaseClock)}s`);
       if (this.portalPhaseClock <= 0) {
         this.portalPhase = "open";
         this.portalPhaseClock = this.portalOpenSeconds;
@@ -1749,13 +1732,13 @@ export class GameRuntime {
     if (this.portalPhase === "open") {
       if (this.portalTargetUrl) {
         this.setFlowHeadline(
-          "포탈 개방",
-          `지금 게이트에 진입하세요 (남은 시간 ${Math.ceil(this.portalPhaseClock)}초)`
+          "PORTAL OPEN",
+          `Enter now (${Math.ceil(this.portalPhaseClock)}s left)`
         );
       } else {
         this.setFlowHeadline(
-          "포탈 개방 / 대상 없음",
-          "?portal=https://... 값을 지정해 이동 경로를 설정하세요."
+          "PORTAL OPEN / NO TARGET",
+          "Set ?portal=https://... to configure destination"
         );
       }
       if (this.portalPhaseClock <= 0) {
@@ -1782,6 +1765,7 @@ export class GameRuntime {
       ringMaterial.opacity = 0.9;
       coreMaterial.opacity = 0.3 + pulse * 0.34;
       this.portalGroup.scale.set(1 + pulse * 0.05, 1 + pulse * 0.05, 1 + pulse * 0.05);
+      this.portalReplicaGroup?.scale.set(1 + pulse * 0.05, 1 + pulse * 0.05, 1 + pulse * 0.05);
       return;
     }
 
@@ -1790,6 +1774,7 @@ export class GameRuntime {
       ringMaterial.opacity = 0.78;
       coreMaterial.opacity = 0.12 + pulse * 0.16;
       this.portalGroup.scale.set(1, 1, 1);
+      this.portalReplicaGroup?.scale.set(1, 1, 1);
       return;
     }
 
@@ -1797,6 +1782,7 @@ export class GameRuntime {
     ringMaterial.opacity = 0.62;
     coreMaterial.opacity = 0.05;
     this.portalGroup.scale.set(1, 1, 1);
+    this.portalReplicaGroup?.scale.set(1, 1, 1);
   }
 
   getPortalPhaseLabel() {
@@ -1897,11 +1883,22 @@ export class GameRuntime {
   }
 
   isPlayerInPortalZone() {
-    const dx = this.playerPosition.x - this.portalFloorPosition.x;
-    const dz = this.playerPosition.z - this.portalFloorPosition.z;
-    const distanceSquared = dx * dx + dz * dz;
     const triggerRadius = this.portalRadius * 0.78;
-    return distanceSquared <= triggerRadius * triggerRadius;
+    const triggerRadiusSquared = triggerRadius * triggerRadius;
+    const inPrimaryPortal = (() => {
+      const dx = this.playerPosition.x - this.portalFloorPosition.x;
+      const dz = this.playerPosition.z - this.portalFloorPosition.z;
+      return dx * dx + dz * dz <= triggerRadiusSquared;
+    })();
+    if (inPrimaryPortal) {
+      return true;
+    }
+    if (!this.portalReplicaGroup) {
+      return false;
+    }
+    const dxReplica = this.playerPosition.x - this.shrinePortalPosition.x;
+    const dzReplica = this.playerPosition.z - this.shrinePortalPosition.z;
+    return dxReplica * dxReplica + dzReplica * dzReplica <= triggerRadiusSquared;
   }
 
   setPortalTransition(active, text = "") {
@@ -1978,7 +1975,7 @@ export class GameRuntime {
     const secondsLeft = Math.max(0, Math.ceil(this.boundaryReturnDelaySeconds - this.boundaryOutClock));
     this.setBoundaryWarning(
       true,
-      `맵 경계를 벗어나셨습니다. ${secondsLeft}초 후 안전 지점으로 복귀합니다.`
+      `留?寃쎄퀎瑜?踰쀬뼱?섏뀲?듬땲?? ${secondsLeft}珥????덉쟾 吏?먯쑝濡?蹂듦??⑸땲??`
     );
 
     if (this.boundaryOutClock < this.boundaryReturnDelaySeconds) {
@@ -1995,7 +1992,7 @@ export class GameRuntime {
     this.keys.clear();
     this.boundaryOutClock = 0;
     this.boundaryNoticeClock = this.boundaryReturnNoticeSeconds;
-    this.setBoundaryWarning(true, "맵 경계를 벗어나셨습니다. 안전 지점으로 복귀했습니다.");
+    this.setBoundaryWarning(true, "留?寃쎄퀎瑜?踰쀬뼱?섏뀲?듬땲?? ?덉쟾 吏?먯쑝濡?蹂듦??덉뒿?덈떎.");
   }
 
   resolvePortalTargetUrl(defaultTarget = "") {
@@ -2049,8 +2046,8 @@ export class GameRuntime {
       this.portalPhase = "cooldown";
       this.portalPhaseClock = this.portalCooldownSeconds;
       this.setFlowHeadline(
-        "포탈 링크 누락",
-        "?portal=https://... 로 이동 주소를 지정한 뒤 다시 시도하세요."
+        "?ы깉 留곹겕 ?꾨씫",
+        "?portal=https://... 濡??대룞 二쇱냼瑜?吏?뺥븳 ???ㅼ떆 ?쒕룄?섏꽭??"
       );
       return;
     }
@@ -2059,7 +2056,7 @@ export class GameRuntime {
     this.flowStage = "portal_transfer";
     this.hud.setStatus(this.getStatusText());
     this.syncGameplayUiForFlow();
-    this.setPortalTransition(true, "포탈 동기화 중...");
+    this.setPortalTransition(true, "?ы깉 ?숆린??以?..");
 
     window.setTimeout(() => {
       window.location.assign(destination);
@@ -3678,7 +3675,7 @@ export class GameRuntime {
       head.castShadow = false;
       head.receiveShadow = false;
 
-      const nameLabel = this.createTextLabel("플레이어", "name");
+      const nameLabel = this.createTextLabel("?뚮젅?댁뼱", "name");
       nameLabel.position.set(0, 2.12, 0);
 
       const chatLabel = this.createTextLabel("", "chat");
@@ -3693,7 +3690,7 @@ export class GameRuntime {
         mesh: root,
         nameLabel,
         chatLabel,
-        name: "플레이어",
+        name: "?뚮젅?댁뼱",
         chatExpireAt: 0,
         targetPosition: new THREE.Vector3(0, 0, 0),
         targetYaw: 0,
@@ -4048,10 +4045,10 @@ export class GameRuntime {
       .replace(/\s+/g, "_")
       .slice(0, 16);
     if (!name) {
-      return "플레이어";
+      return "?뚮젅?댁뼱";
     }
     if (/^PLAYER(?:_\d+)?$/i.test(name)) {
-      return name.replace(/^PLAYER/i, "플레이어");
+      return name.replace(/^PLAYER/i, "?뚮젅?댁뼱");
     }
     return name;
   }
@@ -4096,7 +4093,7 @@ export class GameRuntime {
     }
 
     const maxLength = kind === "chat" ? 120 : 16;
-    const fallback = kind === "name" ? "플레이어" : "";
+    const fallback = kind === "name" ? "?뚮젅?댁뼱" : "";
     const text = String(rawText ?? "").trim().slice(0, maxLength) || fallback;
     if (label.userData.text === text) {
       return;
@@ -4261,32 +4258,32 @@ export class GameRuntime {
   getStatusText() {
     if (this.hubFlowEnabled) {
       if (this.flowStage === "bridge_approach") {
-        return this.networkConnected ? "온라인 / 접근 중" : "오프라인 / 접근 중";
+        return this.networkConnected ? "ONLINE / BRIDGE APPROACH" : "OFFLINE / BRIDGE APPROACH";
       }
       if (this.flowStage === "bridge_dialogue") {
-        return this.networkConnected ? "온라인 / 안내 대화" : "오프라인 / 안내 대화";
+        return this.networkConnected ? "ONLINE / NPC DIALOGUE" : "OFFLINE / NPC DIALOGUE";
       }
       if (this.flowStage === "bridge_name") {
-        return this.networkConnected ? "온라인 / 이름 확인" : "오프라인 / 이름 확인";
+        return this.networkConnected ? "ONLINE / NAME CHECK" : "OFFLINE / NAME CHECK";
       }
       if (this.flowStage === "bridge_mirror") {
-        return this.networkConnected ? "온라인 / 입구 확인" : "오프라인 / 입구 확인";
+        return this.networkConnected ? "ONLINE / SHRINE GATE" : "OFFLINE / SHRINE GATE";
       }
       if (this.flowStage === "city_intro") {
-        return this.networkConnected ? "온라인 / 도시 이동" : "오프라인 / 도시 이동";
+        return this.networkConnected ? "ONLINE / CITY TRANSIT" : "OFFLINE / CITY TRANSIT";
       }
       if (this.flowStage === "portal_transfer") {
-        return "포탈 / 이동 중";
+        return "PORTAL / TRANSFERRING";
       }
     }
 
     if (!this.networkConnected) {
-      return this.socketEndpoint ? "오프라인" : "오프라인 / 서버 필요";
+      return this.socketEndpoint ? "OFFLINE" : "OFFLINE / SERVER REQUIRED";
     }
     if (this.pointerLockSupported && !this.pointerLocked && !this.mobileEnabled) {
-      return "온라인 / 클릭";
+      return "ONLINE / CLICK TO LOCK";
     }
-    return "온라인";
+    return "ONLINE";
   }
 
   loop() {
@@ -4406,3 +4403,4 @@ export class GameRuntime {
     this.syncMobileUiState();
   }
 }
+
