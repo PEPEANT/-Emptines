@@ -196,6 +196,9 @@ export class GameRuntime {
     this.localSyncMinYaw = 0.012;
     this.localSyncMinPitch = 0.012;
     this.chatBubbleLifetimeMs = 4200;
+    this.chatBubbleFadeMs = 700;
+    this.localChatLabel = null;
+    this.localChatExpireAt = 0;
     this.chatLogMaxEntries = RUNTIME_TUNING.CHAT_LOG_MAX_ENTRIES;
     this.chatLogEl = document.getElementById("chat-log");
     this.chatControlsEl = document.getElementById("chat-controls");
@@ -3929,6 +3932,7 @@ export class GameRuntime {
     this.updateCloudLayer(delta);
     this.updateOcean(delta);
     this.updateRemotePlayers(delta);
+    this.updateLocalChatBubble();
     this.emitLocalSync(delta);
     this.updateDynamicResolution(delta);
     this.updateHud(delta);
@@ -4060,8 +4064,16 @@ export class GameRuntime {
         }
       }
 
-      if (remote.chatLabel.visible && now >= remote.chatExpireAt) {
-        remote.chatLabel.visible = false;
+      if (remote.chatLabel.visible) {
+        const remaining = remote.chatExpireAt - now;
+        if (remaining <= 0) {
+          remote.chatLabel.visible = false;
+          remote.chatLabel.material.opacity = 1;
+        } else if (remaining < this.chatBubbleFadeMs) {
+          remote.chatLabel.material.opacity = remaining / this.chatBubbleFadeMs;
+        } else {
+          remote.chatLabel.material.opacity = 1;
+        }
       }
 
       if (now - remote.lastSeen > this.remoteStaleTimeoutMs) {
@@ -4170,6 +4182,7 @@ export class GameRuntime {
       this.lastLocalChatEcho = `${senderName}|${text}`;
       this.lastLocalChatEchoAt = performance.now();
     }
+    this.showLocalChatBubble(text);
 
     if (this.socket && this.networkConnected) {
       this.socket.emit("chat:send", {
@@ -4181,6 +4194,36 @@ export class GameRuntime {
     this.chatInputEl.value = "";
     this.setChatOpen(false);
     this.chatInputEl.blur();
+  }
+
+  showLocalChatBubble(text) {
+    if (!text) return;
+    if (!this.localChatLabel) {
+      this.localChatLabel = this.createTextLabel("", "chat");
+      this.localChatLabel.renderOrder = 40;
+      this.scene.add(this.localChatLabel);
+    }
+    this.setTextLabel(this.localChatLabel, text, "chat");
+    this.localChatLabel.visible = true;
+    this.localChatLabel.material.opacity = 1;
+    this.localChatExpireAt = performance.now() + this.chatBubbleLifetimeMs;
+  }
+
+  updateLocalChatBubble() {
+    if (!this.localChatLabel?.visible) return;
+    // float above player's head
+    this.localChatLabel.position.set(
+      this.playerPosition.x,
+      this.playerPosition.y + 0.5,
+      this.playerPosition.z
+    );
+    const remaining = this.localChatExpireAt - performance.now();
+    if (remaining <= 0) {
+      this.localChatLabel.visible = false;
+      this.localChatLabel.material.opacity = 1;
+    } else if (remaining < this.chatBubbleFadeMs) {
+      this.localChatLabel.material.opacity = remaining / this.chatBubbleFadeMs;
+    }
   }
 
   focusChatInput() {
@@ -4249,7 +4292,7 @@ export class GameRuntime {
   createTextLabel(text, kind = "name") {
     const canvas = document.createElement("canvas");
     canvas.width = 512;
-    canvas.height = kind === "chat" ? 144 : 112;
+    canvas.height = kind === "chat" ? 210 : 112;
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
@@ -4286,7 +4329,7 @@ export class GameRuntime {
     }
 
     const maxLength = kind === "chat" ? 120 : 16;
-    const fallback = kind === "name" ? "?뚮젅?댁뼱" : "";
+    const fallback = kind === "name" ? "PLAYER" : "";
     const text = String(rawText ?? "").trim().slice(0, maxLength) || fallback;
     if (label.userData.text === text) {
       return;
@@ -4298,34 +4341,99 @@ export class GameRuntime {
 
     if (text) {
       if (kind === "chat") {
-        context.fillStyle = "rgba(10, 24, 40, 0.84)";
-        context.strokeStyle = "rgba(178, 216, 252, 0.92)";
+        const BUBBLE_TOP = 10;
+        const BUBBLE_H = 150;
+        const TAIL_H = 36;
+        const TAIL_HW = 22;
+        const cx = width / 2;
+
+        context.fillStyle = "rgba(8, 20, 36, 0.88)";
+        context.strokeStyle = "rgba(160, 210, 255, 0.95)";
         context.lineWidth = 6;
+
+        // bubble body
+        this.drawRoundedRect(context, 12, BUBBLE_TOP, width - 24, BUBBLE_H, 24);
+        context.fill();
+        context.stroke();
+
+        // tail pointing down toward player head
+        context.beginPath();
+        context.moveTo(cx - TAIL_HW, BUBBLE_TOP + BUBBLE_H - 4);
+        context.lineTo(cx + TAIL_HW, BUBBLE_TOP + BUBBLE_H - 4);
+        context.lineTo(cx, BUBBLE_TOP + BUBBLE_H + TAIL_H);
+        context.closePath();
+        context.fillStyle = "rgba(8, 20, 36, 0.88)";
+        context.fill();
+        context.strokeStyle = "rgba(160, 210, 255, 0.95)";
+        context.lineWidth = 5;
+        context.beginPath();
+        context.moveTo(cx - TAIL_HW, BUBBLE_TOP + BUBBLE_H - 2);
+        context.lineTo(cx, BUBBLE_TOP + BUBBLE_H + TAIL_H);
+        context.lineTo(cx + TAIL_HW, BUBBLE_TOP + BUBBLE_H - 2);
+        context.stroke();
+
+        // word-wrap into max 2 lines
+        const fontSize = 38;
+        context.font = `600 ${fontSize}px Bahnschrift, "Trebuchet MS", "Segoe UI", sans-serif`;
+        const maxLineW = width - 56;
+        const words = text.split(" ");
+        const lines = [];
+        let cur = "";
+        for (const w of words) {
+          const test = cur ? `${cur} ${w}` : w;
+          if (context.measureText(test).width > maxLineW && cur) {
+            lines.push(cur);
+            cur = w;
+          } else {
+            cur = test;
+          }
+        }
+        if (cur) lines.push(cur);
+        const draw = lines.slice(0, 2);
+        const lineH = 48;
+        const midY = BUBBLE_TOP + BUBBLE_H / 2 + 4;
+        const startY = midY - ((draw.length - 1) * lineH) / 2;
+
+        context.textAlign = "center";
+        context.textBaseline = "middle";
+        context.fillStyle = "#e8f6ff";
+        for (let i = 0; i < draw.length; i++) {
+          context.fillText(draw[i], cx, startY + i * lineH);
+        }
+
+        const approxChars = Math.max(...draw.map((l) => l.length));
+        const minScaleX = 2.2;
+        const maxScaleX = 5.0;
+        const scaleX = THREE.MathUtils.clamp(
+          minScaleX + approxChars * 0.052,
+          minScaleX,
+          maxScaleX
+        );
+        label.scale.set(scaleX, scaleX * (height / width), 1);
       } else {
         context.fillStyle = "rgba(6, 18, 32, 0.86)";
         context.strokeStyle = "rgba(173, 233, 255, 0.88)";
         context.lineWidth = 5;
+        this.drawRoundedRect(context, 12, 12, width - 24, height - 24, 22);
+        context.fill();
+        context.stroke();
+
+        context.textAlign = "center";
+        context.textBaseline = "middle";
+        context.fillStyle = "#e8f8ff";
+        context.font = "700 38px Bahnschrift, \"Trebuchet MS\", \"Segoe UI\", sans-serif";
+        context.fillText(text, width * 0.5, height * 0.53);
+
+        const minScaleX = 1.5;
+        const maxScaleX = 3.3;
+        const scaleX = THREE.MathUtils.clamp(
+          minScaleX + text.length * 0.075,
+          minScaleX,
+          maxScaleX
+        );
+        label.scale.set(scaleX, 0.4, 1);
       }
-
-      this.drawRoundedRect(context, 12, 12, width - 24, height - 24, 22);
-      context.fill();
-      context.stroke();
-
-      context.textAlign = "center";
-      context.textBaseline = "middle";
-      context.fillStyle = kind === "chat" ? "#f0f8ff" : "#e8f8ff";
-      context.font = kind === "chat" ? "600 40px Bahnschrift" : "700 38px Bahnschrift";
-      context.fillText(text, width * 0.5, height * 0.53);
     }
-
-    const minScaleX = kind === "chat" ? 2.2 : 1.5;
-    const maxScaleX = kind === "chat" ? 5.2 : 3.3;
-    const scaleX = THREE.MathUtils.clamp(
-      minScaleX + text.length * (kind === "chat" ? 0.05 : 0.075),
-      minScaleX,
-      maxScaleX
-    );
-    label.scale.set(scaleX, kind === "chat" ? 0.58 : 0.4, 1);
 
     label.userData.text = text;
     label.material.map.needsUpdate = true;
