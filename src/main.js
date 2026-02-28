@@ -23,13 +23,13 @@ function showBootError(message) {
 
 function boot() {
   if (!supportsWebGL()) {
-    showBootError("WebGL is not available in this browser.");
+    showBootError("이 브라우저에서는 WebGL을 사용할 수 없습니다.");
     return;
   }
 
   const mount = document.getElementById("app");
   if (!mount) {
-    showBootError("Missing #app mount element.");
+    showBootError("#app 마운트 요소를 찾을 수 없습니다.");
     return;
   }
 
@@ -39,7 +39,7 @@ function boot() {
     window.__emptinesGame = game;
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    showBootError(`Boot failed: ${detail}`);
+    showBootError(`시작에 실패했습니다: ${detail}`);
     console.error(error);
   }
 }

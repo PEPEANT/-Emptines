@@ -28,7 +28,7 @@ export class HUD {
     if (!this.enabled) {
       return;
     }
-    const next = String(status ?? "OFFLINE");
+    const next = String(status ?? "오프라인");
     if (this.cache.status !== next) {
       this.cache.status = next;
       setText(this.statusEl, next);
@@ -72,7 +72,7 @@ export class HUD {
     if (!this.enabled) {
       return;
     }
-    this.setStatus(state.status ?? "OFFLINE");
+    this.setStatus(state.status ?? "오프라인");
     this.setPlayers(state.players ?? 0);
     this.setPosition(state.x ?? 0, state.z ?? 0);
     this.setFps(state.fps ?? 0);

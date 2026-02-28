@@ -191,6 +191,7 @@ export class GameRuntime {
     this.nicknameErrorEl = document.getElementById("nickname-error");
     this.portalTransitionEl = document.getElementById("portal-transition");
     this.portalTransitionTextEl = document.getElementById("portal-transition-text");
+    this.boundaryWarningEl = document.getElementById("boundary-warning");
 
     const hubFlowConfig = this.worldContent?.hubFlow ?? {};
     const bridgeConfig = hubFlowConfig?.bridge ?? {};
@@ -236,6 +237,12 @@ export class GameRuntime {
     this.portalTransitioning = false;
     this.portalPulseClock = 0;
     this.waterDeltaSmoothed = 1 / 60;
+    this.boundaryReturnDelaySeconds = 1.8;
+    this.boundaryReturnNoticeSeconds = 1.2;
+    this.boundaryHardLimitPadding = 18;
+    this.boundaryOutClock = 0;
+    this.boundaryNoticeClock = 0;
+    this.lastSafePosition = new THREE.Vector3(0, GAME_CONSTANTS.PLAYER_HEIGHT, 0);
     this.hubFlowGroup = null;
     this.portalGroup = null;
     this.portalRing = null;
@@ -287,6 +294,7 @@ export class GameRuntime {
     this.camera.rotation.order = "YXZ";
     this.applyInitialFlowSpawn();
     this.camera.position.copy(this.playerPosition);
+    this.lastSafePosition.copy(this.playerPosition);
     this.syncGameplayUiForFlow();
 
     this.hud.update({
@@ -770,6 +778,7 @@ export class GameRuntime {
       this.flowStage = "city_live";
       this.hubFlowUiEl?.classList.add("hidden");
       this.hideNicknameGate();
+      this.lastSafePosition.copy(this.playerPosition);
       return;
     }
 
@@ -790,6 +799,7 @@ export class GameRuntime {
     this.hud.setStatus(this.getStatusText());
     this.hideNicknameGate();
     this.setMirrorGateVisible(false);
+    this.lastSafePosition.copy(this.playerPosition);
   }
 
   bindHubFlowUiEvents() {
@@ -1081,6 +1091,7 @@ export class GameRuntime {
         this.flowStage = "city_live";
         this.flowClock = 0;
         this.playerPosition.copy(this.citySpawn);
+        this.lastSafePosition.copy(this.playerPosition);
         this.yaw = this.getLookYaw(this.citySpawn, this.portalFloorPosition);
         this.pitch = -0.02;
         this.hud.setStatus(this.getStatusText());
@@ -1186,6 +1197,93 @@ export class GameRuntime {
       this.portalTransitionTextEl.textContent = String(text);
     }
     this.portalTransitionEl?.classList.toggle("on", Boolean(active));
+  }
+
+  setBoundaryWarning(active, text = "") {
+    if (!this.boundaryWarningEl) {
+      return;
+    }
+    if (text) {
+      this.boundaryWarningEl.textContent = String(text);
+    }
+    this.boundaryWarningEl.classList.toggle("on", Boolean(active));
+  }
+
+  getBoundarySoftLimit() {
+    return Math.max(4, Number(this.playerBoundsHalfExtent) || GAME_CONSTANTS.WORLD_LIMIT);
+  }
+
+  getBoundaryHardLimit() {
+    return this.getBoundarySoftLimit() + this.boundaryHardLimitPadding;
+  }
+
+  canUseBoundaryGuard() {
+    if (this.portalTransitioning) {
+      return false;
+    }
+    if (!this.canMovePlayer()) {
+      return false;
+    }
+    if (!this.hubFlowEnabled) {
+      return true;
+    }
+    return this.flowStage !== "city_intro" && this.flowStage !== "portal_transfer";
+  }
+
+  updateBoundaryGuard(delta) {
+    if (!this.canUseBoundaryGuard()) {
+      this.boundaryOutClock = 0;
+      if (this.boundaryNoticeClock > 0) {
+        this.boundaryNoticeClock = Math.max(0, this.boundaryNoticeClock - delta);
+        if (this.boundaryNoticeClock <= 0) {
+          this.setBoundaryWarning(false);
+        }
+      } else {
+        this.setBoundaryWarning(false);
+      }
+      return;
+    }
+
+    const softLimit = this.getBoundarySoftLimit();
+    const outsideBounds =
+      Math.abs(this.playerPosition.x) > softLimit || Math.abs(this.playerPosition.z) > softLimit;
+
+    if (!outsideBounds) {
+      this.lastSafePosition.copy(this.playerPosition);
+      this.boundaryOutClock = 0;
+      if (this.boundaryNoticeClock > 0) {
+        this.boundaryNoticeClock = Math.max(0, this.boundaryNoticeClock - delta);
+        if (this.boundaryNoticeClock <= 0) {
+          this.setBoundaryWarning(false);
+        }
+      } else {
+        this.setBoundaryWarning(false);
+      }
+      return;
+    }
+
+    this.boundaryOutClock += delta;
+    const secondsLeft = Math.max(0, Math.ceil(this.boundaryReturnDelaySeconds - this.boundaryOutClock));
+    this.setBoundaryWarning(
+      true,
+      `맵 경계를 벗어나셨습니다. ${secondsLeft}초 후 안전 지점으로 복귀합니다.`
+    );
+
+    if (this.boundaryOutClock < this.boundaryReturnDelaySeconds) {
+      return;
+    }
+
+    if (this.lastSafePosition.lengthSq() <= 0.0001) {
+      this.lastSafePosition.set(0, GAME_CONSTANTS.PLAYER_HEIGHT, 0);
+    }
+    this.playerPosition.copy(this.lastSafePosition);
+    this.playerPosition.y = GAME_CONSTANTS.PLAYER_HEIGHT;
+    this.verticalVelocity = 0;
+    this.onGround = true;
+    this.keys.clear();
+    this.boundaryOutClock = 0;
+    this.boundaryNoticeClock = this.boundaryReturnNoticeSeconds;
+    this.setBoundaryWarning(true, "맵 경계를 벗어나셨습니다. 안전 지점으로 복귀했습니다.");
   }
 
   resolvePortalTargetUrl(defaultTarget = "") {
@@ -2331,6 +2429,9 @@ export class GameRuntime {
     if (!this.portalTransitionTextEl) {
       this.portalTransitionTextEl = document.getElementById("portal-transition-text");
     }
+    if (!this.boundaryWarningEl) {
+      this.boundaryWarningEl = document.getElementById("boundary-warning");
+    }
     if (!this.chatLogEl) {
       this.chatLogEl = document.getElementById("chat-log");
     }
@@ -2748,7 +2849,7 @@ export class GameRuntime {
       }
 
       const moveStep = speed * delta;
-      const worldLimit = Math.max(4, Number(this.playerBoundsHalfExtent) || GAME_CONSTANTS.WORLD_LIMIT);
+      const worldLimit = this.getBoundaryHardLimit();
       this.playerPosition.x = THREE.MathUtils.clamp(
         this.playerPosition.x + this.moveVec.x * moveStep,
         -worldLimit,
@@ -2772,6 +2873,7 @@ export class GameRuntime {
       this.onGround = false;
     }
 
+    this.updateBoundaryGuard(delta);
     this.camera.position.copy(this.playerPosition);
     this.camera.rotation.y = this.yaw;
     this.camera.rotation.x = this.pitch;

@@ -246,6 +246,33 @@ canvas {
   text-transform: uppercase;
 }
 
+#boundary-warning {
+  position: fixed;
+  left: 50%;
+  bottom: 18vh;
+  z-index: 88;
+  min-width: min(92vw, 360px);
+  max-width: min(92vw, 520px);
+  padding: 11px 14px;
+  border: 1px solid rgba(255, 169, 169, 0.7);
+  border-radius: 10px;
+  background: rgba(44, 10, 14, 0.84);
+  color: #ffe5e5;
+  font: 700 0.79rem/1.4 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.04em;
+  text-align: center;
+  opacity: 0;
+  transform: translate(-50%, 8px);
+  transition: opacity 180ms ease, transform 180ms ease;
+  pointer-events: none;
+  box-shadow: 0 10px 24px rgba(8, 2, 3, 0.35);
+}
+
+#boundary-warning.on {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
 #tool-ui {
   position: fixed;
   left: 50%;
