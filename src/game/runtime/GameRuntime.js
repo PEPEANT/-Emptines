@@ -604,6 +604,37 @@ export class GameRuntime {
     bridgeDeck.receiveShadow = true;
     bridgeGroup.add(bridgeDeck);
 
+    const bridgeRailMaterial = new THREE.MeshStandardMaterial({
+      color: this.bridgeRailColor,
+      roughness: 0.36,
+      metalness: 0.58,
+      emissive: 0x2a3e52,
+      emissiveIntensity: 0.24
+    });
+    const postSpacing = 8;
+    const postCount = Math.max(2, Math.floor(bridgeDeckLength / postSpacing));
+    for (let pi = 0; pi <= postCount; pi++) {
+      const zOff = -bridgeDeckLength * 0.5 + (pi / postCount) * bridgeDeckLength;
+      for (const sx of [-1, 1]) {
+        const post = new THREE.Mesh(
+          new THREE.BoxGeometry(0.13, 1.22, 0.13),
+          bridgeRailMaterial
+        );
+        post.position.set(sx * this.bridgeWidth * 0.52, 0.77, zOff);
+        post.castShadow = !this.mobileEnabled;
+        bridgeGroup.add(post);
+      }
+    }
+    for (const sx of [-1, 1]) {
+      const railBeam = new THREE.Mesh(
+        new THREE.BoxGeometry(0.12, 0.12, bridgeDeckLength + 0.12),
+        bridgeRailMaterial
+      );
+      railBeam.position.set(sx * this.bridgeWidth * 0.52, 1.38, 0);
+      railBeam.castShadow = !this.mobileEnabled;
+      bridgeGroup.add(railBeam);
+    }
+
     const cityGroup = new THREE.Group();
     cityGroup.position.set(this.citySpawn.x, 0, this.citySpawn.z + 4);
 
@@ -641,39 +672,60 @@ export class GameRuntime {
       [-18, 9.2, 17],
       [19, 8.8, 15],
       [0, 11.6, -24],
-      [0, 8.6, 22],
       [-25, 6.8, 2],
       [25, 7.1, 3]
     ];
-    const towerMaterial = new THREE.MeshStandardMaterial({
-      color: 0x5f758f,
-      roughness: 0.56,
-      metalness: 0.28,
-      emissive: 0x273a52,
-      emissiveIntensity: 0.3
-    });
-    for (const [x, h, z] of towerPositions) {
-      const tower = new THREE.Mesh(new THREE.BoxGeometry(4.6, h, 4.6), towerMaterial);
+    const towerMats = [
+      new THREE.MeshStandardMaterial({
+        color: 0x7a9fcc, roughness: 0.48, metalness: 0.30,
+        emissive: 0x2a4a70, emissiveIntensity: 0.32
+      }),
+      new THREE.MeshStandardMaterial({
+        color: 0xc49a5a, roughness: 0.64, metalness: 0.08,
+        emissive: 0x5a3810, emissiveIntensity: 0.18
+      }),
+      new THREE.MeshStandardMaterial({
+        color: 0x48a8a4, roughness: 0.42, metalness: 0.26,
+        emissive: 0x185054, emissiveIntensity: 0.30
+      }),
+    ];
+    for (let ti = 0; ti < towerPositions.length; ti++) {
+      const [x, h, z] = towerPositions[ti];
+      const tower = new THREE.Mesh(new THREE.BoxGeometry(4.6, h, 4.6), towerMats[ti % 3]);
       tower.position.set(x, h * 0.5, z);
       tower.castShadow = !this.mobileEnabled;
       tower.receiveShadow = true;
       cityGroup.add(tower);
     }
 
-    const skylineMaterial = new THREE.MeshStandardMaterial({
-      color: 0x4b5f74,
-      roughness: 0.62,
-      metalness: 0.18,
-      emissive: 0x1c2b3b,
-      emissiveIntensity: 0.2
-    });
-    const skylineCapMaterial = new THREE.MeshStandardMaterial({
-      color: 0x86a9c8,
-      roughness: 0.28,
-      metalness: 0.45,
-      emissive: 0x35516b,
-      emissiveIntensity: 0.28
-    });
+    const skylineMats = [
+      new THREE.MeshStandardMaterial({
+        color: 0x2e5a7e, roughness: 0.56, metalness: 0.22,
+        emissive: 0x0f2a42, emissiveIntensity: 0.24
+      }),
+      new THREE.MeshStandardMaterial({
+        color: 0x8a7a5c, roughness: 0.72, metalness: 0.06,
+        emissive: 0x3a2c14, emissiveIntensity: 0.14
+      }),
+      new THREE.MeshStandardMaterial({
+        color: 0x22707a, roughness: 0.50, metalness: 0.18,
+        emissive: 0x0e3840, emissiveIntensity: 0.26
+      }),
+    ];
+    const skylineCapMats = [
+      new THREE.MeshStandardMaterial({
+        color: 0x7adce8, roughness: 0.20, metalness: 0.50,
+        emissive: 0x30a0b0, emissiveIntensity: 0.38
+      }),
+      new THREE.MeshStandardMaterial({
+        color: 0xe0b84a, roughness: 0.24, metalness: 0.42,
+        emissive: 0x8a5c10, emissiveIntensity: 0.30
+      }),
+      new THREE.MeshStandardMaterial({
+        color: 0x7adce8, roughness: 0.20, metalness: 0.50,
+        emissive: 0x30a0b0, emissiveIntensity: 0.38
+      }),
+    ];
     // Clone the plaza tower pattern into a larger skyline ring so it reads from mid-distance.
     for (let i = 0; i < towerPositions.length; i += 1) {
       const [x, h, z] = towerPositions[i];
@@ -684,7 +736,7 @@ export class GameRuntime {
 
       const megaTower = new THREE.Mesh(
         new THREE.BoxGeometry(footprint, megaHeight, footprint),
-        skylineMaterial
+        skylineMats[i % 3]
       );
       megaTower.position.set(megaX, megaHeight * 0.5, megaZ);
       megaTower.castShadow = !this.mobileEnabled;
@@ -693,7 +745,7 @@ export class GameRuntime {
 
       const towerCap = new THREE.Mesh(
         new THREE.CylinderGeometry(footprint * 0.26, footprint * 0.32, 1.7, this.mobileEnabled ? 9 : 14),
-        skylineCapMaterial
+        skylineCapMats[i % 3]
       );
       towerCap.position.set(megaX, megaHeight + 0.86, megaZ);
       towerCap.castShadow = !this.mobileEnabled;
@@ -2767,7 +2819,7 @@ export class GameRuntime {
         distortionScale: Number(config.distortionScale) || 2.2,
         fog: Boolean(this.scene.fog),
         alpha: THREE.MathUtils.clamp(Number(config.opacity) || 0.92, 0.72, 1),
-        side: THREE.DoubleSide
+        side: THREE.FrontSide
       });
     } catch {
       normalMap.dispose?.();
@@ -2780,7 +2832,7 @@ export class GameRuntime {
           transmission: 0.04,
           transparent: true,
           opacity: THREE.MathUtils.clamp(Number(config.opacity) || 0.92, 0.72, 1),
-          side: THREE.DoubleSide
+          side: THREE.FrontSide
         })
       );
     }
