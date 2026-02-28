@@ -669,8 +669,8 @@ export class GameRuntime {
     const towerPositions = [
       [-22, 6.4, -10],
       [22, 7.8, -8],
-      [-18, 9.2, 17],
-      [19, 8.8, 15],
+      [-18, 9.2, -22],
+      [19, 8.8, -20],
       [0, 11.6, -24],
       [-25, 6.8, 2],
       [25, 7.1, 3]
@@ -1214,22 +1214,8 @@ export class GameRuntime {
 
   createPortalTimeBillboard() {
     const board = new THREE.Group();
-    board.position.set(0, 0, -6.2);
+    board.position.set(0, 4, -10);
     board.rotation.y = Math.PI;
-
-    const backing = new THREE.Mesh(
-      new THREE.BoxGeometry(10.5, 2.5, 0.24),
-      new THREE.MeshStandardMaterial({
-        color: 0x111822,
-        roughness: 0.34,
-        metalness: 0.38,
-        emissive: 0x21374d,
-        emissiveIntensity: 0.18
-      })
-    );
-    backing.position.set(0, 5.1, -0.04);
-    backing.castShadow = !this.mobileEnabled;
-    backing.receiveShadow = true;
 
     const glowBack = new THREE.Mesh(
       new THREE.PlaneGeometry(10.1, 2.08),
@@ -1268,7 +1254,7 @@ export class GameRuntime {
     screen.position.set(0, 5.15, 0.08);
     screen.renderOrder = 14;
 
-    board.add(backing, glowBack, screen);
+    board.add(glowBack, screen);
 
     this.portalBillboardCanvas = canvas;
     this.portalBillboardContext = context;
@@ -1764,7 +1750,7 @@ export class GameRuntime {
   updatePortalPhase(delta) {
     this.portalPhaseClock = Math.max(0, this.portalPhaseClock - delta);
     if (this.portalPhase === "cooldown") {
-      this.setFlowHeadline("CITY LIVE", `Next portal event in ${Math.ceil(this.portalPhaseClock)}s`);
+      this.setFlowHeadline("도시 라이브", `다음 포탈까지 ${Math.ceil(this.portalPhaseClock)}초`);
       if (this.portalPhaseClock <= 0) {
         this.portalPhase = "warning";
         this.portalPhaseClock = this.portalWarningSeconds;
@@ -1773,7 +1759,7 @@ export class GameRuntime {
     }
 
     if (this.portalPhase === "warning") {
-      this.setFlowHeadline("ANOMALY DETECTED", `Portal opening in ${Math.ceil(this.portalPhaseClock)}s`);
+      this.setFlowHeadline("이상 감지", `${Math.ceil(this.portalPhaseClock)}초 후 포탈 개방`);
       if (this.portalPhaseClock <= 0) {
         this.portalPhase = "open";
         this.portalPhaseClock = this.portalOpenSeconds;
@@ -1784,13 +1770,13 @@ export class GameRuntime {
     if (this.portalPhase === "open") {
       if (this.portalTargetUrl) {
         this.setFlowHeadline(
-          "PORTAL OPEN",
-          `Enter now (${Math.ceil(this.portalPhaseClock)}s left)`
+          "포탈 개방",
+          `지금 입장하세요 (${Math.ceil(this.portalPhaseClock)}초 남음)`
         );
       } else {
         this.setFlowHeadline(
-          "PORTAL OPEN / NO TARGET",
-          "Set ?portal=https://... to configure destination"
+          "포탈 개방 / 목적지 없음",
+          "?portal=https://... 로 목적지를 설정하세요"
         );
       }
       if (this.portalPhaseClock <= 0) {
@@ -1839,15 +1825,15 @@ export class GameRuntime {
 
   getPortalPhaseLabel() {
     if (this.portalPhase === "open") {
-      return "PORTAL OPEN";
+      return "포탈 개방";
     }
     if (this.portalPhase === "warning") {
-      return "PORTAL ALERT";
+      return "포탈 경보";
     }
     if (this.portalPhase === "cooldown") {
-      return "NEXT PORTAL";
+      return "다음 포탈";
     }
-    return "SYSTEM READY";
+    return "대기중";
   }
 
   formatPortalCountdown(totalSeconds) {
@@ -1878,9 +1864,9 @@ export class GameRuntime {
       this.portalPhase === "idle"
         ? "--:--"
         : this.formatPortalCountdown(Math.ceil(this.portalPhaseClock));
-    const line1 = "RECLAIM PORTAL";
+    const line1 = "리클레임 포탈";
     const line2 = `${phaseLabel}  ${countdown}`;
-    const line3 = `LOCAL ${localTime}`;
+    const line3 = `현지 시간  ${localTime}`;
 
     if (
       !force &&
