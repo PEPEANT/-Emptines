@@ -1084,8 +1084,8 @@ export class GameRuntime {
     const frameZ = -0.22 * boardScale;
     const placements = [
       // Move all legged boards to the plaza center and face incoming players.
-      { x: -8.8, z: 14.6, yaw: Math.PI },
-      { x: 8.8, z: 14.6, yaw: Math.PI }
+      { x: -15.2, z: 14.8, yaw: Math.PI },
+      { x: 15.2, z: 14.8, yaw: Math.PI }
     ];
 
     for (const placement of placements) {
@@ -1818,26 +1818,6 @@ export class GameRuntime {
     this.portalReplicaGroup?.scale.set(1, 1, 1);
   }
 
-  getPortalPhaseLabel() {
-    if (this.portalPhase === "open") {
-      return "포탈 개방";
-    }
-    if (this.portalPhase === "warning") {
-      return "포탈 경보";
-    }
-    if (this.portalPhase === "cooldown") {
-      return "다음 포탈";
-    }
-    return "대기중";
-  }
-
-  formatPortalCountdown(totalSeconds) {
-    const safeSeconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
-    const minutes = Math.floor(safeSeconds / 60);
-    const seconds = safeSeconds % 60;
-    return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-  }
-
   updatePortalTimeBillboard(delta = 0, force = false) {
     if (!this.portalBillboardContext || !this.portalBillboardTexture || !this.portalBillboardCanvas) {
       return;
@@ -1854,14 +1834,9 @@ export class GameRuntime {
     const minutes = String(now.getMinutes()).padStart(2, "0");
     const seconds = String(now.getSeconds()).padStart(2, "0");
     const localTime = `${hours}:${minutes}:${seconds}`;
-    const phaseLabel = this.getPortalPhaseLabel();
-    const countdown =
-      this.portalPhase === "idle"
-        ? "--:--"
-        : this.formatPortalCountdown(Math.ceil(this.portalPhaseClock));
-    const line1 = "특이점 OX 퀴즈 대회";
-    const line2 = "시작시간 : ( 대 기 중 )";
-    const line3 = `${phaseLabel}  ${countdown}  |  현지 시간  ${localTime}`;
+    const line1 = "시작시간 : ( 대 기 중 )";
+    const line2 = `현지 시간 : ${localTime}`;
+    const line3 = "";
 
     if (
       !force &&
@@ -1899,17 +1874,12 @@ export class GameRuntime {
     context.shadowBlur = 12;
     context.fillStyle = "#d8f2ff";
     context.font = "700 70px Bahnschrift";
-    context.fillText(line1, width * 0.5, 84);
+    context.fillText(line1, width * 0.5, 120);
 
     context.shadowBlur = 10;
     context.fillStyle = "#9de7ff";
     context.font = "700 62px Bahnschrift";
-    context.fillText(line2, width * 0.5, 178);
-
-    context.shadowBlur = 8;
-    context.fillStyle = "#bfe8ff";
-    context.font = "700 44px Bahnschrift";
-    context.fillText(line3, width * 0.5, 266);
+    context.fillText(line2, width * 0.5, 218);
 
     this.portalBillboardTexture.needsUpdate = true;
     this.portalBillboardCache = { line1, line2, line3 };
