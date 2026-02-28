@@ -32,6 +32,8 @@ function parseSeconds(raw, fallback, min = 0.1) {
   return Math.max(min, value);
 }
 
+const NPC_GREETING_VIDEO_URL = new URL("../../../mp4/grok-video.webm", import.meta.url).href;
+
 export class GameRuntime {
   constructor(mount, options = {}) {
     this.mount = mount;
@@ -248,6 +250,10 @@ export class GameRuntime {
     this.portalRing = null;
     this.portalCore = null;
     this.npcGuideGroup = null;
+    this.npcGreetingScreen = null;
+    this.npcGreetingVideoEl = null;
+    this.npcGreetingVideoTexture = null;
+    this.npcGreetingPlayed = false;
     this.mirrorGateGroup = null;
     this.mirrorGatePanel = null;
     this.bridgeBoundaryMarker = null;
@@ -452,6 +458,21 @@ export class GameRuntime {
   }
 
   clearHubFlowWorld() {
+    if (this.npcGreetingVideoEl) {
+      this.npcGreetingVideoEl.onended = null;
+      this.npcGreetingVideoEl.onerror = null;
+      this.npcGreetingVideoEl.pause();
+      this.npcGreetingVideoEl.removeAttribute("src");
+      this.npcGreetingVideoEl.load();
+      this.npcGreetingVideoEl = null;
+    }
+    if (this.npcGreetingVideoTexture) {
+      this.npcGreetingVideoTexture.dispose();
+      this.npcGreetingVideoTexture = null;
+    }
+    this.npcGreetingScreen = null;
+    this.npcGreetingPlayed = false;
+
     if (!this.hubFlowGroup) {
       return;
     }
@@ -462,6 +483,7 @@ export class GameRuntime {
     this.portalRing = null;
     this.portalCore = null;
     this.npcGuideGroup = null;
+    this.npcGreetingScreen = null;
     this.mirrorGateGroup = null;
     this.mirrorGatePanel = null;
     this.bridgeBoundaryMarker = null;
@@ -521,7 +543,7 @@ export class GameRuntime {
     cityGroup.position.set(this.citySpawn.x, 0, this.citySpawn.z + 4);
 
     const plaza = new THREE.Mesh(
-      new THREE.CylinderGeometry(24, 24, 0.22, this.mobileEnabled ? 24 : 36),
+      new THREE.CylinderGeometry(34, 34, 0.22, this.mobileEnabled ? 26 : 42),
       new THREE.MeshStandardMaterial({
         color: 0x39434d,
         roughness: 0.82,
@@ -535,7 +557,7 @@ export class GameRuntime {
     cityGroup.add(plaza);
 
     const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(17.2, 0.36, 20, this.mobileEnabled ? 40 : 72),
+      new THREE.TorusGeometry(24.5, 0.38, 20, this.mobileEnabled ? 44 : 80),
       new THREE.MeshStandardMaterial({
         color: 0x81a8ce,
         roughness: 0.3,
@@ -549,11 +571,14 @@ export class GameRuntime {
     cityGroup.add(ring);
 
     const towerPositions = [
-      [-16, 6, -8],
-      [16, 7.5, -6],
-      [-12, 9.2, 13],
-      [13, 8.4, 11],
-      [0, 11, -16]
+      [-22, 6.4, -10],
+      [22, 7.8, -8],
+      [-18, 9.2, 17],
+      [19, 8.8, 15],
+      [0, 11.6, -24],
+      [0, 8.6, 22],
+      [-25, 6.8, 2],
+      [25, 7.1, 3]
     ];
     const towerMaterial = new THREE.MeshStandardMaterial({
       color: 0x5f758f,
@@ -568,6 +593,47 @@ export class GameRuntime {
       tower.castShadow = !this.mobileEnabled;
       tower.receiveShadow = true;
       cityGroup.add(tower);
+    }
+
+    const skylineMaterial = new THREE.MeshStandardMaterial({
+      color: 0x4b5f74,
+      roughness: 0.62,
+      metalness: 0.18,
+      emissive: 0x1c2b3b,
+      emissiveIntensity: 0.2
+    });
+    const skylineCapMaterial = new THREE.MeshStandardMaterial({
+      color: 0x86a9c8,
+      roughness: 0.28,
+      metalness: 0.45,
+      emissive: 0x35516b,
+      emissiveIntensity: 0.28
+    });
+    // Clone the plaza tower pattern into a larger skyline ring so it reads from mid-distance.
+    for (let i = 0; i < towerPositions.length; i += 1) {
+      const [x, h, z] = towerPositions[i];
+      const megaX = x * 2.7;
+      const megaZ = z * 2.7;
+      const megaHeight = Math.max(30, h * 4.2 + (i % 3) * 4.5);
+      const footprint = 8.4 + (i % 2) * 1.8;
+
+      const megaTower = new THREE.Mesh(
+        new THREE.BoxGeometry(footprint, megaHeight, footprint),
+        skylineMaterial
+      );
+      megaTower.position.set(megaX, megaHeight * 0.5, megaZ);
+      megaTower.castShadow = !this.mobileEnabled;
+      megaTower.receiveShadow = true;
+      cityGroup.add(megaTower);
+
+      const towerCap = new THREE.Mesh(
+        new THREE.CylinderGeometry(footprint * 0.26, footprint * 0.32, 1.7, this.mobileEnabled ? 9 : 14),
+        skylineCapMaterial
+      );
+      towerCap.position.set(megaX, megaHeight + 0.86, megaZ);
+      towerCap.castShadow = !this.mobileEnabled;
+      towerCap.receiveShadow = true;
+      cityGroup.add(towerCap);
     }
 
     const npcGuide = new THREE.Group();
@@ -614,98 +680,270 @@ export class GameRuntime {
     npcPad.rotation.x = -Math.PI / 2;
     npcPad.position.y = 0.04;
 
-    npcGuide.add(npcBody, npcHead, npcPad);
+    const npcHoloFloor = new THREE.Mesh(
+      new THREE.CircleGeometry(2.12, this.mobileEnabled ? 28 : 48),
+      new THREE.MeshBasicMaterial({
+        color: 0x67dfff,
+        transparent: true,
+        opacity: 0.18,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+      })
+    );
+    npcHoloFloor.rotation.x = -Math.PI / 2;
+    npcHoloFloor.position.y = 0.028;
+
+    const npcHoloRing = new THREE.Mesh(
+      new THREE.RingGeometry(1.34, 2.18, this.mobileEnabled ? 28 : 52),
+      new THREE.MeshBasicMaterial({
+        color: 0x9cefff,
+        transparent: true,
+        opacity: 0.42,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+      })
+    );
+    npcHoloRing.rotation.x = -Math.PI / 2;
+    npcHoloRing.position.y = 0.032;
+
+    const npcHoloBeam = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.56, 1.16, 2.34, this.mobileEnabled ? 12 : 18, 1, true),
+      new THREE.MeshBasicMaterial({
+        color: 0x6ad7ff,
+        transparent: true,
+        opacity: 0.14,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+      })
+    );
+    npcHoloBeam.position.y = 1.2;
+
+    const npcHoloFrame = new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.PlaneGeometry(1.56, 2.52)),
+      new THREE.LineBasicMaterial({
+        color: 0xa2f0ff,
+        transparent: true,
+        opacity: 0.88,
+        blending: THREE.AdditiveBlending
+      })
+    );
+    npcHoloFrame.position.set(0, 1.48, -0.45);
+    npcHoloFrame.rotation.y = Math.PI;
+    npcHoloFrame.renderOrder = 13;
+    npcHoloFrame.frustumCulled = false;
+
+    npcGuide.add(npcHoloFloor, npcHoloRing, npcHoloBeam, npcBody, npcHead, npcPad, npcHoloFrame);
+    const npcGreetingScreen = this.createNpcGreetingScreen();
+    npcGuide.add(npcGreetingScreen);
 
     const mirrorGate = new THREE.Group();
     mirrorGate.position.set(this.bridgeMirrorPosition.x, 0, this.bridgeMirrorPosition.z);
     mirrorGate.visible = false;
 
-    const mirrorFrame = new THREE.Mesh(
-      new THREE.BoxGeometry(2.6, 3.9, 0.22),
-      new THREE.MeshStandardMaterial({
-        color: 0x3d4d5f,
-        roughness: 0.34,
-        metalness: 0.58,
-        emissive: 0x1d3348,
-        emissiveIntensity: 0.24
-      })
-    );
-    mirrorFrame.position.y = this.bridgeMirrorPosition.y;
-    mirrorFrame.castShadow = !this.mobileEnabled;
-    mirrorFrame.receiveShadow = true;
+    const shrinePillarMaterial = new THREE.MeshStandardMaterial({
+      color: 0x8f3a2d,
+      roughness: 0.56,
+      metalness: 0.1,
+      emissive: 0x361611,
+      emissiveIntensity: 0.11
+    });
+    const shrineBeamMaterial = new THREE.MeshStandardMaterial({
+      color: 0x25445f,
+      roughness: 0.5,
+      metalness: 0.18,
+      emissive: 0x112435,
+      emissiveIntensity: 0.12
+    });
+    const shrineTileMaterial = new THREE.MeshStandardMaterial({
+      color: 0x3d4a5a,
+      roughness: 0.44,
+      metalness: 0.2,
+      emissive: 0x1a2430,
+      emissiveIntensity: 0.1
+    });
+    const shrineStoneMaterial = new THREE.MeshStandardMaterial({
+      color: 0x8b9098,
+      roughness: 0.76,
+      metalness: 0.04
+    });
 
-    const mirrorPanel = new THREE.Mesh(
-      new THREE.PlaneGeometry(2.08, 3.34),
+    const shrineLeftPost = new THREE.Mesh(
+      new THREE.BoxGeometry(0.52, 4.9, 0.52),
+      shrinePillarMaterial
+    );
+    shrineLeftPost.position.set(-1.72, 2.45, 0);
+    shrineLeftPost.castShadow = !this.mobileEnabled;
+    shrineLeftPost.receiveShadow = true;
+
+    const shrineRightPost = shrineLeftPost.clone();
+    shrineRightPost.position.x = 1.72;
+
+    const shrineLeftBase = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.5, 0.56, 0.26, this.mobileEnabled ? 12 : 18),
+      shrineStoneMaterial
+    );
+    shrineLeftBase.position.set(-1.72, 0.13, 0);
+    shrineLeftBase.castShadow = !this.mobileEnabled;
+    shrineLeftBase.receiveShadow = true;
+
+    const shrineRightBase = shrineLeftBase.clone();
+    shrineRightBase.position.x = 1.72;
+
+    const shrineTopBeam = new THREE.Mesh(
+      new THREE.BoxGeometry(5.12, 0.34, 0.56),
+      shrinePillarMaterial
+    );
+    shrineTopBeam.position.set(0, 3.72, 0);
+    shrineTopBeam.castShadow = !this.mobileEnabled;
+    shrineTopBeam.receiveShadow = true;
+
+    const shrineMiddleBeam = new THREE.Mesh(
+      new THREE.BoxGeometry(4.46, 0.28, 0.44),
+      shrineBeamMaterial
+    );
+    shrineMiddleBeam.position.set(0, 3.26, 0);
+    shrineMiddleBeam.castShadow = !this.mobileEnabled;
+    shrineMiddleBeam.receiveShadow = true;
+
+    const shrineLowerBeam = new THREE.Mesh(
+      new THREE.BoxGeometry(3.86, 0.24, 0.34),
+      shrineBeamMaterial
+    );
+    shrineLowerBeam.position.set(0, 2.5, 0);
+    shrineLowerBeam.castShadow = !this.mobileEnabled;
+    shrineLowerBeam.receiveShadow = true;
+
+    const shrineRoofCore = new THREE.Mesh(
+      new THREE.BoxGeometry(5.36, 0.18, 1.38),
+      shrineTileMaterial
+    );
+    shrineRoofCore.position.set(0, 4.02, 0);
+    shrineRoofCore.castShadow = !this.mobileEnabled;
+    shrineRoofCore.receiveShadow = true;
+
+    const shrineRoofFront = new THREE.Mesh(
+      new THREE.BoxGeometry(5.64, 0.16, 0.46),
+      shrineTileMaterial
+    );
+    shrineRoofFront.position.set(0, 3.94, 0.72);
+    shrineRoofFront.rotation.x = 0.22;
+    shrineRoofFront.castShadow = !this.mobileEnabled;
+    shrineRoofFront.receiveShadow = true;
+
+    const shrineRoofBack = shrineRoofFront.clone();
+    shrineRoofBack.position.z = -0.72;
+    shrineRoofBack.rotation.x = -0.22;
+
+    const shrineRoofRidge = new THREE.Mesh(
+      new THREE.BoxGeometry(4.96, 0.16, 0.34),
+      shrineTileMaterial
+    );
+    shrineRoofRidge.position.set(0, 4.18, 0);
+    shrineRoofRidge.castShadow = !this.mobileEnabled;
+    shrineRoofRidge.receiveShadow = true;
+
+    const shrinePlaque = new THREE.Mesh(
+      new THREE.BoxGeometry(0.72, 0.88, 0.1),
       new THREE.MeshStandardMaterial({
-        color: 0xdaf5ff,
-        roughness: 0.08,
-        metalness: 0.96,
-        emissive: 0x4fa7d4,
-        emissiveIntensity: 0.22,
-        transparent: true,
-        opacity: 0.86
+        color: 0xe8dbc1,
+        roughness: 0.36,
+        metalness: 0.12,
+        emissive: 0x4d442f,
+        emissiveIntensity: 0.08
       })
     );
-    mirrorPanel.position.set(0, this.bridgeMirrorPosition.y, 0.12);
-    mirrorPanel.rotation.y = Math.PI;
-    mirrorPanel.receiveShadow = false;
+    shrinePlaque.position.set(0, 3.02, 0.28);
+    shrinePlaque.castShadow = !this.mobileEnabled;
+    shrinePlaque.receiveShadow = true;
+
+    const shrineAura = new THREE.Mesh(
+      new THREE.RingGeometry(1.34, 1.95, this.mobileEnabled ? 28 : 44),
+      new THREE.MeshBasicMaterial({
+        color: 0xb6f0ff,
+        transparent: true,
+        opacity: 0.2,
+        side: THREE.DoubleSide,
+        depthWrite: false
+      })
+    );
+    shrineAura.rotation.x = -Math.PI / 2;
+    shrineAura.position.y = 0.06;
 
     const mirrorPad = new THREE.Mesh(
-      new THREE.RingGeometry(1.2, 1.65, this.mobileEnabled ? 24 : 36),
+      new THREE.RingGeometry(1.52, 2.18, this.mobileEnabled ? 24 : 36),
       new THREE.MeshBasicMaterial({
         color: 0x7df0ff,
         transparent: true,
-        opacity: 0.74,
+        opacity: 0.42,
         side: THREE.DoubleSide,
         depthWrite: false
       })
     );
     mirrorPad.rotation.x = -Math.PI / 2;
-    mirrorPad.position.y = 0.05;
+    mirrorPad.position.y = 0.04;
 
-    mirrorGate.add(mirrorFrame, mirrorPanel, mirrorPad);
+    mirrorGate.add(
+      shrineLeftBase,
+      shrineRightBase,
+      shrineLeftPost,
+      shrineRightPost,
+      shrineTopBeam,
+      shrineMiddleBeam,
+      shrineLowerBeam,
+      shrineRoofCore,
+      shrineRoofFront,
+      shrineRoofBack,
+      shrineRoofRidge,
+      shrinePlaque,
+      shrineAura,
+      mirrorPad
+    );
 
     const boundaryMarker = new THREE.Group();
     boundaryMarker.position.set(this.bridgeCityEntry.x, 0, this.bridgeCityEntry.z);
+    const boundaryPortalRadius = Math.max(2.2, this.bridgeWidth * 0.34);
 
     const boundaryRing = new THREE.Mesh(
-      new THREE.TorusGeometry(this.bridgeWidth * 0.54, 0.19, 20, this.mobileEnabled ? 30 : 54),
+      new THREE.TorusGeometry(boundaryPortalRadius, 0.22, 22, this.mobileEnabled ? 36 : 68),
       new THREE.MeshStandardMaterial({
-        color: 0x9ce5ff,
-        roughness: 0.18,
-        metalness: 0.38,
-        emissive: 0x53c8ff,
-        emissiveIntensity: 0.32,
+        color: 0x84dcff,
+        roughness: 0.14,
+        metalness: 0.46,
+        emissive: 0x49bfff,
+        emissiveIntensity: 0.48,
         transparent: true,
-        opacity: 0.68
+        opacity: 0.82
       })
     );
-    boundaryRing.rotation.x = Math.PI / 2;
-    boundaryRing.position.y = 0.34;
+    boundaryRing.position.y = 2.06;
 
     const boundaryHalo = new THREE.Mesh(
-      new THREE.RingGeometry(this.bridgeWidth * 0.34, this.bridgeWidth * 0.72, this.mobileEnabled ? 30 : 52),
+      new THREE.CircleGeometry(boundaryPortalRadius * 0.82, this.mobileEnabled ? 26 : 52),
       new THREE.MeshBasicMaterial({
-        color: 0x89f2ff,
+        color: 0xaaf2ff,
         transparent: true,
-        opacity: 0.22,
+        opacity: 0.24,
         side: THREE.DoubleSide,
-        depthWrite: false
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
       })
     );
-    boundaryHalo.rotation.x = -Math.PI / 2;
-    boundaryHalo.position.y = 0.06;
+    boundaryHalo.position.y = 2.06;
 
     const boundaryBeam = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.08, 0.08, 2.7, this.mobileEnabled ? 10 : 14),
+      new THREE.CylinderGeometry(0.07, 0.12, 1.18, this.mobileEnabled ? 10 : 16),
       new THREE.MeshBasicMaterial({
-        color: 0x8fe9ff,
+        color: 0x7fe6ff,
         transparent: true,
-        opacity: 0.22,
-        depthWrite: false
+        opacity: 0.28,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
       })
     );
-    boundaryBeam.position.y = 1.46;
+    boundaryBeam.position.y = 0.62;
 
     const portalGroup = new THREE.Group();
     portalGroup.position.copy(this.portalFloorPosition);
@@ -759,7 +997,7 @@ export class GameRuntime {
     this.portalCore = portalCore;
     this.npcGuideGroup = npcGuide;
     this.mirrorGateGroup = mirrorGate;
-    this.mirrorGatePanel = mirrorPanel;
+    this.mirrorGatePanel = null;
     this.bridgeBoundaryMarker = boundaryMarker;
     this.bridgeBoundaryRing = boundaryRing;
     this.bridgeBoundaryHalo = boundaryHalo;
@@ -872,7 +1110,7 @@ export class GameRuntime {
     this.chalkLastStamp = null;
     this.setMirrorGateVisible(true);
     this.yaw = this.getLookYaw(this.playerPosition, this.bridgeMirrorPosition);
-    this.setFlowHeadline("거울 확인", "거울을 바라보면 이동 승인이 완료됩니다.");
+    this.setFlowHeadline("입구 확인", "사찰 입구를 바라보면 이동 승인이 완료됩니다.");
     this.hud.setStatus(this.getStatusText());
     this.syncGameplayUiForFlow();
   }
@@ -892,13 +1130,105 @@ export class GameRuntime {
     }
   }
 
+  openBridgeNameGate() {
+    if (!this.hubFlowEnabled || this.flowStage !== "bridge_dialogue") {
+      return;
+    }
+    this.flowStage = "bridge_name";
+    this.keys.clear();
+    this.chalkDrawingActive = false;
+    this.chalkLastStamp = null;
+    this.showNicknameGate();
+    this.setFlowHeadline("검문소 등록", "안내원 앞에서 호출명을 등록하세요.");
+    this.hud.setStatus(this.getStatusText());
+  }
+
+  createNpcGreetingScreen() {
+    const video = document.createElement("video");
+    video.src = NPC_GREETING_VIDEO_URL;
+    video.preload = "auto";
+    video.loop = false;
+    video.muted = false;
+    video.playsInline = true;
+    video.crossOrigin = "anonymous";
+    video.setAttribute("playsinline", "");
+    video.setAttribute("webkit-playsinline", "");
+
+    const videoTexture = new THREE.VideoTexture(video);
+    videoTexture.colorSpace = THREE.SRGBColorSpace;
+    videoTexture.minFilter = THREE.LinearFilter;
+    videoTexture.magFilter = THREE.LinearFilter;
+    videoTexture.generateMipmaps = false;
+
+    const screen = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.42, 2.38),
+      new THREE.MeshBasicMaterial({
+        map: videoTexture,
+        transparent: true,
+        alphaTest: 0.02,
+        depthWrite: false
+      })
+    );
+    screen.position.set(0, 1.48, -0.42);
+    screen.rotation.y = Math.PI;
+    screen.renderOrder = 12;
+    screen.frustumCulled = false;
+    video.onended = () => {
+      this.openBridgeNameGate();
+    };
+    video.onerror = () => {
+      this.openBridgeNameGate();
+    };
+
+    this.npcGreetingVideoEl = video;
+    this.npcGreetingVideoTexture = videoTexture;
+    this.npcGreetingScreen = screen;
+    this.npcGreetingPlayed = false;
+    return screen;
+  }
+
+  playNpcGreeting() {
+    if (!this.npcGreetingVideoEl) {
+      this.openBridgeNameGate();
+      return;
+    }
+    if (this.npcGreetingPlayed) {
+      this.openBridgeNameGate();
+      return;
+    }
+
+    const video = this.npcGreetingVideoEl;
+    const tryPlay = () =>
+      video.play().then(
+        () => {
+          this.npcGreetingPlayed = true;
+        },
+        () => Promise.reject(new Error("play failed"))
+      );
+
+    video.currentTime = 0;
+    tryPlay().catch(() => {
+      video.muted = true;
+      video.currentTime = 0;
+      video.play().then(
+        () => {
+          this.npcGreetingPlayed = true;
+        },
+        () => {
+          this.npcGreetingPlayed = false;
+          this.openBridgeNameGate();
+        }
+      );
+    });
+  }
+
   getNpcDistance() {
     const dx = this.playerPosition.x - this.bridgeNpcPosition.x;
     const dz = this.playerPosition.z - this.bridgeNpcPosition.z;
     return Math.hypot(dx, dz);
   }
 
-  evaluateMirrorFocus() {
+  evaluateGateFocus() {
     const dx = this.playerPosition.x - this.bridgeMirrorPosition.x;
     const dz = this.playerPosition.z - this.bridgeMirrorPosition.z;
     const distance = Math.hypot(dx, dz);
@@ -931,13 +1261,13 @@ export class GameRuntime {
     const haloMaterial = this.bridgeBoundaryHalo.material;
     const beamMaterial = this.bridgeBoundaryBeam.material;
 
-    ringMaterial.emissiveIntensity = 0.24 + pulse * 0.24 + dingAlpha * 1.32;
-    ringMaterial.opacity = 0.6 + pulse * 0.12 + dingAlpha * 0.24;
-    haloMaterial.opacity = 0.18 + pulse * 0.2 + dingAlpha * 0.44;
-    beamMaterial.opacity = 0.16 + pulse * 0.18 + dingAlpha * 0.38;
+    ringMaterial.emissiveIntensity = 0.42 + pulse * 0.42 + dingAlpha * 1.08;
+    ringMaterial.opacity = 0.72 + pulse * 0.1 + dingAlpha * 0.2;
+    haloMaterial.opacity = 0.16 + pulse * 0.22 + dingAlpha * 0.34;
+    beamMaterial.opacity = 0.2 + pulse * 0.16 + dingAlpha * 0.28;
 
-    const scale = 1 + dingAlpha * 0.22;
-    this.bridgeBoundaryMarker.scale.set(scale, 1 + dingAlpha * 0.06, scale);
+    const scale = 1 + dingAlpha * 0.18;
+    this.bridgeBoundaryMarker.scale.set(scale, 1 + dingAlpha * 0.08, scale);
   }
 
   setFlowHeadline(title, subtitle) {
@@ -1010,17 +1340,22 @@ export class GameRuntime {
       );
       this.updatePortalVisual();
       if (npcDistance <= this.bridgeNpcTriggerRadius) {
-        this.flowStage = "bridge_name";
+        this.flowStage = "bridge_dialogue";
         this.keys.clear();
         this.chalkDrawingActive = false;
         this.chalkLastStamp = null;
         if (document.pointerLockElement === this.renderer.domElement) {
           document.exitPointerLock?.();
         }
-        this.showNicknameGate();
-        this.setFlowHeadline("검문소 등록", "안내원 앞에서 호출명을 등록하세요.");
+        this.playNpcGreeting();
+        this.setFlowHeadline("검문소 안내", "안내원 인사말 수신 중...");
         this.hud.setStatus(this.getStatusText());
       }
+      return;
+    }
+
+    if (this.flowStage === "bridge_dialogue") {
+      this.updatePortalVisual();
       return;
     }
 
@@ -1036,7 +1371,7 @@ export class GameRuntime {
         this.bridgeSpawn.x - half,
         this.bridgeSpawn.x + half
       );
-      const focus = this.evaluateMirrorFocus();
+      const focus = this.evaluateGateFocus();
       if (focus > 0.35) {
         this.mirrorLookClock = Math.min(
           this.bridgeMirrorLookSeconds,
@@ -1051,8 +1386,8 @@ export class GameRuntime {
         1
       );
       this.setFlowHeadline(
-        "거울 확인",
-        `반사 정렬 진행률 ${Math.round(progress * 100)}%`
+        "입구 확인",
+        `입구 동기화 진행률 ${Math.round(progress * 100)}%`
       );
       this.updatePortalVisual();
       if (progress >= 1) {
@@ -3219,11 +3554,14 @@ export class GameRuntime {
       if (this.flowStage === "bridge_approach") {
         return this.networkConnected ? "온라인 / 접근 중" : "오프라인 / 접근 중";
       }
+      if (this.flowStage === "bridge_dialogue") {
+        return this.networkConnected ? "온라인 / 안내 대화" : "오프라인 / 안내 대화";
+      }
       if (this.flowStage === "bridge_name") {
         return this.networkConnected ? "온라인 / 이름 확인" : "오프라인 / 이름 확인";
       }
       if (this.flowStage === "bridge_mirror") {
-        return this.networkConnected ? "온라인 / 거울 확인" : "오프라인 / 거울 확인";
+        return this.networkConnected ? "온라인 / 입구 확인" : "오프라인 / 입구 확인";
       }
       if (this.flowStage === "city_intro") {
         return this.networkConnected ? "온라인 / 도시 이동" : "오프라인 / 도시 이동";
