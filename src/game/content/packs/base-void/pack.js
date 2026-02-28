@@ -155,6 +155,28 @@ export const BASE_VOID_PACK = {
         emissiveIntensity: 0.2
       }
     },
+    hubFlow: {
+      enabled: true,
+      introSeconds: 4.8,
+      bridge: {
+        spawn: [0, GAME_CONSTANTS.PLAYER_HEIGHT, -78],
+        cityEntry: [0, GAME_CONSTANTS.PLAYER_HEIGHT, -18],
+        width: 10,
+        deckColor: 0x4f5660,
+        railColor: 0x8fa2b8
+      },
+      city: {
+        spawn: [0, GAME_CONSTANTS.PLAYER_HEIGHT, -8]
+      },
+      portal: {
+        position: [0, 0.08, 22],
+        radius: 4.4,
+        cooldownSeconds: 60,
+        warningSeconds: 16,
+        openSeconds: 24,
+        targetUrl: ""
+      }
+    },
     postProcessing: {
       exposure: 0.58,
       bloom: {

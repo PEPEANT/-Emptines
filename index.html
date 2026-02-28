@@ -8,6 +8,50 @@
   <body>
     <div id="app"></div>
 
+    <div id="hud-ui" aria-label="status">
+      <div class="hud-row">
+        <span class="hud-key">NET</span>
+        <span id="hud-status">BOOT</span>
+      </div>
+      <div class="hud-row">
+        <span class="hud-key">PLAYERS</span>
+        <span id="hud-players">0</span>
+      </div>
+      <div class="hud-row">
+        <span class="hud-key">POS</span>
+        <span id="hud-position">0, 0</span>
+      </div>
+      <div class="hud-row">
+        <span class="hud-key">FPS</span>
+        <span id="hud-fps">0</span>
+      </div>
+    </div>
+
+    <div id="hub-flow-ui" aria-live="polite">
+      <div id="hub-billboard">
+        <p class="hub-kicker">RECLAIM HUB</p>
+        <h1 id="hub-phase-title">Bridge Checkpoint</h1>
+        <p id="hub-phase-subtitle">Set your callsign to enter the city.</p>
+      </div>
+    </div>
+
+    <div id="nickname-gate" class="hidden" aria-modal="true" role="dialog" aria-labelledby="nickname-title">
+      <form id="nickname-form" novalidate>
+        <h2 id="nickname-title">Bridge Access Terminal</h2>
+        <p class="nickname-copy">Choose your callsign before city entry.</p>
+        <label for="nickname-input">Callsign</label>
+        <input
+          id="nickname-input"
+          type="text"
+          maxlength="16"
+          placeholder="PLAYER_2049"
+          autocomplete="nickname"
+        />
+        <p id="nickname-error" class="hidden" aria-live="polite"></p>
+        <button id="nickname-submit" type="submit">Enter City</button>
+      </form>
+    </div>
+
     <div id="tool-ui" aria-label="tools">
       <div id="tool-hotbar">
         <button class="tool-slot active" data-tool="move" type="button" title="Move (B)">
@@ -33,6 +77,11 @@
           autocomplete="off"
         />
       </div>
+    </div>
+
+    <div id="portal-transition" aria-hidden="true">
+      <div class="portal-loader"></div>
+      <p id="portal-transition-text">Portal sync in progress...</p>
     </div>
 
     <script type="module" src="/src/main.js"></script>

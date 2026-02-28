@@ -14,6 +14,24 @@ import { lerpAngle } from "../utils/math.js";
 import { disposeMeshTree } from "../utils/threeUtils.js";
 import { RUNTIME_TUNING } from "./config/runtimeTuning.js";
 
+function parseVec3(raw, fallback) {
+  const base = Array.isArray(fallback) ? fallback : [0, 0, 0];
+  const value = Array.isArray(raw) ? raw : base;
+  return new THREE.Vector3(
+    Number(value[0] ?? base[0]) || 0,
+    Number(value[1] ?? base[1]) || 0,
+    Number(value[2] ?? base[2]) || 0
+  );
+}
+
+function parseSeconds(raw, fallback, min = 0.1) {
+  const value = Number(raw);
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.max(min, value);
+}
+
 export class GameRuntime {
   constructor(mount, options = {}) {
     this.mount = mount;
@@ -142,7 +160,12 @@ export class GameRuntime {
     this.socketEndpoint = null;
     this.networkConnected = false;
     this.localPlayerId = null;
-    this.localPlayerName = "PLAYER";
+    this.queryParams =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search)
+        : new URLSearchParams();
+    this.localPlayerName = this.formatPlayerName(this.queryParams.get("name") ?? "PLAYER");
+    this.pendingPlayerNameSync = false;
     this.remotePlayers = new Map();
     this.remoteSyncClock = 0;
     this.chatBubbleLifetimeMs = 4200;
@@ -157,6 +180,62 @@ export class GameRuntime {
     this.chatOpen = false;
     this.lastLocalChatEcho = "";
     this.lastLocalChatEchoAt = 0;
+    this.toolUiEl = document.getElementById("tool-ui");
+    this.chatUiEl = document.getElementById("chat-ui");
+    this.hubFlowUiEl = document.getElementById("hub-flow-ui");
+    this.hubPhaseTitleEl = document.getElementById("hub-phase-title");
+    this.hubPhaseSubtitleEl = document.getElementById("hub-phase-subtitle");
+    this.nicknameGateEl = document.getElementById("nickname-gate");
+    this.nicknameFormEl = document.getElementById("nickname-form");
+    this.nicknameInputEl = document.getElementById("nickname-input");
+    this.nicknameErrorEl = document.getElementById("nickname-error");
+    this.portalTransitionEl = document.getElementById("portal-transition");
+    this.portalTransitionTextEl = document.getElementById("portal-transition-text");
+
+    const hubFlowConfig = this.worldContent?.hubFlow ?? {};
+    const bridgeConfig = hubFlowConfig?.bridge ?? {};
+    const cityConfig = hubFlowConfig?.city ?? {};
+    const portalConfig = hubFlowConfig?.portal ?? {};
+    this.hubFlowEnabled = Boolean(hubFlowConfig?.enabled);
+    this.flowStage = this.hubFlowEnabled ? "bridge_name" : "city_live";
+    this.flowClock = 0;
+    this.hubIntroDuration = parseSeconds(hubFlowConfig?.introSeconds, 4.8, 0.8);
+    this.bridgeSpawn = parseVec3(
+      bridgeConfig?.spawn,
+      [0, GAME_CONSTANTS.PLAYER_HEIGHT, -78]
+    );
+    this.bridgeCityEntry = parseVec3(
+      bridgeConfig?.cityEntry,
+      [0, GAME_CONSTANTS.PLAYER_HEIGHT, -18]
+    );
+    this.citySpawn = parseVec3(
+      cityConfig?.spawn,
+      [0, GAME_CONSTANTS.PLAYER_HEIGHT, -8]
+    );
+    this.bridgeWidth = Math.max(4, Number(bridgeConfig?.width) || 10);
+    this.bridgeDeckColor = bridgeConfig?.deckColor ?? 0x4f5660;
+    this.bridgeRailColor = bridgeConfig?.railColor ?? 0x8fa2b8;
+    this.portalFloorPosition = parseVec3(portalConfig?.position, [0, 0.08, 22]);
+    this.portalRadius = Math.max(2.2, Number(portalConfig?.radius) || 4.4);
+    this.portalCooldownSeconds = parseSeconds(portalConfig?.cooldownSeconds, 60, 8);
+    this.portalWarningSeconds = parseSeconds(portalConfig?.warningSeconds, 16, 4);
+    this.portalOpenSeconds = parseSeconds(portalConfig?.openSeconds, 24, 5);
+    this.portalTargetUrl = this.resolvePortalTargetUrl(portalConfig?.targetUrl ?? "");
+    this.portalPhase = this.hubFlowEnabled ? "cooldown" : "idle";
+    this.portalPhaseClock = this.portalCooldownSeconds;
+    this.portalTransitioning = false;
+    this.portalPulseClock = 0;
+    this.hubFlowGroup = null;
+    this.portalGroup = null;
+    this.portalRing = null;
+    this.portalCore = null;
+    this.hubFlowUiBound = false;
+    this.cityIntroStart = new THREE.Vector3();
+    this.cityIntroEnd = new THREE.Vector3();
+    this.flowHeadlineCache = {
+      title: "",
+      subtitle: ""
+    };
 
     this._initialized = false;
   }
@@ -177,12 +256,16 @@ export class GameRuntime {
     this.setChatOpen(false);
 
     this.setupWorld();
+    this.setupHubFlowWorld();
     this.setupPostProcessing();
     this.bindEvents();
+    this.bindHubFlowUiEvents();
     this.connectNetwork();
 
     this.camera.rotation.order = "YXZ";
+    this.applyInitialFlowSpawn();
     this.camera.position.copy(this.playerPosition);
+    this.syncGameplayUiForFlow();
 
     this.hud.update({
       status: this.getStatusText(),
@@ -336,6 +419,565 @@ export class GameRuntime {
     originMarker.position.fromArray(marker.position);
     originMarker.castShadow = true;
     this.scene.add(originMarker);
+  }
+
+  clearHubFlowWorld() {
+    if (!this.hubFlowGroup) {
+      return;
+    }
+    this.scene.remove(this.hubFlowGroup);
+    disposeMeshTree(this.hubFlowGroup);
+    this.hubFlowGroup = null;
+    this.portalGroup = null;
+    this.portalRing = null;
+    this.portalCore = null;
+  }
+
+  setupHubFlowWorld() {
+    this.clearHubFlowWorld();
+    if (!this.hubFlowEnabled) {
+      return;
+    }
+
+    const group = new THREE.Group();
+
+    const bridgeDirection = new THREE.Vector3(
+      this.bridgeCityEntry.x - this.bridgeSpawn.x,
+      0,
+      this.bridgeCityEntry.z - this.bridgeSpawn.z
+    );
+    let bridgeLength = bridgeDirection.length();
+    if (bridgeLength < 22) {
+      bridgeLength = 66;
+      bridgeDirection.set(0, 0, 1);
+    } else {
+      bridgeDirection.normalize();
+    }
+
+    const bridgeYaw = Math.atan2(bridgeDirection.x, bridgeDirection.z);
+    const bridgeCenter = new THREE.Vector3(
+      (this.bridgeSpawn.x + this.bridgeCityEntry.x) * 0.5,
+      0.15,
+      (this.bridgeSpawn.z + this.bridgeCityEntry.z) * 0.5
+    );
+    const bridgeDeckLength = bridgeLength + 30;
+    const bridgeGroup = new THREE.Group();
+    bridgeGroup.position.copy(bridgeCenter);
+    bridgeGroup.rotation.y = bridgeYaw;
+
+    const bridgeDeckMaterial = new THREE.MeshStandardMaterial({
+      color: this.bridgeDeckColor,
+      roughness: 0.7,
+      metalness: 0.12,
+      emissive: 0x171d23,
+      emissiveIntensity: 0.1
+    });
+    const bridgeRailMaterial = new THREE.MeshStandardMaterial({
+      color: this.bridgeRailColor,
+      roughness: 0.48,
+      metalness: 0.35,
+      emissive: 0x253445,
+      emissiveIntensity: 0.12
+    });
+    const bridgeDeck = new THREE.Mesh(
+      new THREE.BoxGeometry(this.bridgeWidth, 0.32, bridgeDeckLength),
+      bridgeDeckMaterial
+    );
+    bridgeDeck.castShadow = !this.mobileEnabled;
+    bridgeDeck.receiveShadow = true;
+    bridgeGroup.add(bridgeDeck);
+
+    const railHeight = 1.35;
+    const railThickness = 0.26;
+    const bridgeRailLeft = new THREE.Mesh(
+      new THREE.BoxGeometry(railThickness, railHeight, bridgeDeckLength),
+      bridgeRailMaterial
+    );
+    bridgeRailLeft.position.set(-this.bridgeWidth * 0.5 + railThickness * 0.5, railHeight * 0.5, 0);
+    bridgeRailLeft.castShadow = !this.mobileEnabled;
+    bridgeRailLeft.receiveShadow = true;
+    bridgeGroup.add(bridgeRailLeft);
+
+    const bridgeRailRight = bridgeRailLeft.clone();
+    bridgeRailRight.position.x = this.bridgeWidth * 0.5 - railThickness * 0.5;
+    bridgeGroup.add(bridgeRailRight);
+
+    const beaconMaterial = new THREE.MeshStandardMaterial({
+      color: 0x9edcff,
+      roughness: 0.16,
+      metalness: 0.14,
+      emissive: 0x6dc8ff,
+      emissiveIntensity: 0.82
+    });
+    const beaconGeometry = new THREE.BoxGeometry(0.34, 0.24, 0.34);
+    const lightCount = Math.max(8, Math.round(bridgeDeckLength / 8));
+    for (let i = 0; i <= lightCount; i += 1) {
+      const ratio = lightCount <= 0 ? 0 : i / lightCount;
+      const z = -bridgeDeckLength * 0.5 + ratio * bridgeDeckLength;
+      const leftBeacon = new THREE.Mesh(beaconGeometry, beaconMaterial);
+      leftBeacon.position.set(-this.bridgeWidth * 0.5 + 0.7, 0.45, z);
+      const rightBeacon = leftBeacon.clone();
+      rightBeacon.position.x = this.bridgeWidth * 0.5 - 0.7;
+      bridgeGroup.add(leftBeacon, rightBeacon);
+    }
+
+    const cityGroup = new THREE.Group();
+    cityGroup.position.set(this.citySpawn.x, 0, this.citySpawn.z + 4);
+
+    const plaza = new THREE.Mesh(
+      new THREE.CylinderGeometry(24, 24, 0.22, this.mobileEnabled ? 24 : 36),
+      new THREE.MeshStandardMaterial({
+        color: 0x39434d,
+        roughness: 0.82,
+        metalness: 0.05,
+        emissive: 0x1b242f,
+        emissiveIntensity: 0.11
+      })
+    );
+    plaza.position.y = 0.11;
+    plaza.receiveShadow = true;
+    cityGroup.add(plaza);
+
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(17.2, 0.36, 20, this.mobileEnabled ? 40 : 72),
+      new THREE.MeshStandardMaterial({
+        color: 0x81a8ce,
+        roughness: 0.3,
+        metalness: 0.54,
+        emissive: 0x34506d,
+        emissiveIntensity: 0.22
+      })
+    );
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.24;
+    cityGroup.add(ring);
+
+    const towerPositions = [
+      [-16, 6, -8],
+      [16, 7.5, -6],
+      [-12, 9.2, 13],
+      [13, 8.4, 11],
+      [0, 11, -16]
+    ];
+    const towerMaterial = new THREE.MeshStandardMaterial({
+      color: 0x5f758f,
+      roughness: 0.56,
+      metalness: 0.28,
+      emissive: 0x273a52,
+      emissiveIntensity: 0.3
+    });
+    for (const [x, h, z] of towerPositions) {
+      const tower = new THREE.Mesh(new THREE.BoxGeometry(4.6, h, 4.6), towerMaterial);
+      tower.position.set(x, h * 0.5, z);
+      tower.castShadow = !this.mobileEnabled;
+      tower.receiveShadow = true;
+      cityGroup.add(tower);
+    }
+
+    const portalGroup = new THREE.Group();
+    portalGroup.position.copy(this.portalFloorPosition);
+    portalGroup.position.y = 0;
+
+    const portalBase = new THREE.Mesh(
+      new THREE.TorusGeometry(this.portalRadius * 0.92, 0.24, 18, this.mobileEnabled ? 28 : 56),
+      new THREE.MeshStandardMaterial({
+        color: 0x406484,
+        roughness: 0.24,
+        metalness: 0.44,
+        emissive: 0x1e3d5a,
+        emissiveIntensity: 0.2
+      })
+    );
+    portalBase.rotation.x = Math.PI / 2;
+    portalBase.position.y = 0.2;
+    portalGroup.add(portalBase);
+
+    const portalRing = new THREE.Mesh(
+      new THREE.TorusGeometry(this.portalRadius, 0.34, 26, this.mobileEnabled ? 44 : 72),
+      new THREE.MeshStandardMaterial({
+        color: 0x77dcff,
+        roughness: 0.14,
+        metalness: 0.4,
+        emissive: 0x4ac8ff,
+        emissiveIntensity: 0.18,
+        transparent: true,
+        opacity: 0.64
+      })
+    );
+    portalRing.position.y = 2.45;
+    portalGroup.add(portalRing);
+
+    const portalCore = new THREE.Mesh(
+      new THREE.CircleGeometry(this.portalRadius * 0.84, this.mobileEnabled ? 28 : 50),
+      new THREE.MeshBasicMaterial({
+        color: 0x9cf4ff,
+        transparent: true,
+        opacity: 0.12,
+        side: THREE.DoubleSide,
+        depthWrite: false
+      })
+    );
+    portalCore.position.y = 2.45;
+    portalGroup.add(portalCore);
+
+    this.hubFlowGroup = group;
+    this.portalGroup = portalGroup;
+    this.portalRing = portalRing;
+    this.portalCore = portalCore;
+
+    group.add(bridgeGroup, cityGroup, portalGroup);
+    this.scene.add(group);
+    this.updatePortalVisual();
+  }
+
+  applyInitialFlowSpawn() {
+    if (!this.hubFlowEnabled) {
+      this.flowStage = "city_live";
+      this.hubFlowUiEl?.classList.add("hidden");
+      this.hideNicknameGate();
+      return;
+    }
+
+    this.flowStage = "bridge_name";
+    this.flowClock = 0;
+    this.portalPhase = "cooldown";
+    this.portalPhaseClock = this.portalCooldownSeconds;
+    this.playerPosition.copy(this.bridgeSpawn);
+    this.yaw = this.getLookYaw(this.bridgeSpawn, this.bridgeCityEntry);
+    this.pitch = -0.03;
+    this.setFlowHeadline(
+      "Bridge Checkpoint",
+      "Pick your callsign. Access to the city opens after registration."
+    );
+    this.hud.setStatus(this.getStatusText());
+    this.showNicknameGate();
+  }
+
+  bindHubFlowUiEvents() {
+    if (this.hubFlowUiBound || !this.hubFlowEnabled || !this.nicknameFormEl) {
+      return;
+    }
+    this.hubFlowUiBound = true;
+
+    this.nicknameFormEl.addEventListener("submit", (event) => {
+      event.preventDefault();
+      this.confirmBridgeName();
+    });
+  }
+
+  showNicknameGate() {
+    if (!this.nicknameGateEl) {
+      return;
+    }
+    this.nicknameGateEl.classList.remove("hidden");
+    this.setNicknameError("");
+    if (this.nicknameInputEl) {
+      const nextName = this.localPlayerName === "PLAYER" ? "" : this.localPlayerName;
+      this.nicknameInputEl.value = nextName;
+      window.setTimeout(() => {
+        this.nicknameInputEl?.focus();
+        this.nicknameInputEl?.select();
+      }, 10);
+    }
+  }
+
+  hideNicknameGate() {
+    this.nicknameGateEl?.classList.add("hidden");
+    this.setNicknameError("");
+  }
+
+  setNicknameError(message) {
+    if (!this.nicknameErrorEl) {
+      return;
+    }
+    const text = String(message ?? "").trim();
+    this.nicknameErrorEl.textContent = text;
+    this.nicknameErrorEl.classList.toggle("hidden", !text);
+  }
+
+  confirmBridgeName() {
+    if (!this.hubFlowEnabled || this.flowStage !== "bridge_name") {
+      return;
+    }
+
+    const raw = String(this.nicknameInputEl?.value ?? "").trim();
+    if (raw.length < 2) {
+      this.setNicknameError("Callsign must use at least 2 characters.");
+      return;
+    }
+
+    const nextName = this.formatPlayerName(raw);
+    this.localPlayerName = nextName;
+    this.pendingPlayerNameSync = true;
+    this.syncPlayerNameIfConnected();
+
+    this.cityIntroStart.copy(this.playerPosition);
+    this.cityIntroEnd.copy(this.citySpawn);
+    this.hideNicknameGate();
+    this.flowStage = "city_intro";
+    this.flowClock = 0;
+    this.keys.clear();
+    this.chalkDrawingActive = false;
+    this.chalkLastStamp = null;
+    if (document.pointerLockElement === this.renderer.domElement) {
+      document.exitPointerLock?.();
+    }
+    this.setFlowHeadline("Transit Sequence", "City gate opening...");
+    this.hud.setStatus(this.getStatusText());
+    this.syncGameplayUiForFlow();
+  }
+
+  syncGameplayUiForFlow() {
+    const gameplayEnabled = !this.hubFlowEnabled || this.flowStage === "city_live";
+    this.toolUiEl?.classList.toggle("hidden", !gameplayEnabled);
+    this.chatUiEl?.classList.toggle("hidden", !gameplayEnabled);
+    if (!gameplayEnabled) {
+      this.setChatOpen(false);
+    }
+  }
+
+  setFlowHeadline(title, subtitle) {
+    if (this.hubFlowUiEl) {
+      this.hubFlowUiEl.classList.remove("hidden");
+    }
+    const nextTitle = String(title ?? "").trim();
+    const nextSubtitle = String(subtitle ?? "").trim();
+    if (this.hubPhaseTitleEl) {
+      if (this.flowHeadlineCache.title !== nextTitle) {
+        this.hubPhaseTitleEl.textContent = nextTitle;
+      }
+    }
+    if (this.hubPhaseSubtitleEl) {
+      if (this.flowHeadlineCache.subtitle !== nextSubtitle) {
+        this.hubPhaseSubtitleEl.textContent = nextSubtitle;
+      }
+    }
+    this.flowHeadlineCache.title = nextTitle;
+    this.flowHeadlineCache.subtitle = nextSubtitle;
+  }
+
+  getLookYaw(from, to) {
+    const dx = Number(to?.x ?? 0) - Number(from?.x ?? 0);
+    const dz = Number(to?.z ?? 0) - Number(from?.z ?? 0);
+    if (Math.abs(dx) < 0.001 && Math.abs(dz) < 0.001) {
+      return this.yaw;
+    }
+    return Math.atan2(-dx, -dz);
+  }
+
+  canUseGameplayControls() {
+    return !this.hubFlowEnabled || this.flowStage === "city_live";
+  }
+
+  canUsePointerLock() {
+    return this.canUseGameplayControls() && !this.portalTransitioning;
+  }
+
+  updateHubFlow(delta) {
+    if (!this.hubFlowEnabled) {
+      return;
+    }
+
+    this.portalPulseClock += delta;
+
+    if (this.flowStage === "bridge_name") {
+      this.updatePortalVisual();
+      return;
+    }
+
+    if (this.flowStage === "city_intro") {
+      this.flowClock += delta;
+      const alpha = THREE.MathUtils.clamp(this.flowClock / this.hubIntroDuration, 0, 1);
+      this.playerPosition.lerpVectors(this.cityIntroStart, this.cityIntroEnd, alpha);
+      const secondsLeft = Math.max(0, Math.ceil(this.hubIntroDuration - this.flowClock));
+      this.setFlowHeadline("Transit Sequence", `City gate opening in ${secondsLeft}s`);
+      this.updatePortalVisual();
+      if (alpha >= 1) {
+        this.flowStage = "city_live";
+        this.flowClock = 0;
+        this.playerPosition.copy(this.citySpawn);
+        this.yaw = this.getLookYaw(this.citySpawn, this.portalFloorPosition);
+        this.pitch = -0.02;
+        this.hud.setStatus(this.getStatusText());
+        this.syncGameplayUiForFlow();
+      }
+      return;
+    }
+
+    if (this.flowStage !== "city_live") {
+      return;
+    }
+
+    this.updatePortalPhase(delta);
+    this.updatePortalVisual();
+    if (this.portalPhase === "open" && !this.portalTransitioning && this.isPlayerInPortalZone()) {
+      this.triggerPortalTransfer();
+    }
+  }
+
+  updatePortalPhase(delta) {
+    this.portalPhaseClock = Math.max(0, this.portalPhaseClock - delta);
+    if (this.portalPhase === "cooldown") {
+      this.setFlowHeadline("City Live", `Next portal event in ${Math.ceil(this.portalPhaseClock)}s`);
+      if (this.portalPhaseClock <= 0) {
+        this.portalPhase = "warning";
+        this.portalPhaseClock = this.portalWarningSeconds;
+      }
+      return;
+    }
+
+    if (this.portalPhase === "warning") {
+      this.setFlowHeadline("Anomaly Rising", `Portal opening in ${Math.ceil(this.portalPhaseClock)}s`);
+      if (this.portalPhaseClock <= 0) {
+        this.portalPhase = "open";
+        this.portalPhaseClock = this.portalOpenSeconds;
+      }
+      return;
+    }
+
+    if (this.portalPhase === "open") {
+      if (this.portalTargetUrl) {
+        this.setFlowHeadline(
+          "Portal Open",
+          `Enter the gate now (${Math.ceil(this.portalPhaseClock)}s left)`
+        );
+      } else {
+        this.setFlowHeadline(
+          "Portal Open / No Target",
+          "Set ?portal=https://... to enable deployment route."
+        );
+      }
+      if (this.portalPhaseClock <= 0) {
+        this.portalPhase = "cooldown";
+        this.portalPhaseClock = this.portalCooldownSeconds;
+      }
+    }
+  }
+
+  updatePortalVisual() {
+    if (!this.portalRing || !this.portalCore || !this.portalGroup) {
+      return;
+    }
+
+    const ringMaterial = this.portalRing.material;
+    const coreMaterial = this.portalCore.material;
+    if (!ringMaterial || !coreMaterial) {
+      return;
+    }
+
+    const pulse = 0.5 + 0.5 * Math.sin(this.portalPulseClock * 6.4);
+    if (this.portalPhase === "open") {
+      ringMaterial.emissiveIntensity = 0.9 + pulse * 0.85;
+      ringMaterial.opacity = 0.9;
+      coreMaterial.opacity = 0.3 + pulse * 0.34;
+      this.portalGroup.scale.set(1 + pulse * 0.05, 1 + pulse * 0.05, 1 + pulse * 0.05);
+      return;
+    }
+
+    if (this.portalPhase === "warning") {
+      ringMaterial.emissiveIntensity = 0.42 + pulse * 0.48;
+      ringMaterial.opacity = 0.78;
+      coreMaterial.opacity = 0.12 + pulse * 0.16;
+      this.portalGroup.scale.set(1, 1, 1);
+      return;
+    }
+
+    ringMaterial.emissiveIntensity = 0.14;
+    ringMaterial.opacity = 0.62;
+    coreMaterial.opacity = 0.05;
+    this.portalGroup.scale.set(1, 1, 1);
+  }
+
+  isPlayerInPortalZone() {
+    const dx = this.playerPosition.x - this.portalFloorPosition.x;
+    const dz = this.playerPosition.z - this.portalFloorPosition.z;
+    const distanceSquared = dx * dx + dz * dz;
+    const triggerRadius = this.portalRadius * 0.78;
+    return distanceSquared <= triggerRadius * triggerRadius;
+  }
+
+  setPortalTransition(active, text = "") {
+    if (this.portalTransitionTextEl && text) {
+      this.portalTransitionTextEl.textContent = String(text);
+    }
+    this.portalTransitionEl?.classList.toggle("on", Boolean(active));
+  }
+
+  resolvePortalTargetUrl(defaultTarget = "") {
+    const queryTarget = String(
+      this.queryParams.get("portal") ?? this.queryParams.get("next") ?? ""
+    ).trim();
+    if (queryTarget) {
+      return queryTarget;
+    }
+
+    const globalTarget = String(window.__EMPTINES_PORTAL_TARGET ?? "").trim();
+    if (globalTarget) {
+      return globalTarget;
+    }
+
+    const configTarget = String(defaultTarget ?? "").trim();
+    return configTarget || null;
+  }
+
+  buildPortalTransferUrl() {
+    if (!this.portalTargetUrl) {
+      return null;
+    }
+
+    let target;
+    try {
+      target = new URL(this.portalTargetUrl, window.location.href);
+    } catch {
+      return null;
+    }
+
+    const returnUrl = `${window.location.origin}${window.location.pathname}`;
+    target.searchParams.set("return", returnUrl);
+    target.searchParams.set("name", this.localPlayerName);
+    if (this.socketEndpoint) {
+      target.searchParams.set("server", this.socketEndpoint);
+    }
+    return target.toString();
+  }
+
+  triggerPortalTransfer() {
+    if (this.portalTransitioning) {
+      return;
+    }
+
+    const destination = this.buildPortalTransferUrl();
+    if (!destination) {
+      this.portalPhase = "cooldown";
+      this.portalPhaseClock = this.portalCooldownSeconds;
+      this.setFlowHeadline(
+        "Portal Link Missing",
+        "Set a deployment URL with ?portal=https://... then retry."
+      );
+      return;
+    }
+
+    this.portalTransitioning = true;
+    this.flowStage = "portal_transfer";
+    this.hud.setStatus(this.getStatusText());
+    this.syncGameplayUiForFlow();
+    this.setPortalTransition(true, "Portal sync in progress...");
+
+    window.setTimeout(() => {
+      window.location.assign(destination);
+    }, 780);
+  }
+
+  syncPlayerNameIfConnected() {
+    const nextName = this.formatPlayerName(this.localPlayerName);
+    this.localPlayerName = nextName;
+    if (!this.socket || !this.networkConnected) {
+      this.pendingPlayerNameSync = true;
+      return;
+    }
+
+    this.socket.emit("room:quick-join", { name: nextName });
+    this.pendingPlayerNameSync = false;
   }
 
   setupSky(sunDirection) {
@@ -677,6 +1319,9 @@ export class GameRuntime {
   }
 
   canDrawChalk() {
+    if (!this.canUseGameplayControls()) {
+      return false;
+    }
     if (this.activeTool !== "chalk") {
       return false;
     }
@@ -1195,6 +1840,10 @@ export class GameRuntime {
         return;
       }
 
+      if (!this.canUseGameplayControls()) {
+        return;
+      }
+
       if (event.code === RUNTIME_TUNING.CHAT_OPEN_KEY && this.chatInputEl) {
         event.preventDefault();
         this.focusChatInput();
@@ -1323,6 +1972,39 @@ export class GameRuntime {
   }
 
   resolveUiElements() {
+    if (!this.toolUiEl) {
+      this.toolUiEl = document.getElementById("tool-ui");
+    }
+    if (!this.chatUiEl) {
+      this.chatUiEl = document.getElementById("chat-ui");
+    }
+    if (!this.hubFlowUiEl) {
+      this.hubFlowUiEl = document.getElementById("hub-flow-ui");
+    }
+    if (!this.hubPhaseTitleEl) {
+      this.hubPhaseTitleEl = document.getElementById("hub-phase-title");
+    }
+    if (!this.hubPhaseSubtitleEl) {
+      this.hubPhaseSubtitleEl = document.getElementById("hub-phase-subtitle");
+    }
+    if (!this.nicknameGateEl) {
+      this.nicknameGateEl = document.getElementById("nickname-gate");
+    }
+    if (!this.nicknameFormEl) {
+      this.nicknameFormEl = document.getElementById("nickname-form");
+    }
+    if (!this.nicknameInputEl) {
+      this.nicknameInputEl = document.getElementById("nickname-input");
+    }
+    if (!this.nicknameErrorEl) {
+      this.nicknameErrorEl = document.getElementById("nickname-error");
+    }
+    if (!this.portalTransitionEl) {
+      this.portalTransitionEl = document.getElementById("portal-transition");
+    }
+    if (!this.portalTransitionTextEl) {
+      this.portalTransitionTextEl = document.getElementById("portal-transition-text");
+    }
     if (!this.chatLogEl) {
       this.chatLogEl = document.getElementById("chat-log");
     }
@@ -1389,6 +2071,10 @@ export class GameRuntime {
   }
 
   setChatOpen(open) {
+    if (open && !this.canUseGameplayControls()) {
+      return;
+    }
+
     this.chatOpen = Boolean(open);
     if (this.chatControlsEl) {
       this.chatControlsEl.classList.toggle("hidden", !this.chatOpen);
@@ -1449,6 +2135,9 @@ export class GameRuntime {
   }
 
   tryPointerLock() {
+    if (!this.canUsePointerLock()) {
+      return;
+    }
     if (!this.pointerLockSupported || this.pointerLocked) {
       return;
     }
@@ -1483,6 +2172,7 @@ export class GameRuntime {
       this.networkConnected = true;
       this.localPlayerId = socket.id;
       this.hud.setStatus(this.getStatusText());
+      this.syncPlayerNameIfConnected();
     });
 
     socket.on("disconnect", () => {
@@ -1690,6 +2380,7 @@ export class GameRuntime {
 
   tick(delta) {
     this.updateMovement(delta);
+    this.updateHubFlow(delta);
     this.updateChalkDrawing();
     this.updateCloudLayer(delta);
     this.updateOcean(delta);
@@ -1700,14 +2391,18 @@ export class GameRuntime {
   }
 
   updateMovement(delta) {
-    const keyForward =
-      (this.keys.has("KeyW") || this.keys.has("ArrowUp") ? 1 : 0) -
-      (this.keys.has("KeyS") || this.keys.has("ArrowDown") ? 1 : 0);
-    const keyStrafe =
-      (this.keys.has("KeyD") || this.keys.has("ArrowRight") ? 1 : 0) -
-      (this.keys.has("KeyA") || this.keys.has("ArrowLeft") ? 1 : 0);
+    const movementEnabled = this.canUseGameplayControls();
+    const keyForward = movementEnabled
+      ? (this.keys.has("KeyW") || this.keys.has("ArrowUp") ? 1 : 0) -
+        (this.keys.has("KeyS") || this.keys.has("ArrowDown") ? 1 : 0)
+      : 0;
+    const keyStrafe = movementEnabled
+      ? (this.keys.has("KeyD") || this.keys.has("ArrowRight") ? 1 : 0) -
+        (this.keys.has("KeyA") || this.keys.has("ArrowLeft") ? 1 : 0)
+      : 0;
 
-    const sprinting = this.keys.has("ShiftLeft") || this.keys.has("ShiftRight");
+    const sprinting =
+      movementEnabled && (this.keys.has("ShiftLeft") || this.keys.has("ShiftRight"));
     const speed = sprinting ? GAME_CONSTANTS.PLAYER_SPRINT : GAME_CONSTANTS.PLAYER_SPEED;
 
     if (keyForward !== 0 || keyStrafe !== 0) {
@@ -1890,6 +2585,9 @@ export class GameRuntime {
   focusChatInput() {
     this.resolveUiElements();
     if (!this.chatInputEl) {
+      return;
+    }
+    if (!this.canUseGameplayControls()) {
       return;
     }
     this.setChatOpen(true);
@@ -2083,6 +2781,18 @@ export class GameRuntime {
   }
 
   getStatusText() {
+    if (this.hubFlowEnabled) {
+      if (this.flowStage === "bridge_name") {
+        return this.networkConnected ? "ONLINE / BRIDGE REG" : "OFFLINE / BRIDGE REG";
+      }
+      if (this.flowStage === "city_intro") {
+        return this.networkConnected ? "ONLINE / CITY TRANSIT" : "OFFLINE / CITY TRANSIT";
+      }
+      if (this.flowStage === "portal_transfer") {
+        return "PORTAL / TRANSFER";
+      }
+    }
+
     if (!this.networkConnected) {
       return this.socketEndpoint ? "OFFLINE" : "OFFLINE / SET SERVER";
     }
@@ -2175,6 +2885,7 @@ export class GameRuntime {
     this.setupBoundaryWalls(this.worldContent.boundary);
     this.setupBeachLayer(this.worldContent.beach, this.worldContent.ocean);
     this.setupOceanLayer(this.worldContent.ocean);
+    this.setupHubFlowWorld();
     this.setupPostProcessing();
   }
 
