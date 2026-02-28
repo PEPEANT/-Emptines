@@ -685,7 +685,8 @@ export class GameRuntime {
       [22, 7.8, -8],
       [-18, 9.2, -22],
       [19, 8.8, -20],
-      [0, 11.6, -24],
+      // Keep the portal sightline clear by avoiding a center-axis tower.
+      [14, 11.6, -24],
       [-25, 6.8, 2],
       [25, 7.1, 3]
     ];
