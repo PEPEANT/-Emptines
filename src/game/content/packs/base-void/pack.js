@@ -189,7 +189,9 @@ export const BASE_VOID_PACK = {
         cooldownSeconds: 60,
         warningSeconds: 16,
         openSeconds: 24,
-        targetUrl: "https://github.com/PEPEANT/singularity_ox"
+        // Temporary test target requested by user.
+        targetUrl:
+          "https://www.turbosquid.com/ko/Search/3D-Models/free?file_type=159%2C191&page_num=9"
       }
     },
     postProcessing: {

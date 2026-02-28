@@ -34,7 +34,8 @@ function parseSeconds(raw, fallback, min = 0.1) {
 
 const NPC_GREETING_VIDEO_URL = new URL("../../../mp4/grok-video.webm", import.meta.url).href;
 const AD_BILLBOARD_IMAGE_URL = new URL("../../../png/AD.41415786.1.png", import.meta.url).href;
-const DEFAULT_PORTAL_TARGET_URL = "https://github.com/PEPEANT/singularity_ox";
+const DEFAULT_PORTAL_TARGET_URL =
+  "https://www.turbosquid.com/ko/Search/3D-Models/free?file_type=159%2C191&page_num=9";
 
 export class GameRuntime {
   constructor(mount, options = {}) {
@@ -2030,12 +2031,7 @@ export class GameRuntime {
       return null;
     }
 
-    const returnUrl = `${window.location.origin}${window.location.pathname}`;
-    target.searchParams.set("return", returnUrl);
-    target.searchParams.set("name", this.localPlayerName);
-    if (this.socketEndpoint) {
-      target.searchParams.set("server", this.socketEndpoint);
-    }
+    // Keep outbound portal links exact (no extra query params), and open in same tab.
     return target.toString();
   }
 
