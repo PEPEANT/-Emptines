@@ -273,6 +273,35 @@ canvas {
   transform: translate(-50%, 0);
 }
 
+#chalk-pickup-prompt {
+  position: fixed;
+  left: 50%;
+  bottom: 100px;
+  z-index: 60;
+  transform: translateX(-50%);
+  background: rgba(6, 16, 28, 0.76);
+  color: #d8eeff;
+  font: 600 0.82rem/1.4 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.05em;
+  padding: 6px 16px 6px 12px;
+  border-radius: 7px;
+  border: 1px solid rgba(122, 191, 235, 0.38);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+#chalk-pickup-prompt kbd {
+  display: inline-block;
+  background: rgba(122, 191, 235, 0.22);
+  border: 1px solid rgba(122, 191, 235, 0.6);
+  border-radius: 4px;
+  padding: 1px 7px;
+  font-size: 0.78rem;
+  font-family: inherit;
+  margin-right: 6px;
+  color: #aadcff;
+}
+
 #tool-ui {
   position: fixed;
   left: 50%;

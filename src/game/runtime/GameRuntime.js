@@ -130,6 +130,11 @@ export class GameRuntime {
     this.chalkPalette = [];
     this.selectedChalkColor = "#f5f7ff";
     this.activeTool = "move";
+    this.hasChalk = false;
+    this.chalkTableWorldPos = null;
+    this.chalkTablePickupRadius = 2.8;
+    this.chalkTableChalkGroup = null;
+    this.chalkPickupEl = null;
     this.beach = null;
     this.shoreFoam = null;
     this.shoreWetBand = null;
@@ -759,6 +764,7 @@ export class GameRuntime {
       cityGroup.add(towerCap);
     }
     this.addPlazaBillboards(cityGroup);
+    this.addChalkTable(cityGroup);
 
     const npcGuide = new THREE.Group();
     npcGuide.position.set(this.bridgeNpcPosition.x, 0, this.bridgeNpcPosition.z);
@@ -1218,6 +1224,88 @@ export class GameRuntime {
     }
   }
 
+  addChalkTable(cityGroup) {
+    if (!cityGroup) return;
+    // Table placed 6 units right of city group center (world ≈ 6, 0, -5)
+    const localX = 6;
+    const localZ = -1;
+    const cityGroupWorldZ = this.citySpawn.z + 4;
+    this.chalkTableWorldPos = new THREE.Vector3(
+      this.citySpawn.x + localX,
+      0,
+      cityGroupWorldZ + localZ
+    );
+    this.chalkPickupEl = document.getElementById("chalk-pickup-prompt");
+
+    const tableGroup = new THREE.Group();
+    tableGroup.position.set(localX, 0, localZ);
+
+    const woodMat = new THREE.MeshStandardMaterial({
+      color: 0x8b6340, roughness: 0.74, metalness: 0.02,
+      emissive: 0x3a2010, emissiveIntensity: 0.07
+    });
+    const legMat = new THREE.MeshStandardMaterial({
+      color: 0x6e4e2a, roughness: 0.80, metalness: 0.02,
+      emissive: 0x281808, emissiveIntensity: 0.05
+    });
+
+    const top = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.07, 0.85), woodMat);
+    top.position.y = 0.78;
+    top.castShadow = true;
+    top.receiveShadow = true;
+    tableGroup.add(top);
+
+    for (const [lx, lz] of [[-0.76, -0.37], [0.76, -0.37], [-0.76, 0.37], [0.76, 0.37]]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.78, 0.065), legMat);
+      leg.position.set(lx, 0.39, lz);
+      leg.castShadow = true;
+      tableGroup.add(leg);
+    }
+
+    // Chalk sticks on table
+    const chalkGroup = new THREE.Group();
+    const chalkColors = [0xf5f7ff, 0xffd86a, 0x7ec9ff, 0xff9cc5, 0xa9f89f];
+    for (let i = 0; i < chalkColors.length; i++) {
+      const cm = new THREE.MeshStandardMaterial({
+        color: chalkColors[i], roughness: 0.92, metalness: 0,
+        emissive: chalkColors[i], emissiveIntensity: 0.06
+      });
+      const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.12, 8), cm);
+      stick.rotation.z = Math.PI / 2;
+      stick.rotation.y = (Math.random() - 0.5) * 0.4;
+      stick.position.set(-0.28 + i * 0.14, 0.825, (Math.random() - 0.5) * 0.08);
+      stick.castShadow = true;
+      chalkGroup.add(stick);
+    }
+    tableGroup.add(chalkGroup);
+    this.chalkTableChalkGroup = chalkGroup;
+
+    cityGroup.add(tableGroup);
+  }
+
+  tryPickupChalk() {
+    if (this.hasChalk || !this.chalkTableWorldPos) return;
+    const dx = this.playerPosition.x - this.chalkTableWorldPos.x;
+    const dz = this.playerPosition.z - this.chalkTableWorldPos.z;
+    if (Math.sqrt(dx * dx + dz * dz) > this.chalkTablePickupRadius) return;
+    this.hasChalk = true;
+    if (this.chalkTableChalkGroup) this.chalkTableChalkGroup.visible = false;
+    this.chalkPickupEl?.classList.add("hidden");
+    this.setActiveTool("chalk");
+  }
+
+  updateChalkPickupPrompt() {
+    if (!this.chalkPickupEl || !this.chalkTableWorldPos || this.hasChalk) {
+      this.chalkPickupEl?.classList.add("hidden");
+      return;
+    }
+    const dx = this.playerPosition.x - this.chalkTableWorldPos.x;
+    const dz = this.playerPosition.z - this.chalkTableWorldPos.z;
+    const near = Math.sqrt(dx * dx + dz * dz) <= this.chalkTablePickupRadius
+      && this.canUseGameplayControls();
+    this.chalkPickupEl.classList.toggle("hidden", !near);
+  }
+
   createPortalTimeBillboard() {
     const board = new THREE.Group();
     board.position.set(0, 7, 0);
@@ -1639,7 +1727,7 @@ export class GameRuntime {
   }
 
   canUsePointerLock() {
-    return this.canMovePlayer() && !this.portalTransitioning;
+    return this.canMovePlayer() && !this.portalTransitioning && this.activeTool !== "chalk";
   }
 
   updateHubFlow(delta) {
@@ -2467,6 +2555,9 @@ export class GameRuntime {
   }
 
   canDrawChalk() {
+    if (!this.hasChalk) {
+      return false;
+    }
     if (!this.canUseGameplayControls()) {
       return false;
     }
@@ -3065,7 +3156,13 @@ export class GameRuntime {
         return;
       }
 
-      if (event.code === "KeyB" && this.canUseGameplayControls()) {
+      if (event.code === "KeyF" && this.canUseGameplayControls() && !this.hasChalk) {
+        event.preventDefault();
+        this.tryPickupChalk();
+        return;
+      }
+
+      if (event.code === "KeyB" && this.canUseGameplayControls() && this.hasChalk) {
         event.preventDefault();
         this.setActiveTool(this.activeTool === "chalk" ? "move" : "chalk");
         return;
@@ -3947,6 +4044,7 @@ export class GameRuntime {
     this.elapsedSeconds += delta;
     this.updateMovement(delta);
     this.updateHubFlow(delta);
+    this.updateChalkPickupPrompt();
     this.updatePortalTimeBillboard(delta);
     this.syncMobileUiState();
     this.updateChalkDrawing();
