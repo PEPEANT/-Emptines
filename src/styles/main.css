@@ -379,6 +379,24 @@ canvas {
   border-color: rgba(198, 231, 255, 0.95);
 }
 
+#intro-video-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 89;
+  display: grid;
+  place-items: center;
+  background: rgba(2, 8, 14, 0.97);
+}
+
+#intro-video {
+  width: min(96vw, 1120px);
+  height: min(92vh, 630px);
+  object-fit: contain;
+  border: 1px solid rgba(165, 205, 236, 0.52);
+  border-radius: 10px;
+  background: #000;
+}
+
 #portal-transition {
   position: fixed;
   inset: 0;

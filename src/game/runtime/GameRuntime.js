@@ -32,7 +32,7 @@ function parseSeconds(raw, fallback, min = 0.1) {
   return Math.max(min, value);
 }
 
-const NPC_GREETING_VIDEO_URL = new URL("../../../mp4/grok-video.webm", import.meta.url).href;
+const INTRO_BOOT_VIDEO_URL = new URL("../../../mp4/grok-video.0.mp4", import.meta.url).href;
 const AD_BILLBOARD_IMAGE_URL = new URL("../../../png/AD.41415786.1.png", import.meta.url).href;
 const DEFAULT_PORTAL_TARGET_URL =
   "http://localhost:5173/?server=http://localhost:3001&name=PLAYER";
@@ -296,6 +296,8 @@ export class GameRuntime {
     this.nicknameFormEl = document.getElementById("nickname-form");
     this.nicknameInputEl = document.getElementById("nickname-input");
     this.nicknameErrorEl = document.getElementById("nickname-error");
+    this.introVideoOverlayEl = document.getElementById("intro-video-overlay");
+    this.introVideoEl = document.getElementById("intro-video");
     this.portalTransitionEl = document.getElementById("portal-transition");
     this.portalTransitionTextEl = document.getElementById("portal-transition-text");
     this.boundaryWarningEl = document.getElementById("boundary-warning");
@@ -315,7 +317,9 @@ export class GameRuntime {
     const cityConfig = hubFlowConfig?.city ?? {};
     const portalConfig = hubFlowConfig?.portal ?? {};
     this.hubFlowEnabled = Boolean(hubFlowConfig?.enabled);
-    this.flowStage = this.hubFlowEnabled ? "bridge_approach" : "city_live";
+    this.flowStage = this.hubFlowEnabled ? "boot_intro" : "city_live";
+    this.bootIntroPending = this.hubFlowEnabled;
+    this.bootIntroVideoPlaying = false;
     this.flowClock = 0;
     this.hubIntroDuration = parseSeconds(hubFlowConfig?.introSeconds, 4.8, 0.8);
     this.bridgeApproachSpawn = parseVec3(
@@ -1756,7 +1760,9 @@ export class GameRuntime {
       return;
     }
 
-    this.flowStage = "bridge_approach";
+    this.flowStage = "boot_intro";
+    this.bootIntroPending = true;
+    this.bootIntroVideoPlaying = false;
     this.flowClock = 0;
     this.mirrorLookClock = 0;
     this.bridgeBoundaryDingClock = 0;
@@ -1767,11 +1773,11 @@ export class GameRuntime {
     this.yaw = this.getLookYaw(this.bridgeApproachSpawn, this.bridgeNpcPosition);
     this.pitch = -0.03;
     this.setFlowHeadline(
-      "BRIDGE ENTRY",
-      "Move toward the checkpoint NPC."
+      "ENTRY CHECK",
+      "임시 닉네임을 입력하고 시작하세요."
     );
     this.hud.setStatus(this.getStatusText());
-    this.hideNicknameGate();
+    this.showNicknameGate();
     this.setMirrorGateVisible(false);
     this.lastSafePosition.copy(this.playerPosition);
   }
@@ -1818,7 +1824,83 @@ export class GameRuntime {
     this.nicknameErrorEl.classList.toggle("hidden", !text);
   }
 
+  beginBridgeApproachFlow() {
+    this.bootIntroPending = false;
+    this.bootIntroVideoPlaying = false;
+    this.flowStage = "bridge_approach";
+    this.flowClock = 0;
+    this.keys.clear();
+    this.chalkDrawingActive = false;
+    this.chalkLastStamp = null;
+    this.hideNicknameGate();
+    this.setFlowHeadline("BRIDGE ENTRY", "Move toward the checkpoint NPC.");
+    this.hud.setStatus(this.getStatusText());
+    this.syncGameplayUiForFlow();
+  }
+
+  finishBootIntroVideo() {
+    this.bootIntroVideoPlaying = false;
+    if (this.introVideoEl) {
+      this.introVideoEl.onended = null;
+      this.introVideoEl.onerror = null;
+      this.introVideoEl.pause();
+      this.introVideoEl.removeAttribute("src");
+      this.introVideoEl.load();
+    }
+    this.introVideoOverlayEl?.classList.add("hidden");
+    this.beginBridgeApproachFlow();
+  }
+
+  playBootIntroVideo() {
+    if (!this.hubFlowEnabled) {
+      this.beginBridgeApproachFlow();
+      return;
+    }
+
+    if (!this.introVideoEl || !this.introVideoOverlayEl) {
+      this.beginBridgeApproachFlow();
+      return;
+    }
+
+    this.bootIntroVideoPlaying = true;
+    this.introVideoOverlayEl.classList.remove("hidden");
+    const video = this.introVideoEl;
+    video.src = INTRO_BOOT_VIDEO_URL;
+    video.currentTime = 0;
+    video.playbackRate = 1.5;
+    video.muted = false;
+    video.loop = false;
+    video.onended = () => {
+      this.finishBootIntroVideo();
+    };
+    video.onerror = () => {
+      this.finishBootIntroVideo();
+    };
+
+    video.play().catch(() => {
+      video.muted = true;
+      video.currentTime = 0;
+      video.play().then(
+        () => {},
+        () => {
+          this.finishBootIntroVideo();
+        }
+      );
+    });
+  }
+
   confirmBridgeName() {
+    if (this.hubFlowEnabled && this.flowStage === "boot_intro") {
+      const rawBootName = String(this.nicknameInputEl?.value ?? "").trim();
+      const nextName = rawBootName.length > 0 ? this.formatPlayerName(rawBootName) : "게스트";
+      this.localPlayerName = nextName;
+      this.pendingPlayerNameSync = true;
+      this.syncPlayerNameIfConnected();
+      this.hideNicknameGate();
+      this.playBootIntroVideo();
+      return;
+    }
+
     if (!this.hubFlowEnabled || this.flowStage !== "bridge_name") {
       return;
     }
@@ -1869,6 +1951,7 @@ export class GameRuntime {
       !this.chatOpen &&
       this.canMovePlayer() &&
       !this.surfacePainterOpen &&
+      !this.bootIntroVideoPlaying &&
       this.flowStage !== "portal_transfer" &&
       (this.nicknameGateEl?.classList.contains("hidden") ?? true);
     this.mobileUiEl.classList.toggle("hidden", !visible);
@@ -1938,38 +2021,23 @@ export class GameRuntime {
     if (!this.hubFlowEnabled || this.flowStage !== "bridge_dialogue") {
       return;
     }
-    this.flowStage = "bridge_name";
+    this.flowStage = "bridge_mirror";
     this.keys.clear();
     this.chalkDrawingActive = false;
     this.chalkLastStamp = null;
-    this.showNicknameGate();
-    this.setFlowHeadline("CHECKPOINT REGISTRATION", "Register your callsign with the terminal.");
+    this.hideNicknameGate();
+    this.setMirrorGateVisible(true);
+    this.setFlowHeadline("ENTRY SYNC", "Pass under the shrine gate to continue.");
     this.hud.setStatus(this.getStatusText());
   }
 
   createNpcGreetingScreen() {
-    const video = document.createElement("video");
-    video.src = NPC_GREETING_VIDEO_URL;
-    video.preload = "auto";
-    video.loop = false;
-    video.muted = false;
-    video.playsInline = true;
-    video.crossOrigin = "anonymous";
-    video.setAttribute("playsinline", "");
-    video.setAttribute("webkit-playsinline", "");
-
-    const videoTexture = new THREE.VideoTexture(video);
-    videoTexture.colorSpace = THREE.SRGBColorSpace;
-    videoTexture.minFilter = THREE.LinearFilter;
-    videoTexture.magFilter = THREE.LinearFilter;
-    videoTexture.generateMipmaps = false;
-
     const screen = new THREE.Mesh(
       new THREE.PlaneGeometry(1.42, 2.38),
       new THREE.MeshBasicMaterial({
-        map: videoTexture,
+        color: 0x5ecbff,
         transparent: true,
-        alphaTest: 0.02,
+        opacity: 0.08,
         depthWrite: false
       })
     );
@@ -1977,53 +2045,15 @@ export class GameRuntime {
     screen.rotation.y = Math.PI;
     screen.renderOrder = 12;
     screen.frustumCulled = false;
-    video.onended = () => {
-      this.openBridgeNameGate();
-    };
-    video.onerror = () => {
-      this.openBridgeNameGate();
-    };
-
-    this.npcGreetingVideoEl = video;
-    this.npcGreetingVideoTexture = videoTexture;
+    this.npcGreetingVideoEl = null;
+    this.npcGreetingVideoTexture = null;
     this.npcGreetingScreen = screen;
-    this.npcGreetingPlayed = false;
+    this.npcGreetingPlayed = true;
     return screen;
   }
 
   playNpcGreeting() {
-    if (!this.npcGreetingVideoEl) {
-      this.openBridgeNameGate();
-      return;
-    }
-    if (this.npcGreetingPlayed) {
-      this.openBridgeNameGate();
-      return;
-    }
-
-    const video = this.npcGreetingVideoEl;
-    const tryPlay = () =>
-      video.play().then(
-        () => {
-          this.npcGreetingPlayed = true;
-        },
-        () => Promise.reject(new Error("play failed"))
-      );
-
-    video.currentTime = 0;
-    tryPlay().catch(() => {
-      video.muted = true;
-      video.currentTime = 0;
-      video.play().then(
-        () => {
-          this.npcGreetingPlayed = true;
-        },
-        () => {
-          this.npcGreetingPlayed = false;
-          this.openBridgeNameGate();
-        }
-      );
-    });
+    this.openBridgeNameGate();
   }
 
   getNpcDistance() {
@@ -2133,6 +2163,11 @@ export class GameRuntime {
     this.portalPulseClock += delta;
     this.updateBridgeBoundaryMarker(delta);
 
+    if (this.flowStage === "boot_intro") {
+      this.updatePortalVisual();
+      return;
+    }
+
     if (this.flowStage === "bridge_approach") {
       const npcDistance = this.getNpcDistance();
       this.setFlowHeadline(
@@ -2149,7 +2184,9 @@ export class GameRuntime {
           document.exitPointerLock?.();
         }
         this.playNpcGreeting();
-        this.setFlowHeadline("CHECKPOINT BRIEFING", "Receiving NPC greeting...");
+        if (this.flowStage === "bridge_dialogue") {
+          this.setFlowHeadline("CHECKPOINT BRIEFING", "Receiving NPC greeting...");
+        }
         this.hud.setStatus(this.getStatusText());
       }
       return;
@@ -4537,6 +4574,12 @@ export class GameRuntime {
     if (!this.nicknameErrorEl) {
       this.nicknameErrorEl = document.getElementById("nickname-error");
     }
+    if (!this.introVideoOverlayEl) {
+      this.introVideoOverlayEl = document.getElementById("intro-video-overlay");
+    }
+    if (!this.introVideoEl) {
+      this.introVideoEl = document.getElementById("intro-video");
+    }
     if (!this.portalTransitionEl) {
       this.portalTransitionEl = document.getElementById("portal-transition");
     }
@@ -5945,6 +5988,11 @@ export class GameRuntime {
       this.networkConnected && this.isRoomHost ? `${text} / HOST` : text;
 
     if (this.hubFlowEnabled) {
+      if (this.flowStage === "boot_intro") {
+        return this.networkConnected
+          ? withHostTag("ONLINE / ENTRY CHECK")
+          : "OFFLINE / ENTRY CHECK";
+      }
       if (this.flowStage === "bridge_approach") {
         return this.networkConnected
           ? withHostTag("ONLINE / BRIDGE APPROACH")

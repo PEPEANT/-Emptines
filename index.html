@@ -64,19 +64,23 @@
 
     <div id="nickname-gate" class="hidden" aria-modal="true" role="dialog" aria-labelledby="nickname-title">
       <form id="nickname-form" novalidate>
-        <h2 id="nickname-title">브리지 출입 등록</h2>
-        <p class="nickname-copy">도시 진입 전에 호출명을 설정하세요.</p>
-        <label for="nickname-input">호출명</label>
+        <h2 id="nickname-title">임시 닉네임을 적으세요</h2>
+        <p class="nickname-copy">적지 않으면 게스트 처리 됩니다.</p>
+        <label for="nickname-input">임시 닉네임</label>
         <input
           id="nickname-input"
           type="text"
           maxlength="16"
-          placeholder="플레이어_2049"
+          placeholder="게스트"
           autocomplete="nickname"
         />
         <p id="nickname-error" class="hidden" aria-live="polite"></p>
-        <button id="nickname-submit" type="submit">도시 입장</button>
+        <button id="nickname-submit" type="submit">시작</button>
       </form>
+    </div>
+
+    <div id="intro-video-overlay" class="hidden" aria-hidden="true">
+      <video id="intro-video" playsinline webkit-playsinline preload="auto"></video>
     </div>
 
     <div id="tool-ui" aria-label="도구">
