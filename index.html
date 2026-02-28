@@ -17,7 +17,7 @@
         <span id="hud-status">오프라인</span>
       </div>
       <div class="hud-row">
-        <span class="hud-key">인원</span>
+        <span class="hud-key">현재 인원</span>
         <span id="hud-players">0</span>
       </div>
       <div class="hud-row">
@@ -28,6 +28,19 @@
         <span class="hud-key">FPS</span>
         <span id="hud-fps">0</span>
       </div>
+    </div>
+
+    <aside id="player-roster" class="hidden" aria-live="polite" aria-label="플레이어 목록">
+      <header class="player-roster-head">
+        <span>현재 인원</span>
+        <strong id="player-roster-count">0명</strong>
+      </header>
+      <p class="player-roster-hint">Tab 키를 누르고 있을 때 표시됩니다.</p>
+      <ol id="player-roster-list"></ol>
+    </aside>
+
+    <div id="host-controls" class="hidden" aria-label="호스팅 컨트롤">
+      <button id="host-open-portal" type="button">포탈 열기</button>
     </div>
 
     <div id="hub-flow-ui" aria-live="polite">
@@ -86,7 +99,7 @@
         <input
           id="chat-input"
           type="text"
-          maxlength="120"
+          maxlength="512"
           placeholder="메시지를 입력하고 Enter를 누르세요"
           autocomplete="off"
         />

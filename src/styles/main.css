@@ -54,6 +54,10 @@ canvas {
   backdrop-filter: blur(5px);
 }
 
+.hud-row strong {
+  color: #e9f6ff;
+}
+
 .hud-row {
   display: flex;
   align-items: center;
@@ -65,6 +69,104 @@ canvas {
 
 .hud-key {
   color: rgba(173, 212, 246, 0.9);
+}
+
+#player-roster {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 36;
+  width: min(92vw, 320px);
+  max-height: min(64vh, 520px);
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid rgba(186, 213, 239, 0.64);
+  border-radius: 11px;
+  background: rgba(8, 20, 33, 0.78);
+  backdrop-filter: blur(5px);
+  box-shadow: 0 10px 24px rgba(3, 9, 14, 0.34);
+}
+
+.player-roster-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 5px;
+  font: 700 0.78rem/1.2 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.08em;
+}
+
+#player-roster-count {
+  color: #e4f5ff;
+  font-size: 0.9rem;
+}
+
+.player-roster-hint {
+  margin: 0 0 8px;
+  color: rgba(171, 210, 244, 0.84);
+  font: 600 0.68rem/1.28 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.04em;
+}
+
+#player-roster-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+  color: #e2f2ff;
+  font: 700 0.74rem/1.28 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.04em;
+}
+
+#player-roster-list li {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#player-roster-list li.self {
+  color: #ffffff;
+}
+
+#player-roster-list li.host {
+  color: #9be7ff;
+}
+
+#player-roster-list li.empty {
+  list-style: none;
+  margin-left: -18px;
+  color: rgba(181, 214, 244, 0.8);
+}
+
+#host-controls {
+  position: fixed;
+  top: 132px;
+  left: 14px;
+  z-index: 36;
+  pointer-events: auto;
+}
+
+#host-open-portal {
+  min-width: 126px;
+  height: 34px;
+  border: 1px solid rgba(167, 211, 242, 0.68);
+  border-radius: 8px;
+  background: rgba(12, 30, 46, 0.86);
+  color: #dff3ff;
+  font: 700 0.72rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+#host-open-portal:hover {
+  border-color: rgba(199, 230, 251, 0.94);
+  background: rgba(20, 49, 74, 0.92);
+}
+
+#host-open-portal:disabled {
+  opacity: 0.65;
+  cursor: default;
 }
 
 #hub-flow-ui {
@@ -555,6 +657,43 @@ canvas {
     min-width: 150px;
     padding: 8px 9px;
     gap: 4px;
+  }
+
+  #player-roster {
+    top: 8px;
+    right: 8px;
+    width: min(68vw, 250px);
+    max-height: 46vh;
+    padding: 8px 9px;
+  }
+
+  .player-roster-head {
+    font-size: 0.68rem;
+  }
+
+  #player-roster-count {
+    font-size: 0.78rem;
+  }
+
+  .player-roster-hint {
+    margin-bottom: 6px;
+    font-size: 0.62rem;
+  }
+
+  #player-roster-list {
+    font-size: 0.66rem;
+    gap: 3px;
+  }
+
+  #host-controls {
+    top: 106px;
+    left: 8px;
+  }
+
+  #host-open-portal {
+    min-width: 112px;
+    height: 31px;
+    font-size: 0.67rem;
   }
 
   .hud-row {

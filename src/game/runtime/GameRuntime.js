@@ -53,7 +53,11 @@ export class GameRuntime {
     this.remoteStaleTimeoutMs =
       Number(this.networkContent.staleTimeoutMs) || GAME_CONSTANTS.REMOTE_STALE_TIMEOUT_MS;
 
-    const initialPixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+    const initialDevicePixelRatio = window.devicePixelRatio || 1;
+    const initialPixelRatio = Math.min(
+      initialDevicePixelRatio,
+      this.mobileEnabled ? 1.5 : 2
+    );
     this.maxPixelRatio = initialPixelRatio;
     this.currentPixelRatio = initialPixelRatio;
 
@@ -173,6 +177,20 @@ export class GameRuntime {
         ? new URLSearchParams(window.location.search)
         : new URLSearchParams();
     this.localPlayerName = this.formatPlayerName(this.queryParams.get("name") ?? "PLAYER");
+    this.hostClaimKey = String(
+      this.queryParams.get("hostKey") ?? this.queryParams.get("host_key") ?? ""
+    ).trim();
+    this.autoHostClaimEnabled =
+      this.parseQueryFlag("host") ||
+      this.parseQueryFlag("hosting") ||
+      this.parseQueryFlag("owner") ||
+      Boolean(this.hostClaimKey);
+    this.autoHostClaimLastAttemptMs = 0;
+    this.roomHostId = null;
+    this.isRoomHost = false;
+    this.portalTargetSetInFlight = false;
+    this.hostPortalTargetCandidate = this.resolveRequestedPortalTargetCandidate();
+    this.hostPortalTargetSynced = false;
     this.pendingPlayerNameSync = false;
     this.remotePlayers = new Map();
     this.remoteSyncClock = 0;
@@ -193,6 +211,11 @@ export class GameRuntime {
     this.remoteFarDistanceSq =
       Math.pow(Number(RUNTIME_TUNING.REMOTE_FAR_DISTANCE) || 70, 2);
     this.remoteHardCap = Math.max(16, Number(RUNTIME_TUNING.REMOTE_HARD_CAP) || 180);
+    this.baseRemoteLabelDistanceSq = this.remoteLabelDistanceSq;
+    this.baseRemoteMeshDistanceSq = this.remoteMeshDistanceSq;
+    this.baseRemoteFarDistanceSq = this.remoteFarDistanceSq;
+    this.baseRemoteHardCap = this.remoteHardCap;
+    this.isLowSpecMobile = false;
     this.elapsedSeconds = 0;
     this.localSyncMinYaw = 0.012;
     this.localSyncMinPitch = 0.012;
@@ -214,6 +237,14 @@ export class GameRuntime {
     this.mobileJumpBtnEl = document.getElementById("mobile-jump");
     this.mobileSprintBtnEl = document.getElementById("mobile-sprint");
     this.mobileChatBtnEl = document.getElementById("mobile-chat");
+    this.playerRosterEl = document.getElementById("player-roster");
+    this.playerRosterCountEl = document.getElementById("player-roster-count");
+    this.playerRosterListEl = document.getElementById("player-roster-list");
+    this.hostControlsEl = document.getElementById("host-controls");
+    this.hostOpenPortalBtnEl = document.getElementById("host-open-portal");
+    this.playerRosterVisible = false;
+    this.roomPlayerSnapshot = [];
+    this.portalForceOpenInFlight = false;
     this.chatOpen = false;
     this.lastLocalChatEcho = "";
     this.lastLocalChatEchoAt = 0;
@@ -334,6 +365,8 @@ export class GameRuntime {
     this.mobileJumpQueued = false;
     this.mobileSprintHeld = false;
 
+    this.applyDeviceRuntimeProfile();
+
     this._initialized = false;
   }
 
@@ -373,6 +406,7 @@ export class GameRuntime {
       z: this.playerPosition.z,
       fps: 0
     });
+    this.updateRoomPlayerSnapshot([]);
 
     this.loop();
   }
@@ -1374,6 +1408,7 @@ export class GameRuntime {
       this.setChatOpen(false);
     }
     this.syncMobileUiState();
+    this.syncHostControls();
   }
 
   syncMobileUiState() {
@@ -1382,6 +1417,7 @@ export class GameRuntime {
     }
     const visible =
       this.mobileEnabled &&
+      !this.chatOpen &&
       this.canMovePlayer() &&
       this.flowStage !== "portal_transfer" &&
       (this.nicknameGateEl?.classList.contains("hidden") ?? true);
@@ -1999,40 +2035,94 @@ export class GameRuntime {
     this.setBoundaryWarning(true, "留?寃쎄퀎瑜?踰쀬뼱?섏뀲?듬땲?? ?덉쟾 吏?먯쑝濡?蹂듦??덉뒿?덈떎.");
   }
 
-  resolvePortalTargetUrl(defaultTarget = "") {
+  parseQueryFlag(name) {
+    const value = String(this.queryParams.get(name) ?? "").trim().toLowerCase();
+    return value === "1" || value === "true" || value === "yes" || value === "on";
+  }
+
+  normalizePortalTargetUrl(rawValue, fallback = "") {
+    const text = String(rawValue ?? "").trim();
+    if (!text) {
+      return String(fallback ?? "").trim();
+    }
+
+    const baseHref =
+      typeof window !== "undefined" && window.location?.href
+        ? window.location.href
+        : "https://example.invalid/";
+
+    let parsed;
+    try {
+      parsed = new URL(text, baseHref);
+    } catch {
+      return String(fallback ?? "").trim();
+    }
+
+    const protocol = String(parsed.protocol ?? "").toLowerCase();
+    if (protocol !== "http:" && protocol !== "https:") {
+      return String(fallback ?? "").trim();
+    }
+
+    return parsed.toString();
+  }
+
+  resolveRequestedPortalTargetCandidate() {
     const queryTarget = String(
       this.queryParams.get("portal") ?? this.queryParams.get("next") ?? ""
     ).trim();
     if (queryTarget) {
-      return queryTarget;
+      return this.normalizePortalTargetUrl(queryTarget, "");
     }
 
-    const globalTarget = String(window.__EMPTINES_PORTAL_TARGET ?? "").trim();
+    const globalTarget =
+      typeof window !== "undefined"
+        ? String(window.__EMPTINES_PORTAL_TARGET ?? "").trim()
+        : "";
     if (globalTarget) {
-      return globalTarget;
+      return this.normalizePortalTargetUrl(globalTarget, "");
     }
 
-    const configTarget = String(defaultTarget ?? "").trim();
+    return "";
+  }
+
+  resolvePortalTargetUrl(defaultTarget = "") {
+    const requestedTarget = this.resolveRequestedPortalTargetCandidate();
+    if (requestedTarget) {
+      return requestedTarget;
+    }
+
+    const configTarget = this.normalizePortalTargetUrl(defaultTarget, "");
     if (configTarget) {
       return configTarget;
     }
-    return DEFAULT_PORTAL_TARGET_URL;
+
+    return this.normalizePortalTargetUrl(DEFAULT_PORTAL_TARGET_URL, "");
+  }
+
+  applyPortalTargetUpdate(rawTarget) {
+    const normalized = this.normalizePortalTargetUrl(rawTarget, "");
+    if (!normalized || normalized === this.portalTargetUrl) {
+      if (normalized && normalized === this.hostPortalTargetCandidate) {
+        this.hostPortalTargetSynced = true;
+      }
+      return false;
+    }
+
+    this.portalTargetUrl = normalized;
+    if (normalized === this.hostPortalTargetCandidate) {
+      this.hostPortalTargetSynced = true;
+    }
+    return true;
   }
 
   buildPortalTransferUrl() {
-    if (!this.portalTargetUrl) {
-      return null;
-    }
-
-    let target;
-    try {
-      target = new URL(this.portalTargetUrl, window.location.href);
-    } catch {
+    const normalizedTarget = this.normalizePortalTargetUrl(this.portalTargetUrl, "");
+    if (!normalizedTarget) {
       return null;
     }
 
     // Keep outbound portal links exact (no extra query params), and open in same tab.
-    return target.toString();
+    return normalizedTarget;
   }
 
   triggerPortalTransfer() {
@@ -2072,6 +2162,335 @@ export class GameRuntime {
 
     this.socket.emit("room:quick-join", { name: nextName });
     this.pendingPlayerNameSync = false;
+  }
+
+  setPlayerRosterVisible(visible) {
+    const nextVisible = Boolean(visible);
+    this.playerRosterVisible = nextVisible;
+    this.playerRosterEl?.classList.toggle("hidden", !nextVisible);
+  }
+
+  updateRoomPlayerSnapshot(players) {
+    const source = Array.isArray(players) ? players : [];
+    this.roomPlayerSnapshot = source
+      .map((player) => ({
+        id: String(player?.id ?? "").trim(),
+        name: this.formatPlayerName(player?.name ?? "PLAYER")
+      }))
+      .filter((player) => Boolean(player.id));
+    this.renderPlayerRoster();
+  }
+
+  renderPlayerRoster() {
+    this.resolveUiElements();
+    if (!this.playerRosterCountEl || !this.playerRosterListEl) {
+      return;
+    }
+
+    const localId = String(this.localPlayerId ?? "").trim();
+    const hostId = String(this.roomHostId ?? "").trim();
+    const roomPlayers = Array.isArray(this.roomPlayerSnapshot) ? this.roomPlayerSnapshot : [];
+    const fallbackCount = Math.max(0, this.remotePlayers.size + (this.networkConnected ? 1 : 0));
+    const totalPlayers = roomPlayers.length > 0 ? roomPlayers.length : fallbackCount;
+
+    this.playerRosterCountEl.textContent = `${totalPlayers}명`;
+    this.playerRosterListEl.textContent = "";
+
+    const sortedPlayers = [...roomPlayers].sort((a, b) => {
+      const aHost = a.id === hostId ? 1 : 0;
+      const bHost = b.id === hostId ? 1 : 0;
+      if (aHost !== bHost) {
+        return bHost - aHost;
+      }
+
+      const aSelf = a.id === localId ? 1 : 0;
+      const bSelf = b.id === localId ? 1 : 0;
+      if (aSelf !== bSelf) {
+        return bSelf - aSelf;
+      }
+
+      return a.name.localeCompare(b.name);
+    });
+
+    if (sortedPlayers.length === 0) {
+      const empty = document.createElement("li");
+      empty.className = "empty";
+      empty.textContent = this.networkConnected ? "플레이어 동기화 대기 중..." : "서버 연결 필요";
+      this.playerRosterListEl.appendChild(empty);
+      return;
+    }
+
+    for (const player of sortedPlayers) {
+      const item = document.createElement("li");
+      const isSelf = player.id === localId;
+      const isHost = player.id === hostId;
+
+      if (isSelf) {
+        item.classList.add("self");
+      }
+      if (isHost) {
+        item.classList.add("host");
+      }
+
+      const tags = [];
+      if (isSelf) {
+        tags.push("나");
+      }
+      if (isHost) {
+        tags.push("방장");
+      }
+      const suffix = tags.length > 0 ? ` (${tags.join(" / ")})` : "";
+      item.textContent = `${player.name}${suffix}`;
+      this.playerRosterListEl.appendChild(item);
+    }
+  }
+
+  syncHostControls() {
+    if (!this.hostControlsEl) {
+      return;
+    }
+
+    const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
+    const hasHostPrivilege = this.isRoomHost || localHostMode;
+    const visible =
+      this.hubFlowEnabled &&
+      hasHostPrivilege;
+    const canForceOpen = visible && this.flowStage === "city_live";
+
+    this.hostControlsEl.classList.toggle("hidden", !visible);
+    if (this.hostOpenPortalBtnEl) {
+      this.hostOpenPortalBtnEl.disabled = !canForceOpen || this.portalForceOpenInFlight;
+      this.hostOpenPortalBtnEl.title = canForceOpen
+        ? "방장 포탈 즉시 개방"
+        : "도시 라이브 단계에서만 사용 가능";
+    }
+  }
+
+  handlePortalForceOpen(_payload = {}, { announce = true } = {}) {
+    if (!this.hubFlowEnabled) {
+      return;
+    }
+
+    this.portalPhase = "open";
+    this.portalPhaseClock = this.portalOpenSeconds;
+    this.updatePortalTimeBillboard(0, true);
+    this.updatePortalVisual();
+
+    if (announce) {
+      this.appendChatLine("", "방장이 포탈을 즉시 개방했습니다.", "system");
+    }
+  }
+
+  requestPortalForceOpen() {
+    const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
+    if (!this.socket || !this.networkConnected) {
+      if (localHostMode) {
+        this.handlePortalForceOpen({}, { announce: false });
+        this.appendChatLine("", "로컬 모드에서 포탈을 즉시 개방했습니다.", "system");
+        return;
+      }
+      this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
+      return;
+    }
+    if (!this.isRoomHost) {
+      this.appendChatLine("", "포탈 즉시 개방은 방장만 가능합니다.", "system");
+      return;
+    }
+    if (!this.hubFlowEnabled || this.flowStage !== "city_live") {
+      this.appendChatLine("", "도시 라이브 단계에서만 포탈 즉시 개방 가능합니다.", "system");
+      return;
+    }
+    if (this.portalForceOpenInFlight) {
+      return;
+    }
+
+    this.portalForceOpenInFlight = true;
+    this.syncHostControls();
+    this.socket.emit("portal:force-open", {}, (response = {}) => {
+      this.portalForceOpenInFlight = false;
+      this.syncHostControls();
+
+      if (!response?.ok) {
+        const reason = String(response?.error ?? "").trim() || "unknown error";
+        this.appendChatLine("", `포탈 개방 실패: ${reason}`, "system");
+        return;
+      }
+
+      // Apply immediately for local host; room broadcast will update everyone else.
+      this.handlePortalForceOpen(response, { announce: false });
+      this.appendChatLine("", "포탈을 즉시 개방했습니다.", "system");
+    });
+  }
+
+  requestHostClaim({ manual = false } = {}) {
+    if (!this.socket || !this.networkConnected) {
+      if (manual) {
+        this.appendChatLine("", "서버 연결 후 다시 시도하세요. (/host)", "system");
+      }
+      return;
+    }
+    if (this.isRoomHost) {
+      if (manual) {
+        this.appendChatLine("", "이미 방장 권한입니다.", "system");
+      }
+      return;
+    }
+    if (!manual && !this.autoHostClaimEnabled) {
+      return;
+    }
+
+    if (!manual) {
+      const now = performance.now();
+      if (now - this.autoHostClaimLastAttemptMs < 1200) {
+        return;
+      }
+      this.autoHostClaimLastAttemptMs = now;
+    }
+
+    this.socket.emit(
+      "room:host:claim",
+      { key: this.hostClaimKey },
+      (response = {}) => {
+        if (!response?.ok) {
+          const reason = String(response?.error ?? "").trim();
+          if (!manual && reason === "invalid host key") {
+            this.autoHostClaimEnabled = false;
+          }
+          if (manual) {
+            this.appendChatLine("", `방장 권한 요청 실패: ${reason || "unknown error"}`, "system");
+          }
+          return;
+        }
+
+        if (response?.room) {
+          this.handleRoomUpdate(response.room);
+        } else if (this.localPlayerId) {
+          this.roomHostId = this.localPlayerId;
+          this.isRoomHost = true;
+          this.hud.setStatus(this.getStatusText());
+          this.syncHostControls();
+        }
+
+        if (manual) {
+          this.appendChatLine("", "방장 권한을 획득했습니다.", "system");
+        }
+        this.syncHostPortalTargetCandidate();
+      }
+    );
+  }
+
+  requestPortalTargetUpdate(targetUrl, { announceSuccess = false, announceErrors = false } = {}) {
+    if (!this.socket || !this.networkConnected) {
+      if (announceErrors) {
+        this.appendChatLine("", "서버 연결 후 포탈 링크를 변경할 수 있습니다.", "system");
+      }
+      return;
+    }
+    if (!this.isRoomHost) {
+      if (announceErrors) {
+        this.appendChatLine("", "포탈 링크 변경은 방장만 가능합니다.", "system");
+      }
+      return;
+    }
+    if (this.portalTargetSetInFlight) {
+      return;
+    }
+
+    const normalized = this.normalizePortalTargetUrl(targetUrl, "");
+    if (!normalized) {
+      if (announceErrors) {
+        this.appendChatLine("", "유효한 http/https 링크를 입력하세요.", "system");
+      }
+      return;
+    }
+
+    if (normalized === this.portalTargetUrl) {
+      if (announceSuccess) {
+        this.appendChatLine("", `포탈 링크 유지: ${normalized}`, "system");
+      }
+      if (normalized === this.hostPortalTargetCandidate) {
+        this.hostPortalTargetSynced = true;
+      }
+      return;
+    }
+
+    this.portalTargetSetInFlight = true;
+    this.socket.emit("portal:target:set", { targetUrl: normalized }, (response = {}) => {
+      this.portalTargetSetInFlight = false;
+
+      if (!response?.ok) {
+        if (announceErrors) {
+          const reason = String(response?.error ?? "").trim() || "unknown error";
+          this.appendChatLine("", `포탈 링크 변경 실패: ${reason}`, "system");
+        }
+        return;
+      }
+
+      const applied = this.normalizePortalTargetUrl(response?.targetUrl ?? normalized, normalized);
+      this.portalTargetUrl = applied;
+      if (applied === this.hostPortalTargetCandidate) {
+        this.hostPortalTargetSynced = true;
+      }
+      if (announceSuccess) {
+        this.appendChatLine("", `포탈 링크 변경 완료: ${applied}`, "system");
+      }
+    });
+  }
+
+  syncHostPortalTargetCandidate() {
+    if (!this.isRoomHost || !this.hostPortalTargetCandidate) {
+      return;
+    }
+    if (this.hostPortalTargetSynced) {
+      return;
+    }
+
+    if (this.hostPortalTargetCandidate === this.portalTargetUrl) {
+      this.hostPortalTargetSynced = true;
+      return;
+    }
+
+    this.requestPortalTargetUpdate(this.hostPortalTargetCandidate);
+  }
+
+  handleChatCommand(rawText) {
+    const text = String(rawText ?? "").trim();
+    if (!text.startsWith("/")) {
+      return false;
+    }
+
+    const [commandRaw, ...rest] = text.split(/\s+/);
+    const command = String(commandRaw ?? "").toLowerCase();
+    const argText = rest.join(" ").trim();
+
+    if (command === "/host") {
+      this.requestHostClaim({ manual: true });
+      return true;
+    }
+
+    if (command === "/portal") {
+      if (!argText) {
+        this.appendChatLine("", "사용법: /portal https://example.com", "system");
+        return true;
+      }
+
+      const normalized = this.normalizePortalTargetUrl(argText, "");
+      if (!normalized) {
+        this.appendChatLine("", "유효한 http/https 링크를 입력하세요.", "system");
+        return true;
+      }
+
+      this.hostPortalTargetCandidate = normalized;
+      this.hostPortalTargetSynced = false;
+      this.requestPortalTargetUpdate(normalized, {
+        announceSuccess: true,
+        announceErrors: true
+      });
+      return true;
+    }
+
+    this.appendChatLine("", "지원 명령어: /host, /portal <url>", "system");
+    return true;
   }
 
   setupSky(sunDirection) {
@@ -3009,6 +3428,12 @@ export class GameRuntime {
         return;
       }
 
+      if (event.code === "Tab") {
+        event.preventDefault();
+        this.setPlayerRosterVisible(true);
+        return;
+      }
+
       if (!this.canMovePlayer()) {
         return;
       }
@@ -3054,7 +3479,9 @@ export class GameRuntime {
     });
 
     window.addEventListener("keyup", (event) => {
-      if (this.isTextInputTarget(event.target)) {
+      if (event.code === "Tab") {
+        event.preventDefault();
+        this.setPlayerRosterVisible(false);
         return;
       }
       this.keys.delete(event.code);
@@ -3070,6 +3497,7 @@ export class GameRuntime {
       this.resetMobileMoveInput();
       this.mobileSprintBtnEl?.classList.remove("active");
       this.mobileJumpBtnEl?.classList.remove("active");
+      this.setPlayerRosterVisible(false);
     });
 
     this.renderer.domElement.addEventListener("click", () => {
@@ -3296,6 +3724,12 @@ export class GameRuntime {
         this.focusChatInput();
       });
     }
+
+    if (this.hostOpenPortalBtnEl) {
+      this.hostOpenPortalBtnEl.addEventListener("click", () => {
+        this.requestPortalForceOpen();
+      });
+    }
   }
 
   resolveUiElements() {
@@ -3368,6 +3802,21 @@ export class GameRuntime {
     if (!this.mobileChatBtnEl) {
       this.mobileChatBtnEl = document.getElementById("mobile-chat");
     }
+    if (!this.hostControlsEl) {
+      this.hostControlsEl = document.getElementById("host-controls");
+    }
+    if (!this.hostOpenPortalBtnEl) {
+      this.hostOpenPortalBtnEl = document.getElementById("host-open-portal");
+    }
+    if (!this.playerRosterEl) {
+      this.playerRosterEl = document.getElementById("player-roster");
+    }
+    if (!this.playerRosterCountEl) {
+      this.playerRosterCountEl = document.getElementById("player-roster-count");
+    }
+    if (!this.playerRosterListEl) {
+      this.playerRosterListEl = document.getElementById("player-roster-list");
+    }
     this.chalkColorButtons = Array.from(document.querySelectorAll(".chalk-color[data-color]"));
     this.toolButtons = Array.from(document.querySelectorAll(".tool-slot[data-tool]"));
   }
@@ -3431,6 +3880,7 @@ export class GameRuntime {
       this.chalkDrawingActive = false;
       this.chalkLastStamp = null;
     }
+    this.syncMobileUiState();
   }
 
   setActiveTool(tool) {
@@ -3502,7 +3952,16 @@ export class GameRuntime {
     this.socketEndpoint = endpoint;
     if (!endpoint) {
       this.networkConnected = false;
+      this.localPlayerId = null;
+      this.roomHostId = null;
+      this.isRoomHost = false;
+      this.portalForceOpenInFlight = false;
+      this.clearRemotePlayers();
+      this.updateRoomPlayerSnapshot([]);
+      this.setPlayerRosterVisible(false);
+      this.syncHostControls();
       this.hud.setStatus(this.getStatusText());
+      this.hud.setPlayers(0);
       return;
     }
 
@@ -3519,20 +3978,35 @@ export class GameRuntime {
     socket.on("connect", () => {
       this.networkConnected = true;
       this.localPlayerId = socket.id;
+      this.roomHostId = null;
+      this.isRoomHost = false;
+      this.autoHostClaimLastAttemptMs = 0;
+      this.hostPortalTargetSynced = false;
+      this.portalTargetSetInFlight = false;
+      this.portalForceOpenInFlight = false;
       this.remoteSyncClock = 0;
       this.lastSentInput = null;
       this.localInputSeq = 0;
       this.lastAckInputSeq = 0;
       this.pendingInputQueue.length = 0;
       this.netPingPending.clear();
+      this.updateRoomPlayerSnapshot([]);
+      this.syncHostControls();
       this.hud.setStatus(this.getStatusText());
       this.syncPlayerNameIfConnected();
       this.startNetworkPing();
+      this.requestHostClaim();
     });
 
     socket.on("disconnect", () => {
       this.networkConnected = false;
       this.localPlayerId = null;
+      this.roomHostId = null;
+      this.isRoomHost = false;
+      this.autoHostClaimLastAttemptMs = 0;
+      this.hostPortalTargetSynced = false;
+      this.portalTargetSetInFlight = false;
+      this.portalForceOpenInFlight = false;
       this.remoteSyncClock = 0;
       this.lastSentInput = null;
       this.pendingJumpInput = false;
@@ -3540,18 +4014,47 @@ export class GameRuntime {
       this.netPingPending.clear();
       this.stopNetworkPing();
       this.clearRemotePlayers();
+      this.updateRoomPlayerSnapshot([]);
+      this.setPlayerRosterVisible(false);
+      this.syncHostControls();
       this.hud.setStatus(this.getStatusText());
-      this.hud.setPlayers(1);
+      this.hud.setPlayers(0);
     });
 
     socket.on("connect_error", () => {
       this.networkConnected = false;
+      this.localPlayerId = null;
+      this.roomHostId = null;
+      this.isRoomHost = false;
+      this.portalForceOpenInFlight = false;
+      this.remoteSyncClock = 0;
+      this.lastSentInput = null;
+      this.pendingJumpInput = false;
+      this.pendingInputQueue.length = 0;
+      this.clearRemotePlayers();
+      this.updateRoomPlayerSnapshot([]);
+      this.setPlayerRosterVisible(false);
+      this.syncHostControls();
       this.stopNetworkPing();
       this.hud.setStatus(this.getStatusText());
+      this.hud.setPlayers(0);
     });
 
     socket.on("room:update", (room) => {
       this.handleRoomUpdate(room);
+    });
+
+    socket.on("portal:target:update", (payload = {}) => {
+      const changed = this.applyPortalTargetUpdate(payload?.targetUrl ?? payload?.url ?? "");
+      if (changed) {
+        this.updatePortalTimeBillboard(0, true);
+      }
+    });
+
+    socket.on("portal:force-open", (payload = {}) => {
+      const hostId = String(payload?.hostId ?? "").trim();
+      const localId = String(this.localPlayerId ?? "").trim();
+      this.handlePortalForceOpen(payload, { announce: Boolean(hostId && hostId !== localId) });
     });
 
     socket.on("snapshot:world", (payload) => {
@@ -3658,7 +4161,19 @@ export class GameRuntime {
   }
 
   handleRoomUpdate(room) {
+    const previousHostState = this.isRoomHost;
+    const nextHostId = String(room?.hostId ?? "").trim();
+    this.roomHostId = nextHostId || null;
+    this.isRoomHost = Boolean(this.localPlayerId && nextHostId && this.localPlayerId === nextHostId);
+    if (typeof room?.portalTarget === "string") {
+      const portalTargetChanged = this.applyPortalTargetUpdate(room.portalTarget);
+      if (portalTargetChanged) {
+        this.updatePortalTimeBillboard(0, true);
+      }
+    }
+
     const players = Array.isArray(room?.players) ? room.players : [];
+    this.updateRoomPlayerSnapshot(players);
     const seen = new Set();
     const remotePool = [];
 
@@ -3697,6 +4212,17 @@ export class GameRuntime {
         this.removeRemotePlayer(id);
       }
     }
+
+    if (!this.isRoomHost && this.autoHostClaimEnabled) {
+      this.requestHostClaim();
+    }
+    if (this.isRoomHost) {
+      this.syncHostPortalTargetCandidate();
+    }
+    if (previousHostState !== this.isRoomHost) {
+      this.hud.setStatus(this.getStatusText());
+    }
+    this.syncHostControls();
 
     const localPlayer = this.networkConnected ? 1 : 0;
     this.hud.setPlayers(this.remotePlayers.size + localPlayer);
@@ -4157,10 +4683,18 @@ export class GameRuntime {
       return;
     }
 
-    const text = String(this.chatInputEl.value ?? "").trim().slice(0, 120);
-    if (!text) {
+    const rawInput = String(this.chatInputEl.value ?? "").trim();
+    if (!rawInput) {
       return;
     }
+    if (this.handleChatCommand(rawInput)) {
+      this.chatInputEl.value = "";
+      this.setChatOpen(false);
+      this.chatInputEl.blur();
+      return;
+    }
+
+    const text = rawInput.slice(0, 120);
 
     const senderName = this.formatPlayerName(this.localPlayerName);
     this.localPlayerName = senderName;
@@ -4559,24 +5093,41 @@ export class GameRuntime {
       z: this.playerPosition.z,
       fps: fpsState.fps
     });
+
+    if (this.playerRosterVisible && this.roomPlayerSnapshot.length === 0) {
+      this.renderPlayerRoster();
+    }
   }
 
   getStatusText() {
+    const withHostTag = (text) =>
+      this.networkConnected && this.isRoomHost ? `${text} / HOST` : text;
+
     if (this.hubFlowEnabled) {
       if (this.flowStage === "bridge_approach") {
-        return this.networkConnected ? "ONLINE / BRIDGE APPROACH" : "OFFLINE / BRIDGE APPROACH";
+        return this.networkConnected
+          ? withHostTag("ONLINE / BRIDGE APPROACH")
+          : "OFFLINE / BRIDGE APPROACH";
       }
       if (this.flowStage === "bridge_dialogue") {
-        return this.networkConnected ? "ONLINE / NPC DIALOGUE" : "OFFLINE / NPC DIALOGUE";
+        return this.networkConnected
+          ? withHostTag("ONLINE / NPC DIALOGUE")
+          : "OFFLINE / NPC DIALOGUE";
       }
       if (this.flowStage === "bridge_name") {
-        return this.networkConnected ? "ONLINE / NAME CHECK" : "OFFLINE / NAME CHECK";
+        return this.networkConnected
+          ? withHostTag("ONLINE / NAME CHECK")
+          : "OFFLINE / NAME CHECK";
       }
       if (this.flowStage === "bridge_mirror") {
-        return this.networkConnected ? "ONLINE / SHRINE GATE" : "OFFLINE / SHRINE GATE";
+        return this.networkConnected
+          ? withHostTag("ONLINE / SHRINE GATE")
+          : "OFFLINE / SHRINE GATE";
       }
       if (this.flowStage === "city_intro") {
-        return this.networkConnected ? "ONLINE / CITY TRANSIT" : "OFFLINE / CITY TRANSIT";
+        return this.networkConnected
+          ? withHostTag("ONLINE / CITY TRANSIT")
+          : "OFFLINE / CITY TRANSIT";
       }
       if (this.flowStage === "portal_transfer") {
         return "PORTAL / TRANSFERRING";
@@ -4587,9 +5138,9 @@ export class GameRuntime {
       return this.socketEndpoint ? "OFFLINE" : "OFFLINE / SERVER REQUIRED";
     }
     if (this.pointerLockSupported && !this.pointerLocked && !this.mobileEnabled) {
-      return "ONLINE / CLICK TO LOCK";
+      return withHostTag("ONLINE / CLICK TO LOCK");
     }
-    return "ONLINE";
+    return withHostTag("ONLINE");
   }
 
   loop() {
@@ -4651,6 +5202,79 @@ export class GameRuntime {
     }
   }
 
+  isLikelyLowSpecMobileDevice() {
+    if (!this.mobileEnabled || typeof navigator === "undefined") {
+      return false;
+    }
+
+    const memoryGb = Number(navigator.deviceMemory) || 0;
+    const cpuCores = Number(navigator.hardwareConcurrency) || 0;
+    const lowMemory = memoryGb > 0 && memoryGb <= 4;
+    const lowCpu = cpuCores > 0 && cpuCores <= 6;
+    return lowMemory || lowCpu;
+  }
+
+  getDevicePixelRatioCap() {
+    if (!this.mobileEnabled) {
+      return 2;
+    }
+    return this.isLowSpecMobile ? 1.25 : 1.5;
+  }
+
+  applyDeviceRuntimeProfile() {
+    this.isLowSpecMobile = this.isLikelyLowSpecMobileDevice();
+
+    if (this.mobileEnabled) {
+      const remoteHardCap = this.isLowSpecMobile ? 72 : 96;
+      const meshDistance = this.isLowSpecMobile ? 92 : 110;
+      const labelDistance = this.isLowSpecMobile ? 26 : 34;
+      const farDistance = this.isLowSpecMobile ? 48 : 60;
+
+      this.remoteHardCap = Math.min(this.baseRemoteHardCap, remoteHardCap);
+      this.remoteMeshDistanceSq = Math.pow(meshDistance, 2);
+      this.remoteLabelDistanceSq = Math.pow(labelDistance, 2);
+      this.remoteFarDistanceSq = Math.pow(farDistance, 2);
+
+      this.inputSendBaseInterval = this.isLowSpecMobile ? 1 / 14 : 1 / 16;
+      this.inputHeartbeatSeconds = this.isLowSpecMobile ? 0.3 : 0.26;
+      this.localSyncMinYaw = this.isLowSpecMobile ? 0.02 : 0.016;
+      this.localSyncMinPitch = this.isLowSpecMobile ? 0.02 : 0.016;
+      this.dynamicResolution.minRatio = this.isLowSpecMobile
+        ? 0.52
+        : GAME_CONSTANTS.DYNAMIC_RESOLUTION.mobileMinRatio;
+    } else {
+      this.remoteHardCap = this.baseRemoteHardCap;
+      this.remoteMeshDistanceSq = this.baseRemoteMeshDistanceSq;
+      this.remoteLabelDistanceSq = this.baseRemoteLabelDistanceSq;
+      this.remoteFarDistanceSq = this.baseRemoteFarDistanceSq;
+
+      this.inputSendBaseInterval = 1 / 20;
+      this.inputHeartbeatSeconds = 0.22;
+      this.localSyncMinYaw = 0.012;
+      this.localSyncMinPitch = 0.012;
+      this.dynamicResolution.minRatio = GAME_CONSTANTS.DYNAMIC_RESOLUTION.desktopMinRatio;
+    }
+
+    const devicePixelRatio = window.devicePixelRatio || 1;
+    this.maxPixelRatio = Math.min(devicePixelRatio, this.getDevicePixelRatioCap());
+    const minPixelRatio = Math.max(
+      0.45,
+      Math.min(this.dynamicResolution.minRatio, this.maxPixelRatio)
+    );
+    const nextPixelRatio = THREE.MathUtils.clamp(
+      this.currentPixelRatio,
+      minPixelRatio,
+      this.maxPixelRatio
+    );
+    if (Math.abs(nextPixelRatio - this.currentPixelRatio) >= 0.01) {
+      this.currentPixelRatio = Number(nextPixelRatio.toFixed(2));
+      this.renderer.setPixelRatio(this.currentPixelRatio);
+      if (this.composer) {
+        this.composer.setPixelRatio(this.currentPixelRatio);
+      }
+    }
+  }
+
   applyQualityProfile() {
     const shadowEnabled = !this.mobileEnabled;
     this.renderer.shadowMap.enabled = shadowEnabled;
@@ -4687,17 +5311,7 @@ export class GameRuntime {
       this.applyQualityProfile();
     }
 
-    this.dynamicResolution.minRatio = this.mobileEnabled
-      ? GAME_CONSTANTS.DYNAMIC_RESOLUTION.mobileMinRatio
-      : GAME_CONSTANTS.DYNAMIC_RESOLUTION.desktopMinRatio;
-
-    this.maxPixelRatio = Math.min(window.devicePixelRatio || 1, 2);
-    const minPixelRatio = Math.max(0.5, Math.min(this.dynamicResolution.minRatio, this.maxPixelRatio));
-    const clampedRatio = THREE.MathUtils.clamp(this.currentPixelRatio, minPixelRatio, this.maxPixelRatio);
-    if (Math.abs(clampedRatio - this.currentPixelRatio) > 0.01) {
-      this.currentPixelRatio = Number(clampedRatio.toFixed(2));
-      this.renderer.setPixelRatio(this.currentPixelRatio);
-    }
+    this.applyDeviceRuntimeProfile();
 
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();

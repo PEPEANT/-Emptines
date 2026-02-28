@@ -39,7 +39,8 @@ export class HUD {
     if (!this.enabled) {
       return;
     }
-    const next = String(count ?? 0);
+    const numeric = Math.max(0, Math.trunc(Number(count) || 0));
+    const next = `${numeric}명`;
     if (this.cache.players !== next) {
       this.cache.players = next;
       setText(this.playersEl, next);
