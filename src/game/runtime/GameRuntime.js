@@ -45,6 +45,7 @@ const RIGHT_BILLBOARD_VIDEO_PATHS = Object.freeze({
   YTDown7: "mp4/av/YTDown7.mp4",
   YTDown8: "mp4/av/YTDown8.mp4"
 });
+const MAX_LEFT_BILLBOARD_IMAGE_CHARS = 4_200_000;
 const DEFAULT_PORTAL_TARGET_URL =
   "http://localhost:5173/?server=http://localhost:3001&name=PLAYER";
 const BOX_FACE_KEYS = ["px", "nx", "py", "ny", "pz", "nz"];
@@ -202,6 +203,12 @@ export class GameRuntime {
     this.plazaBillboardRightScreenMaterial = null;
     this.plazaBillboardRightVideoEl = null;
     this.plazaBillboardRightVideoTexture = null;
+    this.leftBillboardState = {
+      mode: "ad",
+      imageDataUrl: "",
+      updatedAt: Date.now()
+    };
+    this.leftBillboardSetInFlight = false;
     this.rightBillboardState = {
       mode: "ad",
       videoId: "",
@@ -1387,6 +1394,7 @@ export class GameRuntime {
       }
     });
 
+    this.applyLeftBillboardState(this.leftBillboardState, { force: true });
     this.applyRightBillboardState(this.rightBillboardState, { force: true });
   }
 
@@ -1416,6 +1424,42 @@ export class GameRuntime {
       videoId: mode === "video" ? videoId : "",
       updatedAt: Math.max(0, Math.trunc(Number(rawState?.updatedAt) || Date.now()))
     };
+  }
+
+  normalizeLeftBillboardState(rawState = {}) {
+    const imageDataUrl = String(rawState?.imageDataUrl ?? rawState?.dataUrl ?? "").trim();
+    const hasValidImage =
+      imageDataUrl.length > 0 &&
+      imageDataUrl.length <= MAX_LEFT_BILLBOARD_IMAGE_CHARS &&
+      imageDataUrl.startsWith("data:image/");
+    const modeRaw = String(rawState?.mode ?? "ad").trim().toLowerCase();
+    const mode = modeRaw === "image" && hasValidImage ? "image" : "ad";
+    return {
+      mode,
+      imageDataUrl: mode === "image" ? imageDataUrl : "",
+      updatedAt: Math.max(0, Math.trunc(Number(rawState?.updatedAt) || Date.now()))
+    };
+  }
+
+  applyLeftBillboardState(rawState = {}, { force = false } = {}) {
+    const next = this.normalizeLeftBillboardState(rawState);
+    const previous = this.normalizeLeftBillboardState(this.leftBillboardState);
+    if (
+      !force &&
+      previous.mode === next.mode &&
+      previous.imageDataUrl === next.imageDataUrl
+    ) {
+      return false;
+    }
+
+    this.leftBillboardState = next;
+    if (next.mode === "image" && next.imageDataUrl) {
+      this.setLeftBillboardImage(next.imageDataUrl);
+      return true;
+    }
+
+    this.resetLeftBillboardImage();
+    return true;
   }
 
   getRightBillboardVideoUrl(rawVideoId) {
@@ -1616,6 +1660,95 @@ export class GameRuntime {
     };
     this.applyRightBillboardState(fallbackState, { force: true });
     this.requestRightBillboardReset({ announceErrors: false });
+  }
+
+  requestLeftBillboardImageSet(rawImageDataUrl) {
+    const next = this.normalizeLeftBillboardState({
+      mode: "image",
+      imageDataUrl: rawImageDataUrl,
+      updatedAt: Date.now()
+    });
+    if (next.mode !== "image" || !next.imageDataUrl) {
+      this.appendChatLine("", "좌측 전광판 이미지는 data:image 형식만 지원합니다.", "system");
+      return;
+    }
+
+    const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
+    if (!this.socket || !this.networkConnected) {
+      if (localHostMode) {
+        this.applyLeftBillboardState(next, { force: true });
+        return;
+      }
+      this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
+      return;
+    }
+
+    if (!this.isRoomHost) {
+      this.appendChatLine("", "좌측 전광판 제어는 방장만 가능합니다.", "system");
+      return;
+    }
+
+    if (this.leftBillboardSetInFlight) {
+      return;
+    }
+    this.leftBillboardSetInFlight = true;
+    this.syncHostControls();
+
+    this.socket.emit("billboard:left:set", { imageDataUrl: next.imageDataUrl }, (response = {}) => {
+      this.leftBillboardSetInFlight = false;
+      this.syncHostControls();
+      if (!response?.ok) {
+        const reason = String(response?.error ?? "").trim() || "unknown error";
+        this.appendChatLine("", `좌측 전광판 이미지 적용 실패: ${reason}`, "system");
+        return;
+      }
+      this.applyLeftBillboardState(response?.state ?? next, { force: true });
+    });
+  }
+
+  requestLeftBillboardReset({ announceErrors = true } = {}) {
+    const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
+    if (!this.socket || !this.networkConnected) {
+      if (localHostMode) {
+        this.applyLeftBillboardState(
+          {
+            mode: "ad",
+            imageDataUrl: "",
+            updatedAt: Date.now()
+          },
+          { force: true }
+        );
+      } else if (announceErrors) {
+        this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
+      }
+      return;
+    }
+
+    if (!this.isRoomHost) {
+      if (announceErrors) {
+        this.appendChatLine("", "좌측 전광판 제어는 방장만 가능합니다.", "system");
+      }
+      return;
+    }
+
+    if (this.leftBillboardSetInFlight) {
+      return;
+    }
+    this.leftBillboardSetInFlight = true;
+    this.syncHostControls();
+
+    this.socket.emit("billboard:left:reset", {}, (response = {}) => {
+      this.leftBillboardSetInFlight = false;
+      this.syncHostControls();
+      if (!response?.ok) {
+        if (announceErrors) {
+          const reason = String(response?.error ?? "").trim() || "unknown error";
+          this.appendChatLine("", `좌측 전광판 복귀 실패: ${reason}`, "system");
+        }
+        return;
+      }
+      this.applyLeftBillboardState(response?.state ?? {}, { force: true });
+    });
   }
 
   requestRightBillboardVideoPlay(rawVideoId) {
@@ -3684,6 +3817,7 @@ export class GameRuntime {
     const controlsBusy =
       this.portalForceOpenInFlight ||
       this.portalScheduleSetInFlight ||
+      this.leftBillboardSetInFlight ||
       this.rightBillboardResetInFlight ||
       this.hostMusicSetInFlight;
 
@@ -3714,10 +3848,10 @@ export class GameRuntime {
       this.hostResetRightVideoBtnEl.disabled = !canControlPortal || controlsBusy;
     }
     if (this.hostLeftImageFileInputEl) {
-      this.hostLeftImageFileInputEl.disabled = !canControlPortal;
+      this.hostLeftImageFileInputEl.disabled = !canControlPortal || controlsBusy;
     }
     if (this.hostResetLeftImageBtnEl) {
-      this.hostResetLeftImageBtnEl.disabled = !canControlPortal;
+      this.hostResetLeftImageBtnEl.disabled = !canControlPortal || controlsBusy;
     }
     if (this.hostMusicFileInputEl) {
       this.hostMusicFileInputEl.disabled = !canControlPortal || controlsBusy;
@@ -5471,9 +5605,17 @@ export class GameRuntime {
       this.hostLeftImageFileInputEl.addEventListener("change", () => {
         const file = this.hostLeftImageFileInputEl?.files?.[0];
         if (!file) return;
+        if (file.type && !file.type.startsWith("image/")) {
+          this.appendChatLine("", "이미지 파일만 업로드할 수 있습니다.", "system");
+          this.hostLeftImageFileInputEl.value = "";
+          return;
+        }
         const reader = new FileReader();
         reader.onload = (e) => {
-          this.setLeftBillboardImage(String(e.target?.result ?? ""));
+          this.requestLeftBillboardImageSet(String(e.target?.result ?? ""));
+        };
+        reader.onerror = () => {
+          this.appendChatLine("", "이미지 파일을 읽지 못했습니다.", "system");
         };
         reader.readAsDataURL(file);
         this.hostLeftImageFileInputEl.value = "";
@@ -5481,7 +5623,7 @@ export class GameRuntime {
     }
     if (this.hostResetLeftImageBtnEl) {
       this.hostResetLeftImageBtnEl.addEventListener("click", () => {
-        this.resetLeftBillboardImage();
+        this.requestLeftBillboardReset({ announceErrors: true });
         if (this.hostLeftImageFileInputEl) this.hostLeftImageFileInputEl.value = "";
       });
     }
@@ -5875,6 +6017,7 @@ export class GameRuntime {
       this.localPlayerId = null;
       this.roomHostId = null;
       this.isRoomHost = false;
+      this.leftBillboardSetInFlight = false;
       this.rightBillboardResetInFlight = false;
       this.hostMusicSetInFlight = false;
       this.applySharedMusicState({ mode: "idle" }, { announce: false });
@@ -5908,6 +6051,7 @@ export class GameRuntime {
       this.portalTargetSetInFlight = false;
       this.portalForceOpenInFlight = false;
       this.portalScheduleSetInFlight = false;
+      this.leftBillboardSetInFlight = false;
       this.rightBillboardResetInFlight = false;
       this.hostMusicSetInFlight = false;
       this.remoteSyncClock = 0;
@@ -5934,6 +6078,7 @@ export class GameRuntime {
       this.portalTargetSetInFlight = false;
       this.portalForceOpenInFlight = false;
       this.portalScheduleSetInFlight = false;
+      this.leftBillboardSetInFlight = false;
       this.rightBillboardResetInFlight = false;
       this.hostMusicSetInFlight = false;
       this.remoteSyncClock = 0;
@@ -5958,6 +6103,7 @@ export class GameRuntime {
       this.isRoomHost = false;
       this.portalScheduleSetInFlight = false;
       this.portalForceOpenInFlight = false;
+      this.leftBillboardSetInFlight = false;
       this.rightBillboardResetInFlight = false;
       this.hostMusicSetInFlight = false;
       this.remoteSyncClock = 0;
@@ -6001,6 +6147,10 @@ export class GameRuntime {
 
     socket.on("paint:surface:update", (payload = {}) => {
       this.applySurfacePaintUpdate(payload);
+    });
+
+    socket.on("billboard:left:update", (payload = {}) => {
+      this.applyLeftBillboardState(payload ?? {}, { force: true });
     });
 
     socket.on("billboard:right:update", (payload = {}) => {
@@ -6134,6 +6284,9 @@ export class GameRuntime {
     }
     if (room?.portalSchedule && typeof room.portalSchedule === "object") {
       this.applyPortalScheduleUpdate(room.portalSchedule, { announce: false });
+    }
+    if (room?.leftBillboard && typeof room.leftBillboard === "object") {
+      this.applyLeftBillboardState(room.leftBillboard);
     }
     if (room?.rightBillboard && typeof room.rightBillboard === "object") {
       // No force: same-video state won't restart playback when another player joins

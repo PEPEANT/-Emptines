@@ -7,6 +7,7 @@ import { dirname, isAbsolute, resolve as resolvePath } from "node:path";
 const SURFACE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,96}$/;
 const MAX_SURFACE_IMAGE_CHARS = 1_400_000;
 const RIGHT_BILLBOARD_VIDEO_ID_PATTERN = /^YTDown([1-8])$/i;
+const MAX_LEFT_BILLBOARD_IMAGE_CHARS = 4_200_000;
 const SURFACE_PAINT_STORE_VERSION = 1;
 const MAX_SHARED_AUDIO_DATA_URL_CHARS = 12_000_000;
 const MAX_SHARED_AUDIO_NAME_CHARS = 120;
@@ -89,6 +90,14 @@ function createRightBillboardState() {
   };
 }
 
+function createLeftBillboardState() {
+  return {
+    mode: "ad",
+    imageDataUrl: "",
+    updatedAt: Date.now()
+  };
+}
+
 function createSharedMusicState() {
   return {
     mode: "idle",
@@ -108,12 +117,24 @@ function normalizeRightBillboardVideoId(rawValue) {
   return `YTDown${Math.trunc(Number(match[1]) || 0)}`;
 }
 
+function normalizeLeftBillboardImageDataUrl(rawValue) {
+  const value = String(rawValue ?? "").trim();
+  if (!value || value.length > MAX_LEFT_BILLBOARD_IMAGE_CHARS) {
+    return "";
+  }
+  if (!value.startsWith("data:image/")) {
+    return "";
+  }
+  return value;
+}
+
 function createPersistentRoom(code, defaultPortalTargetUrl) {
   return {
     code,
     hostId: null,
     portalTarget: defaultPortalTargetUrl,
     portalSchedule: createPortalScheduleState(),
+    leftBillboard: createLeftBillboardState(),
     rightBillboard: createRightBillboardState(),
     sharedMusic: createSharedMusicState(),
     surfacePaint: new Map(),
@@ -299,6 +320,7 @@ export class RoomService {
       hostId: room.hostId,
       portalTarget: String(room.portalTarget ?? "").trim(),
       portalSchedule: this.serializePortalSchedule(room),
+      leftBillboard: this.serializeLeftBillboard(room),
       rightBillboard: this.serializeRightBillboard(room),
       players: Array.from(room.players.values()).map((player) => ({
         id: player.id,
@@ -357,6 +379,84 @@ export class RoomService {
 
   emitPortalScheduleUpdate(room) {
     this.io.to(room.code).emit("portal:schedule:update", this.serializePortalSchedule(room));
+  }
+
+  serializeLeftBillboard(room) {
+    const state = room?.leftBillboard ?? createLeftBillboardState();
+    const imageDataUrl = normalizeLeftBillboardImageDataUrl(state.imageDataUrl);
+    const modeRaw = String(state.mode ?? "ad").trim().toLowerCase();
+    const mode = modeRaw === "image" && imageDataUrl ? "image" : "ad";
+
+    return {
+      mode,
+      imageDataUrl: mode === "image" ? imageDataUrl : "",
+      updatedAt: Math.max(0, Math.trunc(Number(state.updatedAt) || Date.now()))
+    };
+  }
+
+  emitLeftBillboardUpdate(room) {
+    this.io.to(room.code).emit("billboard:left:update", this.serializeLeftBillboard(room));
+  }
+
+  setLeftBillboardImage(room, rawImageDataUrl) {
+    if (!room) {
+      return { ok: false, error: "room not found" };
+    }
+
+    const imageDataUrl = normalizeLeftBillboardImageDataUrl(rawImageDataUrl);
+    if (!imageDataUrl) {
+      return { ok: false, error: "invalid image data" };
+    }
+
+    const previous = this.serializeLeftBillboard(room);
+    if (previous.mode === "image" && previous.imageDataUrl === imageDataUrl) {
+      return {
+        ok: true,
+        changed: false,
+        state: previous
+      };
+    }
+
+    if (!room.leftBillboard || typeof room.leftBillboard !== "object") {
+      room.leftBillboard = createLeftBillboardState();
+    }
+    room.leftBillboard.mode = "image";
+    room.leftBillboard.imageDataUrl = imageDataUrl;
+    room.leftBillboard.updatedAt = Date.now();
+
+    return {
+      ok: true,
+      changed: true,
+      state: this.serializeLeftBillboard(room)
+    };
+  }
+
+  resetLeftBillboard(room) {
+    if (!room) {
+      return { ok: false, error: "room not found" };
+    }
+
+    const previous = this.serializeLeftBillboard(room);
+    if (previous.mode === "ad" && !previous.imageDataUrl) {
+      return {
+        ok: true,
+        changed: false,
+        state: previous
+      };
+    }
+
+    if (!room.leftBillboard || typeof room.leftBillboard !== "object") {
+      room.leftBillboard = createLeftBillboardState();
+    }
+    room.leftBillboard.mode = "ad";
+    room.leftBillboard.imageDataUrl = "";
+    room.leftBillboard.updatedAt = Date.now();
+
+    return {
+      ok: true,
+      changed: true,
+      state: this.serializeLeftBillboard(room)
+    };
   }
 
   serializeRightBillboard(room) {
