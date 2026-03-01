@@ -36,15 +36,30 @@ const INTRO_BOOT_VIDEO_URL = new URL("../../../mp4/grok-video.0.mp4", import.met
 const ENTRY_BGM_URL = new URL("../../../mp3/TSUKUYOMI.mp3", import.meta.url).href;
 const AD_BILLBOARD_IMAGE_URL = new URL("../../../png/AD.41415786.1.png", import.meta.url).href;
 const RIGHT_BILLBOARD_VIDEO_PATHS = Object.freeze({
+  GROK01: "mp4/av/grok-video_01.mp4",
+  GROK02: "mp4/av/grok-video_02.mp4",
+  GROK03: "mp4/av/grok-video_03.mp4",
+  GROK04: "mp4/av/grok-video_04.mp4",
   YTDown1: "mp4/av/YTDown1.mp4",
   YTDown2: "mp4/av/YTDown2.mp4",
   YTDown3: "mp4/av/YTDown3.mp4",
   YTDown4: "mp4/av/YTDown4.mp4",
-  YTDown5: "mp4/av/YTDown5.mp4",
   YTDown6: "mp4/av/YTDown6.mp4",
   YTDown7: "mp4/av/YTDown7.mp4",
   YTDown8: "mp4/av/YTDown8.mp4"
 });
+const RIGHT_BILLBOARD_VIDEO_ID_ALIASES = Object.freeze({
+  "grok-video_01": "GROK01",
+  "grok-video_02": "GROK02",
+  "grok-video_03": "GROK03",
+  "grok-video_04": "GROK04"
+});
+const RIGHT_BILLBOARD_VIDEO_ID_LOOKUP = Object.freeze(
+  Object.entries(RIGHT_BILLBOARD_VIDEO_PATHS).reduce((lookup, [id]) => {
+    lookup[String(id).toLowerCase()] = id;
+    return lookup;
+  }, { ...RIGHT_BILLBOARD_VIDEO_ID_ALIASES })
+);
 const MAX_LEFT_BILLBOARD_IMAGE_CHARS = 4_200_000;
 const DEFAULT_PORTAL_TARGET_URL =
   "http://localhost:5173/?server=http://localhost:3001&name=PLAYER";
@@ -84,10 +99,7 @@ export class GameRuntime {
       Number(this.networkContent.staleTimeoutMs) || GAME_CONSTANTS.REMOTE_STALE_TIMEOUT_MS;
 
     const initialDevicePixelRatio = window.devicePixelRatio || 1;
-    const initialPixelRatio = Math.min(
-      initialDevicePixelRatio,
-      this.mobileEnabled ? 1.5 : 2
-    );
+    const initialPixelRatio = Math.min(initialDevicePixelRatio, 1.5);
     this.maxPixelRatio = initialPixelRatio;
     this.currentPixelRatio = initialPixelRatio;
 
@@ -117,7 +129,7 @@ export class GameRuntime {
     const rendererExposure = Number(this.worldContent?.postProcessing?.exposure);
     this.renderer.toneMappingExposure = Number.isFinite(rendererExposure) ? rendererExposure : 1.08;
     this.renderer.shadowMap.enabled = !this.mobileEnabled;
-    this.renderer.shadowMap.autoUpdate = !this.mobileEnabled;
+    this.renderer.shadowMap.autoUpdate = false;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     this.textureLoader = new THREE.TextureLoader();
@@ -176,8 +188,9 @@ export class GameRuntime {
     this.surfacePaintRaycaster = new THREE.Raycaster();
     this.surfacePaintAimPoint = new THREE.Vector2(0, 0);
     this.surfacePaintTarget = null;
-    this.surfacePaintProbeInterval = this.mobileEnabled ? 0.3 : 0.2;
-    this.surfacePaintProbeClock = this.surfacePaintProbeInterval;
+    this.surfacePaintProbeIntervalIdle = this.mobileEnabled ? 0.6 : 0.45;
+    this.surfacePaintProbeIntervalActive = this.mobileEnabled ? 0.24 : 0.16;
+    this.surfacePaintProbeClock = this.surfacePaintProbeIntervalIdle;
     this.surfacePaintPromptEl = null;
     this.surfacePainterEl = null;
     this.surfacePainterTitleEl = null;
@@ -210,6 +223,7 @@ export class GameRuntime {
     this.plazaBillboardRightScreenMaterial = null;
     this.plazaBillboardRightVideoEl = null;
     this.plazaBillboardRightVideoTexture = null;
+    this.rightBillboardActiveVideoId = "";
     this.leftBillboardState = {
       mode: "ad",
       imageDataUrl: "",
@@ -249,6 +263,9 @@ export class GameRuntime {
       fps: 0
     };
     this.hudRefreshClock = 0;
+    this.mobileUiRefreshClock = 0;
+    this.spatialAudioMixClock = 0;
+    this.spatialAudioMixInterval = 0.12;
 
     this.socket = null;
     this.socketEndpoint = null;
@@ -317,10 +334,12 @@ export class GameRuntime {
     this.localChatLabel = null;
     this.localChatExpireAt = 0;
     this.chatLogMaxEntries = RUNTIME_TUNING.CHAT_LOG_MAX_ENTRIES;
+    this.chatTitleEl = document.getElementById("chat-title");
     this.chatLogEl = document.getElementById("chat-log");
     this.chatControlsEl = document.getElementById("chat-controls");
     this.chatToggleBtnEl = document.getElementById("chat-toggle");
     this.chatInputEl = document.getElementById("chat-input");
+    this.chatSendBtnEl = document.getElementById("chat-send");
     this.toolHotbarEl = document.getElementById("tool-hotbar");
     this.chalkColorsEl = document.getElementById("chalk-colors");
     this.chalkColorButtons = [];
@@ -347,6 +366,9 @@ export class GameRuntime {
     this.hostMusicPlayBtnEl = document.getElementById("host-music-play");
     this.hostMusicStopBtnEl = document.getElementById("host-music-stop");
     this.hostRightVideoSelectEl = document.getElementById("host-right-video");
+    this.hostRightVideoQuickButtons = Array.from(
+      document.querySelectorAll(".host-video-quick-btn[data-video-id]")
+    );
     this.hostPlayRightVideoBtnEl = document.getElementById("host-right-play");
     this.hostResetRightVideoBtnEl = document.getElementById("host-right-reset");
     this.hostMusicSetInFlight = false;
@@ -1420,20 +1442,11 @@ export class GameRuntime {
   }
 
   normalizeRightBillboardVideoId(rawVideoId) {
-    const text = String(rawVideoId ?? "").trim();
+    const text = String(rawVideoId ?? "").trim().toLowerCase();
     if (!text) {
       return "";
     }
-
-    const match = text.match(/^YTDown(\d+)$/i);
-    if (!match) {
-      return "";
-    }
-
-    const normalized = `YTDown${Math.trunc(Number(match[1]) || 0)}`;
-    return Object.prototype.hasOwnProperty.call(RIGHT_BILLBOARD_VIDEO_PATHS, normalized)
-      ? normalized
-      : "";
+    return RIGHT_BILLBOARD_VIDEO_ID_LOOKUP[text] ?? "";
   }
 
   normalizeRightBillboardState(rawState = {}) {
@@ -1493,6 +1506,7 @@ export class GameRuntime {
   }
 
   stopRightBillboardVideoPlayback() {
+    this.rightBillboardActiveVideoId = "";
     if (this.plazaBillboardRightVideoEl) {
       const video = this.plazaBillboardRightVideoEl;
       this.plazaBillboardRightVideoEl = null;
@@ -1577,15 +1591,26 @@ export class GameRuntime {
       return false;
     }
 
+    if (
+      this.rightBillboardActiveVideoId === videoId &&
+      this.plazaBillboardRightVideoEl &&
+      !this.plazaBillboardRightVideoEl.ended
+    ) {
+      return true;
+    }
+
     this.stopRightBillboardVideoPlayback();
 
     const video = document.createElement("video");
-    video.preload = "auto";
+    video.preload = "metadata";
     video.playsInline = true;
     video.muted = false;
     video.loop = false;
     video.crossOrigin = "anonymous";
+    video.disablePictureInPicture = true;
+    video.setAttribute("playsinline", "true");
     video.setAttribute("webkit-playsinline", "true");
+    video.setAttribute("disableremoteplayback", "true");
     video.src = sourceUrl;
     video.currentTime = 0;
 
@@ -1599,6 +1624,7 @@ export class GameRuntime {
 
     this.plazaBillboardRightVideoEl = video;
     this.plazaBillboardRightVideoTexture = texture;
+    this.rightBillboardActiveVideoId = videoId;
 
     // Keep showing the AD image until video has enough data to display,
     // so joining players see the AD briefly instead of a black frame.
@@ -1654,6 +1680,7 @@ export class GameRuntime {
     }
 
     this.rightBillboardState = next;
+    this.syncRightBillboardHostUi();
     if (next.mode === "video" && next.videoId) {
       this.startRightBillboardVideoPlayback(next.videoId);
       return true;
@@ -1661,6 +1688,24 @@ export class GameRuntime {
 
     this.showDefaultBillboardAdOnRight();
     return true;
+  }
+
+  syncRightBillboardHostUi() {
+    const state = this.normalizeRightBillboardState(this.rightBillboardState);
+    const activeVideoId = state.mode === "video" ? state.videoId : "";
+    const select = this.hostRightVideoSelectEl;
+    if (select && activeVideoId) {
+      const hasOption = Array.from(select.options ?? []).some(
+        (option) => String(option.value ?? "") === activeVideoId
+      );
+      if (hasOption && select.value !== activeVideoId) {
+        select.value = activeVideoId;
+      }
+    }
+    for (const button of this.hostRightVideoQuickButtons ?? []) {
+      const buttonVideoId = this.normalizeRightBillboardVideoId(button.dataset.videoId ?? "");
+      button.classList.toggle("active", Boolean(activeVideoId && buttonVideoId === activeVideoId));
+    }
   }
 
   handleRightBillboardVideoFinished(rawVideoId) {
@@ -1807,7 +1852,7 @@ export class GameRuntime {
         this.appendChatLine("", `우측 전광판 재생 실패: ${reason}`, "system");
         return;
       }
-      this.applyRightBillboardState(response?.state ?? {}, { force: true });
+      this.applyRightBillboardState(response?.state ?? {}, { force: Boolean(response?.changed) });
     });
   }
 
@@ -1852,7 +1897,7 @@ export class GameRuntime {
         }
         return;
       }
-      this.applyRightBillboardState(response?.state ?? {}, { force: true });
+      this.applyRightBillboardState(response?.state ?? {}, { force: Boolean(response?.changed) });
     });
   }
 
@@ -2383,7 +2428,7 @@ export class GameRuntime {
   updateSurfacePaintPrompt(delta = 0) {
     if (!this.isSurfacePaintFeatureEnabled()) {
       this.surfacePaintTarget = null;
-      this.surfacePaintProbeClock = this.surfacePaintProbeInterval;
+      this.surfacePaintProbeClock = this.surfacePaintProbeIntervalIdle;
       this.surfacePaintPromptEl?.classList.add("hidden");
       if (this.mobilePaintBtnEl) {
         this.mobilePaintBtnEl.classList.add("hidden");
@@ -2394,7 +2439,7 @@ export class GameRuntime {
 
     if (this.chatOpen || this.surfacePainterOpen || !this.canMovePlayer()) {
       this.surfacePaintTarget = null;
-      this.surfacePaintProbeClock = this.surfacePaintProbeInterval;
+      this.surfacePaintProbeClock = this.surfacePaintProbeIntervalIdle;
       this.surfacePaintPromptEl?.classList.add("hidden");
       if (this.mobilePaintBtnEl) {
         this.mobilePaintBtnEl.classList.add("hidden");
@@ -2404,8 +2449,11 @@ export class GameRuntime {
     }
 
     this.surfacePaintProbeClock += Math.max(0, Number(delta) || 0);
+    const probeInterval = this.surfacePaintTarget
+      ? this.surfacePaintProbeIntervalActive
+      : this.surfacePaintProbeIntervalIdle;
     const shouldProbe =
-      this.surfacePaintProbeClock >= this.surfacePaintProbeInterval || !this.surfacePaintTarget;
+      this.surfacePaintProbeClock >= probeInterval || !this.surfacePaintTarget;
     if (shouldProbe) {
       this.surfacePaintProbeClock = 0;
       this.surfacePaintTarget = this.getSurfacePaintTarget();
@@ -3059,7 +3107,10 @@ export class GameRuntime {
     this.chalkDrawingActive = false;
     this.chalkLastStamp = null;
     this.hideNicknameGate();
-    this.setFlowHeadline("다리 입장", "검문소 NPC 쪽으로 이동하세요.");
+    this.setMirrorGateVisible(false);
+    this.lastSafePosition.copy(this.playerPosition);
+    this.pendingAuthoritativeStateSync = true;
+    this.requestAuthoritativeStateSync();
     this.hud.setStatus(this.getStatusText());
     this.syncGameplayUiForFlow();
     this.ensureEntryMusicPlayback();
@@ -3179,6 +3230,9 @@ export class GameRuntime {
     }
     const mobile = Boolean(this.mobileEnabled);
     document.body.classList.toggle("is-mobile-ui", mobile);
+    if (!mobile) {
+      document.body.classList.remove("chat-mobile-open");
+    }
 
     const hudUi = document.getElementById("hud-ui");
     const hudStatusRow = document.getElementById("hud-row-status");
@@ -3189,31 +3243,21 @@ export class GameRuntime {
     const hubFlowUi = document.getElementById("hub-flow-ui");
     const rosterHint = document.querySelector?.(".player-roster-hint");
 
-    hudStatusRow?.classList.toggle("hidden", mobile);
-    hudPositionRow?.classList.toggle("hidden", mobile);
-    hudFpsRow?.classList.toggle("hidden", mobile);
-    hudPlayersKey?.classList.toggle("hidden", mobile);
-    hubFlowUi?.classList.toggle("hidden", mobile);
-    rosterHint?.classList.toggle("hidden", mobile);
+    hudStatusRow?.classList.add("hidden");
+    hudPositionRow?.classList.add("hidden");
+    hudFpsRow?.classList.add("hidden");
+    hudPlayersKey?.classList.add("hidden");
+    hubFlowUi?.classList.add("hidden");
+    rosterHint?.classList.add("hidden");
 
     if (hudUi) {
-      if (mobile) {
-        hudUi.style.background = "transparent";
-        hudUi.style.border = "none";
-        hudUi.style.backdropFilter = "none";
-        hudUi.style.boxShadow = "none";
-        hudUi.style.padding = "0";
-        hudUi.style.minWidth = "0";
-        hudUi.style.gap = "0";
-      } else {
-        hudUi.style.background = "";
-        hudUi.style.border = "";
-        hudUi.style.backdropFilter = "";
-        hudUi.style.boxShadow = "";
-        hudUi.style.padding = "";
-        hudUi.style.minWidth = "";
-        hudUi.style.gap = "";
-      }
+      hudUi.style.background = "transparent";
+      hudUi.style.border = "none";
+      hudUi.style.backdropFilter = "none";
+      hudUi.style.boxShadow = "none";
+      hudUi.style.padding = "0";
+      hudUi.style.minWidth = "0";
+      hudUi.style.gap = "0";
     }
   }
 
@@ -3285,8 +3329,9 @@ export class GameRuntime {
     this.mobileLookLastX = touch.clientX;
     this.mobileLookLastY = touch.clientY;
 
-    this.yaw -= deltaX * 0.003;
-    this.pitch -= deltaY * 0.0024;
+    // Increase mobile drag sensitivity to reduce sluggish camera response.
+    this.yaw -= deltaX * 0.005;
+    this.pitch -= deltaY * 0.0038;
     this.pitch = THREE.MathUtils.clamp(this.pitch, -1.52, 1.52);
   }
 
@@ -3381,23 +3426,10 @@ export class GameRuntime {
   }
 
   setFlowHeadline(title, subtitle) {
-    if (this.hubFlowUiEl && !this.mobileEnabled) {
-      this.hubFlowUiEl.classList.remove("hidden");
-    }
-    const nextTitle = String(title ?? "").trim();
-    const nextSubtitle = String(subtitle ?? "").trim();
-    if (this.hubPhaseTitleEl) {
-      if (this.flowHeadlineCache.title !== nextTitle) {
-        this.hubPhaseTitleEl.textContent = nextTitle;
-      }
-    }
-    if (this.hubPhaseSubtitleEl) {
-      if (this.flowHeadlineCache.subtitle !== nextSubtitle) {
-        this.hubPhaseSubtitleEl.textContent = nextSubtitle;
-      }
-    }
-    this.flowHeadlineCache.title = nextTitle;
-    this.flowHeadlineCache.subtitle = nextSubtitle;
+    // Hub headline overlay is intentionally suppressed for cleaner gameplay.
+    this.hubFlowUiEl?.classList.add("hidden");
+    this.flowHeadlineCache.title = String(title ?? "").trim();
+    this.flowHeadlineCache.subtitle = String(subtitle ?? "").trim();
   }
 
   getLookYaw(from, to) {
@@ -3416,11 +3448,13 @@ export class GameRuntime {
     if (!this.hubFlowEnabled) {
       return true;
     }
-    return (
-      this.flowStage === "bridge_approach" ||
-      this.flowStage === "bridge_mirror" ||
-      this.flowStage === "city_live"
-    );
+    if (this.flowStage === "portal_transfer") {
+      return false;
+    }
+    if (this.bootIntroVideoPlaying) {
+      return false;
+    }
+    return true;
   }
 
   canUseGameplayControls() {
@@ -3514,98 +3548,73 @@ export class GameRuntime {
     }
 
     if (this.flowStage === "bridge_approach") {
-      const npcDistance = this.getNpcDistance();
-      this.setFlowHeadline(
-        "다리 입장",
-        `검문소 NPC까지 거리: ${Math.max(0, Math.ceil(npcDistance))}m`
-      );
-      this.updatePortalVisual();
-      if (npcDistance <= this.bridgeNpcTriggerRadius) {
-        this.flowStage = "bridge_dialogue";
-        this.keys.clear();
-        this.chalkDrawingActive = false;
-        this.chalkLastStamp = null;
-        if (document.pointerLockElement === this.renderer.domElement) {
-          document.exitPointerLock?.();
-        }
-        this.playNpcGreeting();
-        if (this.flowStage === "bridge_dialogue") {
-          this.setFlowHeadline("검문 브리핑", "NPC 인사를 수신 중...");
-        }
-        this.hud.setStatus(this.getStatusText());
-      }
-      return;
-    }
-
-    if (this.flowStage === "bridge_dialogue") {
-      this.updatePortalVisual();
-      return;
-    }
-
-    if (this.flowStage === "bridge_name") {
-      this.updatePortalVisual();
-      return;
-    }
-
-    if (this.flowStage === "bridge_mirror") {
-      const gateDistance = Math.max(
-        0,
-        Math.ceil(
-          Math.hypot(
-            this.playerPosition.x - this.bridgeMirrorPosition.x,
-            this.playerPosition.z - this.bridgeMirrorPosition.z
-          )
-        )
-      );
-      this.setFlowHeadline(
-        "입장 동기화",
-        `신사문 아래를 통과하세요 (${gateDistance}m)`
-      );
       this.updatePortalVisual();
       if (this.isPlayerPassingShrineGate()) {
-        this.cityIntroStart.copy(this.playerPosition);
-        this.cityIntroEnd.copy(this.citySpawn);
-        this.flowStage = "city_intro";
+        this.flowStage = "city_live";
         this.flowClock = 0;
         this.bridgeBoundaryDingTriggered = false;
         this.bridgeBoundaryDingClock = 0;
         this.keys.clear();
         this.setMirrorGateVisible(false);
-        if (document.pointerLockElement === this.renderer.domElement) {
-          document.exitPointerLock?.();
-        }
-        this.setFlowHeadline("도시 이동", "도시 게이트로 이동 중...");
+        this.playerPosition.copy(this.citySpawn);
+        this.lastSafePosition.copy(this.playerPosition);
+        this.pendingAuthoritativeStateSync = true;
+        this.requestAuthoritativeStateSync();
+        this.setFlowHeadline("도시 라이브", "자유 이동");
         this.hud.setStatus(this.getStatusText());
+        this.syncGameplayUiForFlow();
+      }
+      return;
+    }
+
+    if (this.flowStage === "bridge_dialogue") {
+      // Legacy stage: return to free-move bridge flow.
+      this.flowStage = "bridge_approach";
+      this.flowClock = 0;
+      this.updatePortalVisual();
+      return;
+    }
+
+    if (this.flowStage === "bridge_name") {
+      // Legacy stage: return to free-move bridge flow.
+      this.flowStage = "bridge_approach";
+      this.flowClock = 0;
+      this.updatePortalVisual();
+      return;
+    }
+
+    if (this.flowStage === "bridge_mirror") {
+      this.updatePortalVisual();
+      if (this.isPlayerPassingShrineGate()) {
+        this.flowStage = "city_live";
+        this.flowClock = 0;
+        this.bridgeBoundaryDingTriggered = false;
+        this.bridgeBoundaryDingClock = 0;
+        this.keys.clear();
+        this.setMirrorGateVisible(false);
+        this.lastSafePosition.copy(this.playerPosition);
+        this.pendingAuthoritativeStateSync = true;
+        this.requestAuthoritativeStateSync();
+        this.setFlowHeadline("도시 라이브", "자유 이동");
+        this.hud.setStatus(this.getStatusText());
+        this.syncGameplayUiForFlow();
       }
       return;
     }
 
     if (this.flowStage === "city_intro") {
-      this.flowClock += delta;
-      const alpha = THREE.MathUtils.clamp(this.flowClock / this.hubIntroDuration, 0, 1);
-      this.playerPosition.lerpVectors(this.cityIntroStart, this.cityIntroEnd, alpha);
-      const secondsLeft = Math.max(0, Math.ceil(this.hubIntroDuration - this.flowClock));
-      this.setFlowHeadline("도시 이동", `${secondsLeft}초 후 도시 게이트가 열립니다`);
-      if (!this.bridgeBoundaryDingTriggered) {
-        const dx = this.playerPosition.x - this.bridgeCityEntry.x;
-        const dz = this.playerPosition.z - this.bridgeCityEntry.z;
-        if (dx * dx + dz * dz <= this.bridgeBoundaryRadius * this.bridgeBoundaryRadius) {
-          this.triggerBridgeBoundaryDing();
-        }
-      }
-      this.updatePortalVisual();
-      if (alpha >= 1) {
-        this.flowStage = "city_live";
-        this.flowClock = 0;
-        this.playerPosition.copy(this.citySpawn);
-        this.lastSafePosition.copy(this.playerPosition);
-        this.yaw = this.getLookYaw(this.citySpawn, this.portalFloorPosition);
-        this.pitch = -0.02;
-        this.pendingAuthoritativeStateSync = true;
-        this.requestAuthoritativeStateSync();
-        this.hud.setStatus(this.getStatusText());
-        this.syncGameplayUiForFlow();
-      }
+      // Legacy compatibility: disable forced auto-move and promote immediately.
+      this.flowStage = "city_live";
+      this.flowClock = 0;
+      this.playerPosition.copy(this.citySpawn);
+      this.lastSafePosition.copy(this.playerPosition);
+      this.yaw = this.getLookYaw(this.citySpawn, this.portalFloorPosition);
+      this.pitch = -0.02;
+      this.pendingAuthoritativeStateSync = true;
+      this.requestAuthoritativeStateSync();
+      this.setFlowHeadline("도시 라이브", "자유 이동");
+      this.hud.setStatus(this.getStatusText());
+      this.syncGameplayUiForFlow();
       return;
     }
 
@@ -4213,6 +4222,10 @@ export class GameRuntime {
     if (this.hostMusicStopBtnEl) {
       this.hostMusicStopBtnEl.disabled = !canControlPortal || controlsBusy;
     }
+    for (const button of this.hostRightVideoQuickButtons ?? []) {
+      button.disabled = !canControlPortal || controlsBusy;
+    }
+    this.syncRightBillboardHostUi();
   }
 
   normalizePortalSchedule(raw = {}) {
@@ -5287,8 +5300,8 @@ export class GameRuntime {
     let water;
     try {
       water = new Water(new THREE.PlaneGeometry(width, depth), {
-        textureWidth: this.mobileEnabled ? 256 : 768,
-        textureHeight: this.mobileEnabled ? 256 : 768,
+        textureWidth: this.mobileEnabled ? 192 : 448,
+        textureHeight: this.mobileEnabled ? 192 : 448,
         waterNormals: normalMap,
         sunDirection: this.sunLight
           ? this.sunLight.position.clone().normalize()
@@ -5474,25 +5487,25 @@ export class GameRuntime {
       upperArm.position.set(side * shoulderX, shoulderY, shoulderZ);
       upperArm.rotation.x = bendX;
       upperArm.rotation.z = -side * upperArmRoll;
-      upperArm.castShadow = true;
+      upperArm.castShadow = false;
 
       const forearm = new THREE.Mesh(forearmGeometry, sleeve);
       forearm.position.set(side * (shoulderX + 0.03), elbowY, elbowZ);
       forearm.rotation.x = bendX + 0.05;
       forearm.rotation.z = -side * forearmRoll;
-      forearm.castShadow = true;
+      forearm.castShadow = false;
 
       const palm = new THREE.Mesh(palmGeometry, skin);
       palm.position.set(side * (shoulderX + 0.05), handY, handZ);
       palm.scale.set(1.12, 0.76, 1.26);
       palm.rotation.x = bendX + 0.09;
-      palm.castShadow = true;
+      palm.castShadow = false;
 
       const thumb = new THREE.Mesh(thumbGeometry, skin);
       thumb.position.set(side * (shoulderX + 0.1), handY - 0.005, handZ - 0.01);
       thumb.rotation.x = 0.52;
       thumb.rotation.z = -side * 0.86;
-      thumb.castShadow = true;
+      thumb.castShadow = false;
 
       const fingerOffsets = [
         [0.03, 0.026],
@@ -5508,7 +5521,7 @@ export class GameRuntime {
         );
         finger.rotation.x = 0.36;
         finger.rotation.z = -side * 0.15;
-        finger.castShadow = true;
+        finger.castShadow = false;
         return finger;
       });
 
@@ -5804,6 +5817,11 @@ export class GameRuntime {
         }
       });
     }
+    if (this.chatSendBtnEl) {
+      this.chatSendBtnEl.addEventListener("click", () => {
+        this.sendChatMessage();
+      });
+    }
     if (this.chatLogEl) {
       this.chatLogEl.addEventListener("pointerdown", () => {
         if (!this.mobileEnabled || this.chatOpen || !this.canUseGameplayControls()) {
@@ -5944,6 +5962,18 @@ export class GameRuntime {
     if (this.hostPlayRightVideoBtnEl) {
       this.hostPlayRightVideoBtnEl.addEventListener("click", () => {
         const videoId = String(this.hostRightVideoSelectEl?.value ?? "").trim();
+        this.requestRightBillboardVideoPlay(videoId);
+      });
+    }
+    for (const button of this.hostRightVideoQuickButtons ?? []) {
+      button.addEventListener("click", () => {
+        const videoId = this.normalizeRightBillboardVideoId(button.dataset.videoId ?? "");
+        if (!videoId) {
+          return;
+        }
+        if (this.hostRightVideoSelectEl) {
+          this.hostRightVideoSelectEl.value = videoId;
+        }
         this.requestRightBillboardVideoPlay(videoId);
       });
     }
@@ -6187,6 +6217,9 @@ export class GameRuntime {
     if (!this.chatLogEl) {
       this.chatLogEl = document.getElementById("chat-log");
     }
+    if (!this.chatTitleEl) {
+      this.chatTitleEl = document.getElementById("chat-title");
+    }
     if (!this.chatControlsEl) {
       this.chatControlsEl = document.getElementById("chat-controls");
     }
@@ -6195,6 +6228,9 @@ export class GameRuntime {
     }
     if (!this.chatInputEl) {
       this.chatInputEl = document.getElementById("chat-input");
+    }
+    if (!this.chatSendBtnEl) {
+      this.chatSendBtnEl = document.getElementById("chat-send");
     }
     if (!this.toolHotbarEl) {
       this.toolHotbarEl = document.getElementById("tool-hotbar");
@@ -6243,6 +6279,11 @@ export class GameRuntime {
     }
     if (!this.hostRightVideoSelectEl) {
       this.hostRightVideoSelectEl = document.getElementById("host-right-video");
+    }
+    if (!this.hostRightVideoQuickButtons || this.hostRightVideoQuickButtons.length === 0) {
+      this.hostRightVideoQuickButtons = Array.from(
+        document.querySelectorAll(".host-video-quick-btn[data-video-id]")
+      );
     }
     if (!this.hostPlayRightVideoBtnEl) {
       this.hostPlayRightVideoBtnEl = document.getElementById("host-right-play");
@@ -6347,13 +6388,22 @@ export class GameRuntime {
 
     this.chatOpen = Boolean(open);
     if (this.chatUiEl) {
-      this.chatUiEl.classList.toggle("collapsed", this.mobileEnabled && !this.chatOpen);
+      const collapsed = !this.chatOpen;
+      this.chatUiEl.classList.toggle("collapsed", collapsed);
+      this.chatUiEl.classList.toggle("mobile-fullscreen", this.mobileEnabled && this.chatOpen);
+      this.chatUiEl.classList.toggle("hidden", this.mobileEnabled && !this.chatOpen);
     }
     if (this.chatControlsEl) {
       this.chatControlsEl.classList.toggle("hidden", !this.chatOpen);
     }
+    if (typeof document !== "undefined" && document.body) {
+      document.body.classList.toggle("chat-mobile-open", this.mobileEnabled && this.chatOpen);
+    }
+    if (this.chatTitleEl) {
+      this.chatTitleEl.textContent = this.chatOpen ? "실시간 채팅" : "채팅";
+    }
     if (this.chatToggleBtnEl) {
-      const label = this.chatOpen ? "채팅 닫기" : "채팅 열기";
+      const label = this.chatOpen ? "닫기" : "채팅";
       if (this.chatToggleBtnEl.textContent !== label) {
         this.chatToggleBtnEl.textContent = label;
       }
@@ -7025,19 +7075,27 @@ export class GameRuntime {
 
   tick(delta) {
     this.elapsedSeconds += delta;
+    this.mobileUiRefreshClock += delta;
+    this.spatialAudioMixClock += delta;
     this.updateMovement(delta);
     this.updateHubFlow(delta);
     this.updateChalkPickupPrompt();
     this.updateSurfacePaintPrompt(delta);
     this.updatePortalTimeBillboard(delta);
-    this.syncMobileUiState();
+    if (this.mobileUiRefreshClock >= 0.12) {
+      this.mobileUiRefreshClock = 0;
+      this.syncMobileUiState();
+    }
     this.updateChalkDrawing();
     this.updateCloudLayer(delta);
     this.updateOcean(delta);
     this.updateRemotePlayers(delta);
     this.updateLocalChatBubble();
     this.emitLocalSync(delta);
-    this.updateSpatialAudioMix();
+    if (this.spatialAudioMixClock >= this.spatialAudioMixInterval) {
+      this.spatialAudioMixClock = 0;
+      this.updateSpatialAudioMix();
+    }
     this.updateDynamicResolution(delta);
     this.updateHud(delta);
   }
@@ -7239,6 +7297,9 @@ export class GameRuntime {
       return false;
     }
 
+    const nearBottom =
+      this.chatLogEl.scrollHeight - this.chatLogEl.scrollTop - this.chatLogEl.clientHeight < 20;
+
     const line = document.createElement("p");
     line.className = `chat-line ${type}`;
 
@@ -7265,7 +7326,9 @@ export class GameRuntime {
     while (this.chatLogEl.childElementCount > this.chatLogMaxEntries) {
       this.chatLogEl.firstElementChild?.remove();
     }
-    this.chatLogEl.scrollTop = this.chatLogEl.scrollHeight;
+    if (nearBottom || type === "self" || !this.chatOpen) {
+      this.chatLogEl.scrollTop = this.chatLogEl.scrollHeight;
+    }
     return true;
   }
 
@@ -7281,8 +7344,13 @@ export class GameRuntime {
     }
     if (this.handleChatCommand(rawInput)) {
       this.chatInputEl.value = "";
-      this.setChatOpen(false);
-      this.chatInputEl.blur();
+      if (this.mobileEnabled) {
+        this.setChatOpen(true);
+        this.chatInputEl.focus();
+      } else {
+        this.setChatOpen(false);
+        this.chatInputEl.blur();
+      }
       return;
     }
 
@@ -7305,8 +7373,13 @@ export class GameRuntime {
     }
 
     this.chatInputEl.value = "";
-    this.setChatOpen(false);
-    this.chatInputEl.blur();
+    if (this.mobileEnabled) {
+      this.setChatOpen(true);
+      this.chatInputEl.focus();
+    } else {
+      this.setChatOpen(false);
+      this.chatInputEl.blur();
+    }
   }
 
   showLocalChatBubble(text) {
@@ -7353,7 +7426,9 @@ export class GameRuntime {
       document.exitPointerLock?.();
     }
     this.chatInputEl.focus();
-    this.chatInputEl.select();
+    if (!this.mobileEnabled) {
+      this.chatInputEl.select();
+    }
   }
 
   isTextInputTarget(target) {
@@ -7813,7 +7888,7 @@ export class GameRuntime {
 
   getDevicePixelRatioCap() {
     if (!this.mobileEnabled) {
-      return 2;
+      return 1.5;
     }
     return this.isLowSpecMobile ? 1.25 : 1.5;
   }
@@ -7875,7 +7950,8 @@ export class GameRuntime {
   applyQualityProfile() {
     const shadowEnabled = !this.mobileEnabled;
     this.renderer.shadowMap.enabled = shadowEnabled;
-    this.renderer.shadowMap.autoUpdate = shadowEnabled;
+    // Shadows are mostly static in this map; avoid per-frame shadow-map renders.
+    this.renderer.shadowMap.autoUpdate = false;
 
     if (this.sunLight) {
       const sunConfig = this.worldContent.lights.sun;
@@ -7888,6 +7964,9 @@ export class GameRuntime {
         this.sunLight.shadow.mapSize.y !== shadowMapSize
       ) {
         this.sunLight.shadow.mapSize.set(shadowMapSize, shadowMapSize);
+        this.sunLight.shadow.needsUpdate = true;
+      }
+      if (shadowEnabled) {
         this.sunLight.shadow.needsUpdate = true;
       }
     }
