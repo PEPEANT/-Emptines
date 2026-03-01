@@ -18,7 +18,7 @@ export const DEFAULT_SERVER_SIM_CONFIG = {
   playerGravity: -24,
   jumpForce: 8.8,
   worldLimit: 120,
-  inputStaleMs: 380,
+  inputStaleMs: 900,
   minInputIntervalMs: 8,
   maxInputPerSecond: 90
 };

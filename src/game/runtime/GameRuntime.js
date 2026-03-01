@@ -329,6 +329,7 @@ export class GameRuntime {
     this.localChatLabel = null;
     this.localChatExpireAt = 0;
     this.loopRafCallback = () => this.loop();
+    this.lastActiveMoveInputAt = 0;
     this.chatLogMaxEntries = RUNTIME_TUNING.CHAT_LOG_MAX_ENTRIES;
     this.chatTitleEl = document.getElementById("chat-title");
     this.chatLogEl = document.getElementById("chat-log");
@@ -3843,7 +3844,8 @@ export class GameRuntime {
   }
 
   getBoundaryHardLimit() {
-    return this.getBoundarySoftLimit() + this.boundaryHardLimitPadding;
+    // Keep movement clamp aligned with authoritative server world limit.
+    return Math.min(this.getBoundarySoftLimit(), GAME_CONSTANTS.WORLD_LIMIT);
   }
 
   canUseBoundaryGuard() {
@@ -7014,6 +7016,8 @@ export class GameRuntime {
     const dy = targetY - this.playerPosition.y;
     const dz = targetZ - this.playerPosition.z;
     const errorSq = dx * dx + dy * dy + dz * dz;
+    const now = performance.now();
+    const recentlyMoving = now - this.lastActiveMoveInputAt < 240;
 
     // XZ-only error for snap decision: ignore Y so a jump doesn't cause a snap.
     const xzErrorSq = dx * dx + dz * dz;
@@ -7034,10 +7038,18 @@ export class GameRuntime {
       return;
     }
 
-    // Soft XZ correction: threshold 0.09 (0.3 m dead zone) prevents micro-jitter
-    // while still stopping error from accumulating to snap range.
-    if (xzErrorSq > 0.09) {
-      const alpha = xzErrorSq > 9 ? 0.28 : xzErrorSq > 2.25 ? 0.16 : 0.09;
+    // Soften correction while actively moving to avoid visible tug-of-war on higher RTT links.
+    const xzThresholdSq = recentlyMoving ? 1.0 : 0.25;
+    if (xzErrorSq > xzThresholdSq) {
+      const alpha = recentlyMoving
+        ? xzErrorSq > 9
+          ? 0.12
+          : 0.05
+        : xzErrorSq > 9
+          ? 0.2
+          : xzErrorSq > 2.25
+            ? 0.1
+            : 0.06;
       this.playerPosition.x += dx * alpha;
       this.playerPosition.z += dz * alpha;
     }
@@ -7045,7 +7057,7 @@ export class GameRuntime {
     // Y correction only when server is ABOVE client (client fell through floor).
     // Never correct Y when client is above server — that would cancel a jump.
     if (dy > 0.25) {
-      this.playerPosition.y += dy * 0.18;
+      this.playerPosition.y += dy * 0.14;
       if (dy > 1.0) {
         this.verticalVelocity = 0;
         this.onGround = targetY <= GAME_CONSTANTS.PLAYER_HEIGHT + 0.001;
@@ -7273,6 +7285,9 @@ export class GameRuntime {
     const keyForward = movement.forward;
     const keyStrafe = movement.strafe;
     const sprinting = movement.sprinting;
+    if (movementEnabled && (Math.abs(keyForward) > 0.001 || Math.abs(keyStrafe) > 0.001)) {
+      this.lastActiveMoveInputAt = performance.now();
+    }
     const speed = sprinting ? GAME_CONSTANTS.PLAYER_SPRINT : GAME_CONSTANTS.PLAYER_SPEED;
 
     if (keyForward !== 0 || keyStrafe !== 0) {
@@ -7953,8 +7968,8 @@ export class GameRuntime {
   }
 
   loop() {
-    // Keep client prediction closer to server simulation even when FPS drops below 20.
-    const delta = Math.min(this.clock.getDelta(), 0.1);
+    // Reduce drift when FPS drops by allowing larger catch-up step.
+    const delta = Math.min(this.clock.getDelta(), 0.2);
     this.tick(delta);
     if (this.composer) {
       this.composer.render();
