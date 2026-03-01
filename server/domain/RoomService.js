@@ -693,7 +693,7 @@ export class RoomService {
     if (room.hostId && room.players.has(room.hostId)) {
       return;
     }
-    room.hostId = room.players.keys().next().value ?? null;
+    room.hostId = null;
   }
 
   isHost(room, socketId) {
