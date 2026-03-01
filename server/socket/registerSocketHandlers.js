@@ -197,6 +197,10 @@ export function registerSocketHandlers({
       });
     });
 
+    socket.on("paint:state:request", () => {
+      emitSurfacePaintState();
+    });
+
     socket.on("room:host:claim", (payload = {}, ackFn) => {
       const room = roomService.getRoomBySocket(socket);
       if (!room) {

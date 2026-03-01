@@ -75,6 +75,30 @@ function normalizeSurfaceImageDataUrl(rawValue) {
   return value;
 }
 
+function normalizeSurfacePaintEntry(rawValue, fallbackUpdatedAt = Date.now()) {
+  if (typeof rawValue === "string") {
+    const imageDataUrl = normalizeSurfaceImageDataUrl(rawValue);
+    if (!imageDataUrl) {
+      return null;
+    }
+    return {
+      imageDataUrl,
+      updatedAt: Math.max(0, Math.trunc(Number(fallbackUpdatedAt) || Date.now()))
+    };
+  }
+
+  const imageDataUrl = normalizeSurfaceImageDataUrl(
+    rawValue?.imageDataUrl ?? rawValue?.dataUrl ?? ""
+  );
+  if (!imageDataUrl) {
+    return null;
+  }
+  return {
+    imageDataUrl,
+    updatedAt: Math.max(0, Math.trunc(Number(rawValue?.updatedAt) || Number(fallbackUpdatedAt) || Date.now()))
+  };
+}
+
 function normalizeSharedAudioDataUrl(rawValue) {
   const value = String(rawValue ?? "").trim();
   if (!value || value.length > MAX_SHARED_AUDIO_DATA_URL_CHARS) {
@@ -242,15 +266,16 @@ export class RoomService {
       return;
     }
 
+    const savedAt = Math.max(0, Math.trunc(Number(parsed?.savedAt) || Date.now()));
     const surfaces = Array.isArray(parsed?.surfaces) ? parsed.surfaces : [];
     const restored = new Map();
     for (const entry of surfaces) {
       const surfaceId = normalizeSurfaceId(entry?.surfaceId);
-      const imageDataUrl = normalizeSurfaceImageDataUrl(entry?.imageDataUrl);
-      if (!surfaceId || !imageDataUrl) {
+      const paintEntry = normalizeSurfacePaintEntry(entry, savedAt);
+      if (!surfaceId || !paintEntry) {
         continue;
       }
-      restored.set(surfaceId, imageDataUrl);
+      restored.set(surfaceId, paintEntry);
     }
 
     const room = this.getDefaultRoom();
@@ -661,11 +686,15 @@ export class RoomService {
     const list = [];
     for (const [surfaceIdRaw, imageDataUrlRaw] of room.surfacePaint.entries()) {
       const surfaceId = normalizeSurfaceId(surfaceIdRaw);
-      const imageDataUrl = normalizeSurfaceImageDataUrl(imageDataUrlRaw);
-      if (!surfaceId || !imageDataUrl) {
+      const paintEntry = normalizeSurfacePaintEntry(imageDataUrlRaw);
+      if (!surfaceId || !paintEntry) {
         continue;
       }
-      list.push({ surfaceId, imageDataUrl });
+      list.push({
+        surfaceId,
+        imageDataUrl: paintEntry.imageDataUrl,
+        updatedAt: paintEntry.updatedAt
+      });
     }
     return list;
   }
@@ -689,25 +718,29 @@ export class RoomService {
       room.surfacePaint = new Map();
     }
 
-    const previous = room.surfacePaint.get(surfaceId);
-    if (previous === imageDataUrl) {
+    const previous = normalizeSurfacePaintEntry(room.surfacePaint.get(surfaceId), 0);
+    if (previous && previous.imageDataUrl === imageDataUrl) {
       return {
         ok: true,
         changed: false,
         surfaceId,
         imageDataUrl,
-        updatedAt: Date.now()
+        updatedAt: previous.updatedAt
       };
     }
 
-    room.surfacePaint.set(surfaceId, imageDataUrl);
+    const updatedAt = Date.now();
+    room.surfacePaint.set(surfaceId, {
+      imageDataUrl,
+      updatedAt
+    });
     this.scheduleSurfacePaintSave();
     return {
       ok: true,
       changed: true,
       surfaceId,
       imageDataUrl,
-      updatedAt: Date.now()
+      updatedAt
     };
   }
 

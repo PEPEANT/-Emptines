@@ -185,6 +185,7 @@ export class GameRuntime {
     this.paintableSurfaceMeshes = [];
     this.paintableSurfaceMap = new Map();
     this.surfacePaintState = new Map();
+    this.surfacePaintUpdatedAt = new Map();
     this.surfacePaintRaycaster = new THREE.Raycaster();
     this.surfacePaintAimPoint = new THREE.Vector2(0, 0);
     this.surfacePaintTarget = null;
@@ -214,6 +215,7 @@ export class GameRuntime {
     this.surfacePainterSaveInFlight = false;
     this.surfacePaintSendInFlight = false;
     this.surfacePainterEraserEnabled = false;
+    this.surfacePainterCanvasLoadNonce = 0;
     this.surfacePaintProbeWorldPosition = new THREE.Vector3();
     this.surfacePaintProbeCameraLocal = new THREE.Vector3();
     this.surfacePaintProbeForwardVector = new THREE.Vector3();
@@ -2271,9 +2273,12 @@ export class GameRuntime {
 
     for (let materialIndex = 0; materialIndex < BOX_FACE_KEYS.length; materialIndex += 1) {
       const surfaceId = `${surfaceBaseId}:${BOX_FACE_KEYS[materialIndex]}`;
+      const materials = Array.isArray(mesh?.material) ? mesh.material : [mesh?.material];
+      const baseMap = materials[materialIndex]?.map ?? null;
       this.paintableSurfaceMap.set(surfaceId, {
         mesh,
         materialIndex,
+        baseMap,
         revision: 0
       });
       const existing = this.surfacePaintState.get(surfaceId);
@@ -2514,8 +2519,12 @@ export class GameRuntime {
       return;
     }
 
+    const loadNonce = ++this.surfacePainterCanvasLoadNonce;
     const image = new Image();
     image.onload = () => {
+      if (loadNonce !== this.surfacePainterCanvasLoadNonce) {
+        return;
+      }
       context.drawImage(image, 0, 0, canvas.width, canvas.height);
     };
     image.src = imageDataUrl;
@@ -2572,6 +2581,7 @@ export class GameRuntime {
     this.surfacePainterPointerId = null;
     this.surfacePainterTouchId = null;
     this.surfacePainterTargetId = "";
+    this.surfacePainterCanvasLoadNonce += 1;
     this.surfacePainterEl?.classList.add("hidden");
     this.updateSurfacePaintPrompt();
     this.syncMobileUiState();
@@ -2716,6 +2726,30 @@ export class GameRuntime {
     this.surfacePainterPointerId = null;
   }
 
+  resetSurfacePaintTexture(surfaceId) {
+    const entry = this.paintableSurfaceMap.get(surfaceId);
+    if (!entry) {
+      return false;
+    }
+    const mesh = entry.mesh;
+    const materialIndex = Math.trunc(Number(entry.materialIndex));
+    const materials = Array.isArray(mesh?.material) ? mesh.material : [mesh?.material];
+    const material = materials[materialIndex];
+    if (!material) {
+      return false;
+    }
+
+    entry.revision = Math.max(0, Math.trunc(Number(entry.revision) || 0)) + 1;
+    const baseMap = entry.baseMap ?? null;
+    const previous = material.map ?? null;
+    material.map = baseMap;
+    material.needsUpdate = true;
+    if (previous && previous !== baseMap) {
+      previous.dispose?.();
+    }
+    return true;
+  }
+
   applySurfacePaintTexture(surfaceId, imageDataUrl) {
     const entry = this.paintableSurfaceMap.get(surfaceId);
     if (!entry) {
@@ -2745,7 +2779,7 @@ export class GameRuntime {
         const previous = material.map;
         material.map = texture;
         material.needsUpdate = true;
-        if (previous && previous !== texture) {
+        if (previous && previous !== texture && previous !== (entry.baseMap ?? null)) {
           previous.dispose?.();
         }
       },
@@ -2761,7 +2795,13 @@ export class GameRuntime {
     if (!surfaceId || !imageDataUrl || !imageDataUrl.startsWith("data:image/")) {
       return false;
     }
+    const updatedAt = Math.max(0, Math.trunc(Number(payload?.updatedAt) || Date.now()));
+    const previousUpdatedAt = Math.max(0, Math.trunc(Number(this.surfacePaintUpdatedAt.get(surfaceId)) || 0));
+    if (previousUpdatedAt > 0 && updatedAt > 0 && updatedAt < previousUpdatedAt) {
+      return false;
+    }
     this.surfacePaintState.set(surfaceId, imageDataUrl);
+    this.surfacePaintUpdatedAt.set(surfaceId, updatedAt);
     this.applySurfacePaintTexture(surfaceId, imageDataUrl);
     return true;
   }
@@ -2772,12 +2812,42 @@ export class GameRuntime {
       : Array.isArray(payload?.surfaces)
         ? payload.surfaces
         : [];
-    if (!surfaces.length) {
+
+    const nextState = new Map();
+    const nextUpdatedAt = new Map();
+    for (const item of surfaces) {
+      const surfaceId = String(item?.surfaceId ?? "").trim();
+      const imageDataUrl = String(item?.imageDataUrl ?? item?.dataUrl ?? "").trim();
+      if (!surfaceId || !imageDataUrl || !imageDataUrl.startsWith("data:image/")) {
+        continue;
+      }
+      const updatedAt = Math.max(0, Math.trunc(Number(item?.updatedAt) || Date.now()));
+      nextState.set(surfaceId, imageDataUrl);
+      nextUpdatedAt.set(surfaceId, updatedAt);
+    }
+
+    const previousState = this.surfacePaintState;
+    for (const [surfaceId] of previousState) {
+      if (!nextState.has(surfaceId)) {
+        this.resetSurfacePaintTexture(surfaceId);
+      }
+    }
+
+    this.surfacePaintState = nextState;
+    this.surfacePaintUpdatedAt = nextUpdatedAt;
+    for (const [surfaceId, imageDataUrl] of nextState) {
+      const previousImage = previousState.get(surfaceId) ?? "";
+      if (previousImage !== imageDataUrl) {
+        this.applySurfacePaintTexture(surfaceId, imageDataUrl);
+      }
+    }
+  }
+
+  requestSurfacePaintSnapshot() {
+    if (!this.socket || !this.networkConnected) {
       return;
     }
-    for (const item of surfaces) {
-      this.applySurfacePaintUpdate(item);
-    }
+    this.socket.emit("paint:state:request");
   }
 
   sendSurfacePaintUpdate(surfaceId, imageDataUrl) {
@@ -2806,6 +2876,13 @@ export class GameRuntime {
       return;
     }
 
+    const previousStates = new Map();
+    const previousUpdatedAt = new Map();
+    for (const targetId of targetIds) {
+      previousStates.set(targetId, String(this.surfacePaintState.get(targetId) ?? ""));
+      previousUpdatedAt.set(targetId, Math.max(0, Math.trunc(Number(this.surfacePaintUpdatedAt.get(targetId)) || 0)));
+    }
+
     const imageDataUrl = this.surfacePainterCanvasEl.toDataURL("image/jpeg", 0.84);
     for (const targetId of targetIds) {
       this.applySurfacePaintUpdate({ surfaceId: targetId, imageDataUrl });
@@ -2822,11 +2899,13 @@ export class GameRuntime {
     this.surfacePaintSendInFlight = true;
     let failedCount = 0;
     let lastReason = "";
+    const failedTargetIds = [];
     for (const targetId of targetIds) {
       const response = await this.sendSurfacePaintUpdate(targetId, imageDataUrl);
       if (!response?.ok) {
         failedCount += 1;
         lastReason = String(response?.error ?? "").trim() || "알 수 없는 오류";
+        failedTargetIds.push(targetId);
         continue;
       }
       this.applySurfacePaintUpdate(response);
@@ -2834,6 +2913,20 @@ export class GameRuntime {
     this.surfacePainterSaveInFlight = false;
     this.surfacePaintSendInFlight = false;
     if (failedCount > 0) {
+      for (const targetId of failedTargetIds) {
+        const previousImage = String(previousStates.get(targetId) ?? "");
+        const previousTs = Math.max(0, Math.trunc(Number(previousUpdatedAt.get(targetId)) || 0));
+        if (previousImage && previousImage.startsWith("data:image/")) {
+          this.surfacePaintState.set(targetId, previousImage);
+          this.surfacePaintUpdatedAt.set(targetId, previousTs);
+          this.applySurfacePaintTexture(targetId, previousImage);
+        } else {
+          this.surfacePaintState.delete(targetId);
+          this.surfacePaintUpdatedAt.delete(targetId);
+          this.resetSurfacePaintTexture(targetId);
+        }
+      }
+      this.requestSurfacePaintSnapshot();
       this.appendChatLine("", `그림 반영 실패(${failedCount}면): ${lastReason}`, "system");
       return;
     }
@@ -6702,6 +6795,7 @@ export class GameRuntime {
       this.syncFullscreenRestoreFlag();
       this.requestAuthoritativeStateSync();
       this.syncPlayerNameIfConnected();
+      this.requestSurfacePaintSnapshot();
       this.startNetworkPing();
       this.requestHostClaim();
     });
