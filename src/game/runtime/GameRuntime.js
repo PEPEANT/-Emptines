@@ -892,7 +892,7 @@ export class GameRuntime {
         `city_tower_${ti}`
       );
       tower.position.set(x, h * 0.5, z);
-      tower.castShadow = !this.mobileEnabled;
+      tower.castShadow = false;
       tower.receiveShadow = true;
       cityGroup.add(tower);
     }
@@ -939,7 +939,7 @@ export class GameRuntime {
         `city_mega_${i}`
       );
       megaTower.position.set(megaX, megaHeight * 0.5, megaZ);
-      megaTower.castShadow = !this.mobileEnabled;
+      megaTower.castShadow = false;
       megaTower.receiveShadow = true;
       cityGroup.add(megaTower);
 
@@ -948,7 +948,7 @@ export class GameRuntime {
         skylineCapMats[i % 3]
       );
       towerCap.position.set(megaX, megaHeight + 0.86, megaZ);
-      towerCap.castShadow = !this.mobileEnabled;
+      towerCap.castShadow = false;
       towerCap.receiveShadow = true;
       cityGroup.add(towerCap);
     }
@@ -2050,6 +2050,9 @@ export class GameRuntime {
   }
 
   createPaintableBoxMesh(geometry, baseMaterial, surfaceBaseId) {
+    if (!this.isDrawingInteractionEnabled()) {
+      return new THREE.Mesh(geometry, baseMaterial.clone());
+    }
     const materials = [];
     for (let index = 0; index < 6; index += 1) {
       materials.push(baseMaterial.clone());
