@@ -6843,16 +6843,14 @@ export class GameRuntime {
 
     for (const [id, remote] of this.remotePlayers) {
       const distanceScore = this.getRemoteDistanceScore(remote.targetPosition);
-      const meshVisible = distanceScore <= this.remoteMeshDistanceSq;
+      const withinMeshRange = distanceScore <= this.remoteMeshDistanceSq;
+      const meshVisible = withinMeshRange || remote.chatLabel.visible;
       remote.mesh.visible = meshVisible;
       if (!meshVisible) {
-        remote.chatLabel.visible = false;
+        remote.nameLabel.visible = false;
       } else {
         const labelVisible = distanceScore <= this.remoteLabelDistanceSq;
         remote.nameLabel.visible = labelVisible;
-        if (!labelVisible) {
-          remote.chatLabel.visible = false;
-        }
 
         let shouldUpdateTransform = true;
         if (distanceScore > this.remoteFarDistanceSq) {
@@ -6882,6 +6880,9 @@ export class GameRuntime {
         } else {
           remote.chatLabel.material.opacity = 1;
         }
+      }
+      if (!remote.chatLabel.visible && !withinMeshRange) {
+        remote.mesh.visible = false;
       }
 
       if (now - remote.lastSeen > this.remoteStaleTimeoutMs) {
