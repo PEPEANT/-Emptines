@@ -1391,6 +1391,9 @@ body.is-mobile-ui .player-roster-hint {
     padding: 10px;
     gap: 8px;
     max-height: calc(100dvh - 16px);
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    overflow: hidden;
   }
 
   #surface-painter {
@@ -1400,7 +1403,9 @@ body.is-mobile-ui .player-roster-hint {
   }
 
   #surface-painter-canvas {
-    max-height: min(48dvh, 360px);
+    width: min(100%, 56dvh);
+    justify-self: center;
+    max-height: min(40dvh, 260px);
   }
 
   #surface-painter-title {
@@ -1410,6 +1415,10 @@ body.is-mobile-ui .player-roster-hint {
   #surface-painter-toolbar {
     grid-template-columns: auto 1fr;
     gap: 6px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    max-height: 24dvh;
+    padding-right: 2px;
   }
 
   #surface-painter-eraser,
@@ -1420,6 +1429,16 @@ body.is-mobile-ui .player-roster-hint {
 
   #surface-painter-actions {
     justify-content: stretch;
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    padding-top: 6px;
+    padding-bottom: 2px;
+    background: linear-gradient(
+      to top,
+      rgba(8, 21, 34, 0.98) 72%,
+      rgba(8, 21, 34, 0.12)
+    );
   }
 
   #surface-painter-actions button {
@@ -1427,5 +1446,31 @@ body.is-mobile-ui .player-roster-hint {
     min-width: 0;
     height: 32px;
     font-size: 0.64rem;
+  }
+}
+
+@media (max-width: 900px) and (orientation: landscape) {
+  #surface-painter {
+    padding: calc(env(safe-area-inset-top, 0px) + 6px) 8px
+      calc(env(safe-area-inset-bottom, 0px) + 6px);
+  }
+
+  #surface-painter-panel {
+    max-height: calc(100dvh - 12px);
+    gap: 6px;
+    padding: 8px;
+  }
+
+  #surface-painter-canvas {
+    width: min(100%, 48dvh);
+    max-height: min(34dvh, 190px);
+  }
+
+  #surface-painter-toolbar {
+    max-height: 26dvh;
+  }
+
+  #surface-painter-actions button {
+    height: 30px;
   }
 }

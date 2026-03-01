@@ -2460,8 +2460,9 @@ export class GameRuntime {
     const visible = Boolean(this.surfacePaintTarget);
     this.surfacePaintPromptEl?.classList.toggle("hidden", !visible || this.mobileEnabled);
     if (this.mobilePaintBtnEl) {
-      this.mobilePaintBtnEl.classList.toggle("hidden", !this.mobileEnabled);
-      this.mobilePaintBtnEl.disabled = !visible;
+      const showMobilePaintButton = this.mobileEnabled && visible;
+      this.mobilePaintBtnEl.classList.toggle("hidden", !showMobilePaintButton);
+      this.mobilePaintBtnEl.disabled = !showMobilePaintButton;
     }
   }
 
@@ -3274,8 +3275,9 @@ export class GameRuntime {
     this.mobileUiEl.classList.toggle("hidden", !visible);
     if (this.mobilePaintBtnEl) {
       const paintEnabled = this.isSurfacePaintFeatureEnabled();
-      this.mobilePaintBtnEl.classList.toggle("hidden", !visible || !paintEnabled);
-      this.mobilePaintBtnEl.disabled = !visible || !paintEnabled || !this.surfacePaintTarget;
+      const paintVisible = visible && paintEnabled && Boolean(this.surfacePaintTarget);
+      this.mobilePaintBtnEl.classList.toggle("hidden", !paintVisible);
+      this.mobilePaintBtnEl.disabled = !paintVisible;
     }
     if (!visible) {
       this.resetMobileMoveInput();
@@ -6450,14 +6452,13 @@ export class GameRuntime {
     this.selectedChalkColor = this.chalkPalette[0] ?? fallbackColors[0];
     this.buildChalkPaletteButtons();
     const chalkEnabled = this.isChalkFeatureEnabled();
-    const surfacePaintEnabled = this.isSurfacePaintFeatureEnabled();
     this.hasChalk = chalkEnabled ? this.hasChalk : false;
     this.toolUiEl?.classList.toggle("hidden", !chalkEnabled);
     this.chalkPickupEl?.classList.add("hidden");
     this.surfacePaintPromptEl?.classList.add("hidden");
     if (this.mobilePaintBtnEl) {
-      this.mobilePaintBtnEl.classList.toggle("hidden", !surfacePaintEnabled);
-      this.mobilePaintBtnEl.disabled = !surfacePaintEnabled;
+      this.mobilePaintBtnEl.classList.add("hidden");
+      this.mobilePaintBtnEl.disabled = true;
     }
     for (const button of this.toolButtons) {
       if (String(button?.dataset?.tool ?? "") === "chalk") {
