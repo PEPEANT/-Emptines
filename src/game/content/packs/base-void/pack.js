@@ -94,7 +94,7 @@ export const BASE_VOID_PACK = {
       emissiveIntensity: 0.09
     },
     chalk: {
-      enabled: true,
+      enabled: false,
       maxMarks: 2800,
       minDistance: 0.17,
       markSizeMin: 0.14,

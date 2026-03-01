@@ -2,6 +2,10 @@ const DEFAULT_SPAWN_HEIGHT = 1.72;
 const SPAWN_RADIUS = 34;
 const SPAWN_SLOTS = 48;
 const MIN_DISTANCE = 2.25;
+const SPAWN_CENTER_X = 0;
+const SPAWN_CENTER_Z = -98;
+const SPAWN_FACE_TARGET_X = 0;
+const SPAWN_FACE_TARGET_Z = -82;
 
 function getStatePosition(state) {
   const x = Number(state?.x);
@@ -13,7 +17,7 @@ function getStatePosition(state) {
 }
 
 function toSpawnState(x, z) {
-  const yaw = Math.atan2(x, z);
+  const yaw = Math.atan2(SPAWN_FACE_TARGET_X - x, SPAWN_FACE_TARGET_Z - z);
   return {
     x,
     y: DEFAULT_SPAWN_HEIGHT,
@@ -26,12 +30,15 @@ function toSpawnState(x, z) {
 
 function fallbackSpawn(existingStates) {
   if (existingStates.length === 0) {
-    return toSpawnState(0, 0);
+    return toSpawnState(SPAWN_CENTER_X, SPAWN_CENTER_Z);
   }
   const jitter = (Math.random() - 0.5) * 2.2;
   const angle = Math.random() * Math.PI * 2;
   const radius = SPAWN_RADIUS * (0.85 + Math.random() * 0.25);
-  return toSpawnState(Math.cos(angle + jitter) * radius, Math.sin(angle + jitter) * radius);
+  return toSpawnState(
+    SPAWN_CENTER_X + Math.cos(angle + jitter) * radius,
+    SPAWN_CENTER_Z + Math.sin(angle + jitter) * radius
+  );
 }
 
 export function chooseDistributedSpawnState(players) {
@@ -44,7 +51,7 @@ export function chooseDistributedSpawnState(players) {
   }
 
   if (existingStates.length === 0) {
-    return toSpawnState(0, 0);
+    return toSpawnState(SPAWN_CENTER_X, SPAWN_CENTER_Z);
   }
 
   let bestCandidate = null;
@@ -54,8 +61,8 @@ export function chooseDistributedSpawnState(players) {
   for (let i = 0; i < SPAWN_SLOTS; i += 1) {
     const angle = (Math.PI * 2 * i) / SPAWN_SLOTS;
     const radius = SPAWN_RADIUS * (0.9 + (i % 3) * 0.05);
-    const x = Math.cos(angle) * radius;
-    const z = Math.sin(angle) * radius;
+    const x = SPAWN_CENTER_X + Math.cos(angle) * radius;
+    const z = SPAWN_CENTER_Z + Math.sin(angle) * radius;
 
     let nearestSq = Number.POSITIVE_INFINITY;
     for (const current of existingStates) {

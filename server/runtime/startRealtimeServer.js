@@ -38,6 +38,7 @@ export function startRealtimeServer(options = {}) {
       origin: config.corsOrigin,
       methods: ["GET", "POST"]
     },
+    maxHttpBufferSize: config.maxSocketPayloadBytes,
     transports: ["websocket", "polling"],
     pingInterval: 5000,
     pingTimeout: 5000
@@ -47,7 +48,10 @@ export function startRealtimeServer(options = {}) {
     io,
     defaultRoomCode: config.defaultRoomCode,
     maxRoomPlayers: config.maxRoomPlayers,
-    defaultPortalTargetUrl: config.defaultPortalTargetUrl
+    defaultPortalTargetUrl: config.defaultPortalTargetUrl,
+    surfacePaintStorePath: config.surfacePaintStorePath,
+    surfacePaintSaveDebounceMs: config.surfacePaintSaveDebounceMs,
+    log
   });
 
   setInterval(() => {

@@ -24,10 +24,21 @@ export function registerSocketHandlers({
       });
     };
 
+    const emitSharedMusicState = () => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        return;
+      }
+      socket.emit("music:state", {
+        state: roomService.serializeSharedMusic(room)
+      });
+    };
+
     const joinDefaultAndAck = (nameOverride, ackFn) => {
       const result = roomService.joinDefaultRoom(socket, nameOverride);
       if (result?.ok) {
         emitSurfacePaintState();
+        emitSharedMusicState();
       }
       ack(ackFn, result);
       return result;
@@ -42,6 +53,7 @@ export function registerSocketHandlers({
 
     roomService.joinDefaultRoom(socket);
     emitSurfacePaintState();
+    emitSharedMusicState();
     roomService.emitRoomList(socket);
 
     socket.on("chat:send", ({ name, text }) => {
@@ -326,6 +338,66 @@ export function registerSocketHandlers({
 
       if (result.changed) {
         roomService.emitRightBillboardUpdate(room);
+      }
+
+      ack(ackFn, {
+        ok: true,
+        changed: Boolean(result.changed),
+        state: result.state
+      });
+    });
+
+    socket.on("music:host:set", (payload = {}, ackFn) => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        ack(ackFn, { ok: false, error: "room not found" });
+        return;
+      }
+      if (!roomService.isHost(room, socket.id)) {
+        ack(ackFn, { ok: false, error: "host only" });
+        return;
+      }
+
+      const result = roomService.setSharedMusic(
+        room,
+        payload?.dataUrl ?? payload?.audioDataUrl ?? "",
+        payload?.name ?? payload?.title ?? ""
+      );
+      if (!result.ok) {
+        ack(ackFn, result);
+        return;
+      }
+
+      if (result.changed) {
+        roomService.emitSharedMusicUpdate(room, { hostId: socket.id });
+      }
+
+      ack(ackFn, {
+        ok: true,
+        changed: Boolean(result.changed),
+        state: result.state
+      });
+    });
+
+    socket.on("music:host:stop", (_payload = {}, ackFn) => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        ack(ackFn, { ok: false, error: "room not found" });
+        return;
+      }
+      if (!roomService.isHost(room, socket.id)) {
+        ack(ackFn, { ok: false, error: "host only" });
+        return;
+      }
+
+      const result = roomService.stopSharedMusic(room);
+      if (!result.ok) {
+        ack(ackFn, result);
+        return;
+      }
+
+      if (result.changed) {
+        roomService.emitSharedMusicUpdate(room, { hostId: socket.id });
       }
 
       ack(ackFn, {

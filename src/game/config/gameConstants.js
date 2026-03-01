@@ -11,6 +11,6 @@ export const GAME_CONSTANTS = {
   REMOTE_STALE_TIMEOUT_MS: 15000,
   DYNAMIC_RESOLUTION: {
     mobileMinRatio: 0.65,
-    desktopMinRatio: 0.85
+    desktopMinRatio: 0.7
   }
 };

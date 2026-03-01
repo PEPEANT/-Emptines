@@ -2,6 +2,9 @@ export const SERVICE_NAME = "reclaim-fps-chat";
 export const DEFAULT_ROOM_CODE = "GLOBAL";
 export const DEFAULT_PORTAL_TARGET_URL =
   "http://localhost:5173/?server=http://localhost:3001&name=PLAYER";
+export const DEFAULT_SURFACE_PAINT_STORE_PATH = "server/data/surface-paint.json";
+export const DEFAULT_SURFACE_PAINT_SAVE_DEBOUNCE_MS = 300;
+export const DEFAULT_MAX_SOCKET_PAYLOAD_BYTES = 12_000_000;
 
 const DEFAULT_MAX_ROOM_PLAYERS = 120;
 const MIN_ROOM_PLAYERS = 16;
@@ -97,6 +100,24 @@ export function loadRuntimeConfig(env = process.env) {
     defaultPortalTargetUrl: normalizeAbsoluteHttpUrl(
       env.DEFAULT_PORTAL_TARGET_URL,
       DEFAULT_PORTAL_TARGET_URL
+    ),
+    surfacePaintStorePath:
+      parseOptionalString(env.SURFACE_PAINT_STORE_PATH, 2048) || DEFAULT_SURFACE_PAINT_STORE_PATH,
+    surfacePaintSaveDebounceMs: Math.trunc(
+      parseBoundedNumber(
+        env.SURFACE_PAINT_SAVE_DEBOUNCE_MS,
+        DEFAULT_SURFACE_PAINT_SAVE_DEBOUNCE_MS,
+        50,
+        5000
+      )
+    ),
+    maxSocketPayloadBytes: Math.trunc(
+      parseBoundedNumber(
+        env.MAX_SOCKET_PAYLOAD_BYTES,
+        DEFAULT_MAX_SOCKET_PAYLOAD_BYTES,
+        1_000_000,
+        50_000_000
+      )
     ),
     sim: {
       tickRateHz: parseBoundedNumber(

@@ -318,9 +318,13 @@ export class GameRuntime {
     this.hostApplyDelayBtnEl = document.getElementById("host-apply-delay");
     this.hostLeftImageFileInputEl = document.getElementById("host-left-image-file");
     this.hostResetLeftImageBtnEl = document.getElementById("host-left-image-reset");
+    this.hostMusicFileInputEl = document.getElementById("host-music-file");
+    this.hostMusicPlayBtnEl = document.getElementById("host-music-play");
+    this.hostMusicStopBtnEl = document.getElementById("host-music-stop");
     this.hostRightVideoSelectEl = document.getElementById("host-right-video");
     this.hostPlayRightVideoBtnEl = document.getElementById("host-right-play");
     this.hostResetRightVideoBtnEl = document.getElementById("host-right-reset");
+    this.hostMusicSetInFlight = false;
     this.playerRosterVisible = false;
     this.roomPlayerSnapshot = [];
     this.portalForceOpenInFlight = false;
@@ -374,6 +378,16 @@ export class GameRuntime {
     this.entryMusicStarted = false;
     this.entryMusicUnlockHandler = null;
     this.entryMusicBaseVolume = 0.62;
+    this.sharedMusicAudioEl = null;
+    this.sharedMusicUnlockHandler = null;
+    this.sharedMusicBaseVolume = 0.72;
+    this.sharedMusicState = {
+      mode: "idle",
+      dataUrl: "",
+      name: "",
+      startAtMs: 0,
+      updatedAt: Date.now()
+    };
     this.entryMusicMinDistance = 8;
     this.entryMusicMaxDistance = 260;
     this.entryMusicRolloff = 1.15;
@@ -1688,6 +1702,266 @@ export class GameRuntime {
     });
   }
 
+  normalizeSharedMusicState(rawState = {}) {
+    const modeRaw = String(rawState?.mode ?? "idle").trim().toLowerCase();
+    const mode = modeRaw === "playing" ? "playing" : "idle";
+    const dataUrlRaw = String(rawState?.dataUrl ?? "").trim();
+    const dataUrl =
+      mode === "playing" && /^data:audio\/[a-z0-9.+-]+;base64,/i.test(dataUrlRaw) ? dataUrlRaw : "";
+    const name = String(rawState?.name ?? "").trim().slice(0, 120);
+    const startAtMs = Math.max(0, Math.trunc(Number(rawState?.startAtMs) || 0));
+    const updatedAt = Math.max(0, Math.trunc(Number(rawState?.updatedAt) || Date.now()));
+
+    if (mode !== "playing" || !dataUrl) {
+      return {
+        mode: "idle",
+        dataUrl: "",
+        name: "",
+        startAtMs: 0,
+        updatedAt
+      };
+    }
+
+    return {
+      mode: "playing",
+      dataUrl,
+      name,
+      startAtMs,
+      updatedAt
+    };
+  }
+
+  detachSharedMusicUnlockListeners() {
+    if (!this.sharedMusicUnlockHandler) {
+      return;
+    }
+    const handler = this.sharedMusicUnlockHandler;
+    this.sharedMusicUnlockHandler = null;
+    window.removeEventListener("pointerdown", handler);
+    window.removeEventListener("keydown", handler);
+    window.removeEventListener("touchstart", handler);
+  }
+
+  attachSharedMusicUnlockListeners() {
+    if (this.sharedMusicUnlockHandler) {
+      return;
+    }
+    const handler = () => {
+      this.detachSharedMusicUnlockListeners();
+      this.startSharedMusicPlaybackFromState(this.sharedMusicState);
+    };
+    this.sharedMusicUnlockHandler = handler;
+    window.addEventListener("pointerdown", handler, { passive: true });
+    window.addEventListener("keydown", handler);
+    window.addEventListener("touchstart", handler, { passive: true });
+  }
+
+  stopSharedMusicPlayback() {
+    this.detachSharedMusicUnlockListeners();
+    if (!this.sharedMusicAudioEl) {
+      return;
+    }
+    this.sharedMusicAudioEl.pause();
+    this.sharedMusicAudioEl.removeAttribute("src");
+    this.sharedMusicAudioEl.load();
+    this.sharedMusicAudioEl = null;
+  }
+
+  startSharedMusicPlaybackFromState(state) {
+    const next = this.normalizeSharedMusicState(state);
+    if (next.mode !== "playing" || !next.dataUrl) {
+      this.stopSharedMusicPlayback();
+      return;
+    }
+
+    const hasSameSource = String(this.sharedMusicAudioEl?.src ?? "") === next.dataUrl;
+    if (!hasSameSource) {
+      this.stopSharedMusicPlayback();
+      const audio = new Audio(next.dataUrl);
+      audio.preload = "auto";
+      audio.loop = true;
+      audio.volume = this.sharedMusicBaseVolume;
+      this.sharedMusicAudioEl = audio;
+    }
+
+    const audio = this.sharedMusicAudioEl;
+    if (!audio) {
+      return;
+    }
+
+    const applyOffset = () => {
+      if (!Number.isFinite(audio.duration) || audio.duration <= 0.1) {
+        return;
+      }
+      const elapsedSec = Math.max(0, (Date.now() - next.startAtMs) / 1000);
+      const syncTime = elapsedSec % audio.duration;
+      if (Math.abs((audio.currentTime || 0) - syncTime) > 1.1) {
+        try {
+          audio.currentTime = syncTime;
+        } catch {
+          // Some browsers block seek before enough buffering.
+        }
+      }
+    };
+    if (audio.readyState >= 1) {
+      applyOffset();
+    } else {
+      audio.addEventListener("loadedmetadata", applyOffset, { once: true });
+    }
+
+    audio.play().then(
+      () => {
+        this.updateSpatialAudioMix();
+        this.detachSharedMusicUnlockListeners();
+      },
+      () => {
+        this.attachSharedMusicUnlockListeners();
+      }
+    );
+  }
+
+  applySharedMusicState(rawState = {}, { announce = false } = {}) {
+    const next = this.normalizeSharedMusicState(rawState);
+    const previous = this.normalizeSharedMusicState(this.sharedMusicState);
+    if (
+      previous.mode === next.mode &&
+      previous.dataUrl === next.dataUrl &&
+      previous.startAtMs === next.startAtMs &&
+      previous.updatedAt === next.updatedAt
+    ) {
+      return false;
+    }
+
+    this.sharedMusicState = next;
+    if (next.mode === "playing") {
+      this.startSharedMusicPlaybackFromState(next);
+      if (announce) {
+        const label = next.name ? ` (${next.name})` : "";
+        this.appendChatLine("", `호스트가 음악 재생 시작${label}`, "system");
+      }
+    } else {
+      this.stopSharedMusicPlayback();
+      if (announce) {
+        this.appendChatLine("", "호스트가 음악 재생을 중지했습니다.", "system");
+      }
+    }
+    return true;
+  }
+
+  readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        resolve(String(reader.result ?? ""));
+      };
+      reader.onerror = () => {
+        reject(new Error("file read failed"));
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async requestHostSharedMusicPlay() {
+    const file = this.hostMusicFileInputEl?.files?.[0];
+    if (!file) {
+      this.appendChatLine("", "먼저 MP3 파일을 선택하세요.", "system");
+      this.hostMusicFileInputEl?.focus?.();
+      return;
+    }
+
+    if (!this.socket || !this.networkConnected) {
+      this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
+      return;
+    }
+    if (!this.isRoomHost) {
+      this.appendChatLine("", "음악 제어는 방장만 가능합니다.", "system");
+      return;
+    }
+    if (this.hostMusicSetInFlight) {
+      return;
+    }
+
+    const type = String(file.type ?? "").toLowerCase();
+    const lowerName = String(file.name ?? "").toLowerCase();
+    if (!type.startsWith("audio/") && !lowerName.endsWith(".mp3")) {
+      this.appendChatLine("", "오디오 파일(mp3)을 선택하세요.", "system");
+      return;
+    }
+
+    const maxBytes = 8 * 1024 * 1024;
+    if ((Number(file.size) || 0) > maxBytes) {
+      this.appendChatLine("", "파일이 너무 큽니다. 8MB 이하 mp3를 사용하세요.", "system");
+      return;
+    }
+
+    this.hostMusicSetInFlight = true;
+    this.syncHostControls();
+
+    let dataUrl = "";
+    try {
+      dataUrl = await this.readFileAsDataUrl(file);
+    } catch {
+      this.hostMusicSetInFlight = false;
+      this.syncHostControls();
+      this.appendChatLine("", "파일 읽기 실패", "system");
+      return;
+    }
+
+    if (!/^data:audio\/[a-z0-9.+-]+;base64,/i.test(dataUrl)) {
+      this.hostMusicSetInFlight = false;
+      this.syncHostControls();
+      this.appendChatLine("", "지원되지 않는 오디오 형식입니다.", "system");
+      return;
+    }
+
+    this.socket.emit(
+      "music:host:set",
+      {
+        name: String(file.name ?? "").trim().slice(0, 120),
+        dataUrl
+      },
+      (response = {}) => {
+        this.hostMusicSetInFlight = false;
+        this.syncHostControls();
+        if (!response?.ok) {
+          const reason = String(response?.error ?? "").trim() || "unknown error";
+          this.appendChatLine("", `음악 업로드 실패: ${reason}`, "system");
+          return;
+        }
+        this.applySharedMusicState(response?.state ?? {}, { announce: false });
+        this.appendChatLine("", "룸 음악 재생 시작", "system");
+      }
+    );
+  }
+
+  requestHostSharedMusicStop() {
+    if (!this.socket || !this.networkConnected) {
+      this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
+      return;
+    }
+    if (!this.isRoomHost) {
+      this.appendChatLine("", "음악 제어는 방장만 가능합니다.", "system");
+      return;
+    }
+    if (this.hostMusicSetInFlight) {
+      return;
+    }
+
+    this.hostMusicSetInFlight = true;
+    this.syncHostControls();
+    this.socket.emit("music:host:stop", {}, (response = {}) => {
+      this.hostMusicSetInFlight = false;
+      this.syncHostControls();
+      if (!response?.ok) {
+        const reason = String(response?.error ?? "").trim() || "unknown error";
+        this.appendChatLine("", `음악 정지 실패: ${reason}`, "system");
+        return;
+      }
+      this.applySharedMusicState(response?.state ?? {}, { announce: false });
+      this.appendChatLine("", "룸 음악 정지", "system");
+    });
+  }
+
   addChalkTable(cityGroup) {
     if (!cityGroup || !this.isChalkFeatureEnabled()) return;
     // Table placed 6 units right of city group center (world ≈ 6, 0, -5)
@@ -2431,6 +2705,10 @@ export class GameRuntime {
         0,
         1
       );
+    }
+
+    if (this.sharedMusicAudioEl) {
+      this.sharedMusicAudioEl.volume = THREE.MathUtils.clamp(this.sharedMusicBaseVolume, 0, 1);
     }
   }
 
@@ -3403,7 +3681,8 @@ export class GameRuntime {
     const controlsBusy =
       this.portalForceOpenInFlight ||
       this.portalScheduleSetInFlight ||
-      this.rightBillboardResetInFlight;
+      this.rightBillboardResetInFlight ||
+      this.hostMusicSetInFlight;
 
     this.hostControlsEl.classList.toggle("hidden", !visible);
     if (this.hostOpenPortalBtnEl) {
@@ -3436,6 +3715,15 @@ export class GameRuntime {
     }
     if (this.hostResetLeftImageBtnEl) {
       this.hostResetLeftImageBtnEl.disabled = !canControlPortal;
+    }
+    if (this.hostMusicFileInputEl) {
+      this.hostMusicFileInputEl.disabled = !canControlPortal || controlsBusy;
+    }
+    if (this.hostMusicPlayBtnEl) {
+      this.hostMusicPlayBtnEl.disabled = !canControlPortal || controlsBusy;
+    }
+    if (this.hostMusicStopBtnEl) {
+      this.hostMusicStopBtnEl.disabled = !canControlPortal || controlsBusy;
     }
   }
 
@@ -5194,6 +5482,25 @@ export class GameRuntime {
         if (this.hostLeftImageFileInputEl) this.hostLeftImageFileInputEl.value = "";
       });
     }
+    if (this.hostMusicFileInputEl) {
+      this.hostMusicFileInputEl.addEventListener("change", () => {
+        const file = this.hostMusicFileInputEl?.files?.[0];
+        if (!file) {
+          return;
+        }
+        this.appendChatLine("", `선택된 음악: ${String(file.name ?? "").trim()}`, "system");
+      });
+    }
+    if (this.hostMusicPlayBtnEl) {
+      this.hostMusicPlayBtnEl.addEventListener("click", () => {
+        void this.requestHostSharedMusicPlay();
+      });
+    }
+    if (this.hostMusicStopBtnEl) {
+      this.hostMusicStopBtnEl.addEventListener("click", () => {
+        this.requestHostSharedMusicStop();
+      });
+    }
 
     if (this.surfacePainterCanvasEl) {
       this.surfacePainterCanvasEl.addEventListener("pointerdown", (event) => {
@@ -5371,6 +5678,15 @@ export class GameRuntime {
     }
     if (!this.hostResetLeftImageBtnEl) {
       this.hostResetLeftImageBtnEl = document.getElementById("host-left-image-reset");
+    }
+    if (!this.hostMusicFileInputEl) {
+      this.hostMusicFileInputEl = document.getElementById("host-music-file");
+    }
+    if (!this.hostMusicPlayBtnEl) {
+      this.hostMusicPlayBtnEl = document.getElementById("host-music-play");
+    }
+    if (!this.hostMusicStopBtnEl) {
+      this.hostMusicStopBtnEl = document.getElementById("host-music-stop");
     }
     if (!this.playerRosterEl) {
       this.playerRosterEl = document.getElementById("player-roster");
@@ -5557,6 +5873,8 @@ export class GameRuntime {
       this.roomHostId = null;
       this.isRoomHost = false;
       this.rightBillboardResetInFlight = false;
+      this.hostMusicSetInFlight = false;
+      this.applySharedMusicState({ mode: "idle" }, { announce: false });
       this.portalForceOpenInFlight = false;
       this.clearRemotePlayers();
       this.updateRoomPlayerSnapshot([]);
@@ -5588,6 +5906,7 @@ export class GameRuntime {
       this.portalForceOpenInFlight = false;
       this.portalScheduleSetInFlight = false;
       this.rightBillboardResetInFlight = false;
+      this.hostMusicSetInFlight = false;
       this.remoteSyncClock = 0;
       this.lastSentInput = null;
       this.localInputSeq = 0;
@@ -5613,6 +5932,7 @@ export class GameRuntime {
       this.portalForceOpenInFlight = false;
       this.portalScheduleSetInFlight = false;
       this.rightBillboardResetInFlight = false;
+      this.hostMusicSetInFlight = false;
       this.remoteSyncClock = 0;
       this.lastSentInput = null;
       this.pendingJumpInput = false;
@@ -5622,6 +5942,7 @@ export class GameRuntime {
       this.clearRemotePlayers();
       this.updateRoomPlayerSnapshot([]);
       this.setPlayerRosterVisible(false);
+      this.applySharedMusicState({ mode: "idle" }, { announce: false });
       this.syncHostControls();
       this.hud.setStatus(this.getStatusText());
       this.hud.setPlayers(0);
@@ -5635,6 +5956,7 @@ export class GameRuntime {
       this.portalScheduleSetInFlight = false;
       this.portalForceOpenInFlight = false;
       this.rightBillboardResetInFlight = false;
+      this.hostMusicSetInFlight = false;
       this.remoteSyncClock = 0;
       this.lastSentInput = null;
       this.pendingJumpInput = false;
@@ -5642,6 +5964,7 @@ export class GameRuntime {
       this.clearRemotePlayers();
       this.updateRoomPlayerSnapshot([]);
       this.setPlayerRosterVisible(false);
+      this.applySharedMusicState({ mode: "idle" }, { announce: false });
       this.syncHostControls();
       this.stopNetworkPing();
       this.hud.setStatus(this.getStatusText());
@@ -5679,6 +6002,17 @@ export class GameRuntime {
 
     socket.on("billboard:right:update", (payload = {}) => {
       this.applyRightBillboardState(payload ?? {}, { force: true });
+    });
+
+    socket.on("music:state", (payload = {}) => {
+      this.applySharedMusicState(payload?.state ?? payload ?? {}, { announce: false });
+    });
+
+    socket.on("music:update", (payload = {}) => {
+      const hostId = String(payload?.hostId ?? "").trim();
+      const localId = String(this.localPlayerId ?? "").trim();
+      const announce = Boolean(hostId && localId && hostId !== localId);
+      this.applySharedMusicState(payload?.state ?? payload ?? {}, { announce });
     });
 
     socket.on("snapshot:world", (payload) => {
