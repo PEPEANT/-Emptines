@@ -3161,7 +3161,7 @@ export class GameRuntime {
     const secondsLeft = Math.max(0, Math.ceil(this.boundaryReturnDelaySeconds - this.boundaryOutClock));
     this.setBoundaryWarning(
       true,
-      `留?寃쎄퀎瑜?踰쀬뼱?섏뀲?듬땲?? ${secondsLeft}珥????덉쟾 吏?먯쑝濡?蹂듦??⑸땲??`
+      `맵 경계를 벗어났습니다. ${secondsLeft}초 안에 돌아오세요.`
     );
 
     if (this.boundaryOutClock < this.boundaryReturnDelaySeconds) {
@@ -3178,7 +3178,7 @@ export class GameRuntime {
     this.keys.clear();
     this.boundaryOutClock = 0;
     this.boundaryNoticeClock = this.boundaryReturnNoticeSeconds;
-    this.setBoundaryWarning(true, "留?寃쎄퀎瑜?踰쀬뼱?섏뀲?듬땲?? ?덉쟾 吏?먯쑝濡?蹂듦??덉뒿?덈떎.");
+    this.setBoundaryWarning(true, "맵 경계를 벗어났습니다. 즉시 돌아오세요.");
   }
 
   parseQueryFlag(name) {
@@ -3281,8 +3281,8 @@ export class GameRuntime {
       this.portalPhase = "cooldown";
       this.portalPhaseClock = this.portalCooldownSeconds;
       this.setFlowHeadline(
-        "?ы깉 留곹겕 ?꾨씫",
-        "?portal=https://... 濡??대룞 二쇱냼瑜?吏?뺥븳 ???ㅼ떆 ?쒕룄?섏꽭??"
+        "포탈 설정 오류",
+        "URL에 ?portal=https://... 주소를 지정한 다음 다시 시도하세요."
       );
       return;
     }
@@ -3291,7 +3291,7 @@ export class GameRuntime {
     this.flowStage = "portal_transfer";
     this.hud.setStatus(this.getStatusText());
     this.syncGameplayUiForFlow();
-    this.setPortalTransition(true, "?ы깉 ?숆린??以?..");
+    this.setPortalTransition(true, "포탈 이동 중...");
 
     window.setTimeout(() => {
       window.location.assign(destination);
