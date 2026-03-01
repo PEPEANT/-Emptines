@@ -63,13 +63,24 @@
           <button id="host-music-stop" type="button">MP3 정지</button>
         </div>
         <div class="host-control-label" style="margin-top:8px">오른쪽 전광판</div>
+        <div id="host-right-video-quick" aria-label="오른쪽 전광판 빠른 선택">
+          <button class="host-video-quick-btn" type="button" data-video-id="GROK01">GROK 01</button>
+          <button class="host-video-quick-btn" type="button" data-video-id="GROK02">GROK 02</button>
+          <button class="host-video-quick-btn" type="button" data-video-id="GROK03">GROK 03</button>
+          <button class="host-video-quick-btn" type="button" data-video-id="GROK04">GROK 04</button>
+          <button class="host-video-quick-btn" type="button" data-video-id="YTDown2">YT 02</button>
+          <button class="host-video-quick-btn" type="button" data-video-id="YTDown4">YT 04</button>
+        </div>
         <div class="host-custom-row">
           <select id="host-right-video" aria-label="오른쪽 전광판 영상">
+            <option value="GROK01">grok-video_01.mp4</option>
+            <option value="GROK02">grok-video_02.mp4</option>
+            <option value="GROK03">grok-video_03.mp4</option>
+            <option value="GROK04">grok-video_04.mp4</option>
             <option value="YTDown1">YTDown1.mp4</option>
             <option value="YTDown2">YTDown2.mp4</option>
             <option value="YTDown3">YTDown3.mp4</option>
             <option value="YTDown4">YTDown4.mp4</option>
-            <option value="YTDown5">YTDown5.mp4</option>
             <option value="YTDown6">YTDown6.mp4</option>
             <option value="YTDown7">YTDown7.mp4</option>
             <option value="YTDown8">YTDown8.mp4</option>
@@ -139,6 +150,7 @@
 
     <div id="chat-ui" aria-label="채팅">
       <div id="chat-header">
+        <strong id="chat-title">채팅</strong>
         <button id="chat-toggle" type="button">채팅 열기</button>
       </div>
       <div id="chat-log" role="log" aria-live="polite" aria-relevant="additions text"></div>
@@ -150,6 +162,7 @@
           placeholder="메시지를 입력하고 Enter를 누르세요"
           autocomplete="off"
         />
+        <button id="chat-send" type="button">보내기</button>
       </div>
     </div>
 

@@ -241,7 +241,7 @@ export class AuthoritativeWorld {
     }
 
     const now = Date.now();
-    const worldLimit = Number(this.config?.sim?.worldLimit || 95);
+    const worldLimit = Number(this.config?.sim?.worldLimit || 120);
     const playerHeight = Number(this.config?.sim?.playerHeight || 1.72);
 
     const currentX = Number(player.state.x) || 0;
@@ -340,7 +340,7 @@ export class AuthoritativeWorld {
       const moveX = -sinYaw * normalized.z + cosYaw * normalized.x;
       const moveZ = -cosYaw * normalized.z - sinYaw * normalized.x;
       const moveStep = speed * dt;
-      const worldLimit = Number(this.config?.sim?.worldLimit || 95);
+      const worldLimit = Number(this.config?.sim?.worldLimit || 120);
       state.x = clamp(state.x + moveX * moveStep, -worldLimit, worldLimit);
       state.z = clamp(state.z + moveZ * moveStep, -worldLimit, worldLimit);
     }

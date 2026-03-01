@@ -7,7 +7,13 @@ Current identity is intentionally simple:
 - sky + ground only world
 - hand-only first-person view (no gun/combat/build mode)
 - global realtime player sync via Socket.io
+- server-authoritative input/snapshot sync (`input:cmd` -> `snapshot:world`)
 - minimal HUD only
+
+Realtime protocol (current):
+
+- client -> server: `input:cmd`
+- server -> client: `snapshot:world`, `ack:input`
 
 The project is now structured for expansion packs.
 New world variants can be added through `src/game/content/packs/`.
@@ -58,6 +64,18 @@ World configuration audit:
 npm run audit:world
 ```
 
+Bot load test (default 50 bots for 35s):
+
+```bash
+npm run loadtest:bots
+```
+
+Custom run:
+
+```bash
+node scripts/loadtest-bots.mjs --server=http://localhost:3001 --bots=80 --duration=45 --hz=20
+```
+
 ## Build
 
 ```bash
@@ -72,8 +90,12 @@ npm run preview
 - `W A S D` or arrow keys: move
 - `Shift`: sprint
 - `Space`: jump
+- `Tab (hold)`: show current player roster/count
 - `T`: open chat input
 - `Enter`: send chat (while input is open)
+- Host button `포탈 열기`: instantly open portal for room (host only)
+- `/host`: claim room host role (chat command)
+- `/portal https://...`: host-only portal link update (chat command)
 - `B`: toggle chalk tool
 - `1..5`: switch chalk color
 - `Left Mouse`: draw on ground (chalk tool)
@@ -85,6 +107,15 @@ Copy `.env.example` to `.env` when needed.
 - `CORS_ORIGIN` (server env)
   - Optional comma-separated allow-list for Socket.io CORS
   - If unset, server allows all origins
+- `DEFAULT_PORTAL_TARGET_URL` (server env)
+  - Default portal destination used by all clients in room
+- `HOST_CLAIM_KEY` (server env, optional but recommended)
+  - Secret key required for `room:host:claim`
+
+Host auto-claim (client query string):
+
+- `?host=1` to auto-request host role on join
+- `?host=1&hostKey=YOUR_KEY` when server uses `HOST_CLAIM_KEY`
 
 ## Deploy Notes
 
@@ -98,6 +129,15 @@ Socket server health endpoints:
 
 - `GET /health`
 - `GET /status`
+
+`/health` now includes realtime metrics:
+
+- `tickDriftP95Ms`
+- `sendSizeP95Bytes`
+- `cpuAvgPct`, `cpuP95Pct`, `cpuPeakPct`
+- `memRssMb`
+- `inputDropRate`
+- `avgRttMs`
 
 ## Asset Credits
 
@@ -158,6 +198,10 @@ Socket server health endpoints:
 |  |- disc.png
 |  `- SOURCE.txt
 `- scripts/
-   |- verify.mjs
-   `- doctor.mjs
+  |- verify.mjs
+  `- doctor.mjs
 ```
+
+## Saved Links
+
+- https://pepeant.github.io/-Emptines/  (saved: 2026-02-28)

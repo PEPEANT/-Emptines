@@ -6,7 +6,30 @@ import { dirname, isAbsolute, resolve as resolvePath } from "node:path";
 
 const SURFACE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,96}$/;
 const MAX_SURFACE_IMAGE_CHARS = 1_400_000;
-const RIGHT_BILLBOARD_VIDEO_ID_PATTERN = /^YTDown([1-8])$/i;
+const RIGHT_BILLBOARD_ALLOWED_VIDEO_IDS = Object.freeze([
+  "GROK01",
+  "GROK02",
+  "GROK03",
+  "GROK04",
+  "YTDown1",
+  "YTDown2",
+  "YTDown3",
+  "YTDown4",
+  "YTDown6",
+  "YTDown7",
+  "YTDown8"
+]);
+const RIGHT_BILLBOARD_VIDEO_ID_LOOKUP = Object.freeze(
+  RIGHT_BILLBOARD_ALLOWED_VIDEO_IDS.reduce((lookup, id) => {
+    lookup[String(id).toLowerCase()] = id;
+    return lookup;
+  }, {
+    "grok-video_01": "GROK01",
+    "grok-video_02": "GROK02",
+    "grok-video_03": "GROK03",
+    "grok-video_04": "GROK04"
+  })
+);
 const MAX_LEFT_BILLBOARD_IMAGE_CHARS = 4_200_000;
 const SURFACE_PAINT_STORE_VERSION = 1;
 const MAX_SHARED_AUDIO_DATA_URL_CHARS = 12_000_000;
@@ -109,12 +132,11 @@ function createSharedMusicState() {
 }
 
 function normalizeRightBillboardVideoId(rawValue) {
-  const text = String(rawValue ?? "").trim();
-  const match = text.match(RIGHT_BILLBOARD_VIDEO_ID_PATTERN);
-  if (!match) {
+  const text = String(rawValue ?? "").trim().toLowerCase();
+  if (!text) {
     return "";
   }
-  return `YTDown${Math.trunc(Number(match[1]) || 0)}`;
+  return RIGHT_BILLBOARD_VIDEO_ID_LOOKUP[text] ?? "";
 }
 
 function normalizeLeftBillboardImageDataUrl(rawValue) {

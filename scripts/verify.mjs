@@ -82,7 +82,18 @@ async function checkSyntax() {
     "src/game/utils/math.js",
     "src/game/utils/threeUtils.js",
     "scripts/world-audit.mjs",
-    "server.js"
+    "server.js",
+    "server/config/runtimeConfig.js",
+    "server/domain/playerState.js",
+    "server/domain/RoomService.js",
+    "server/domain/spawn.js",
+    "server/http/createStatusServer.js",
+    "server/runtime/startRealtimeServer.js",
+    "server/runtime/AuthoritativeWorld.js",
+    "server/socket/registerSocketHandlers.js",
+    "server/utils/ack.js",
+    "server/utils/playerCounter.js",
+    "server/utils/probeExistingServer.js"
   ];
   for (const file of files) {
     await run(process.execPath, ["--check", file]);
@@ -145,11 +156,12 @@ async function checkSocketServer() {
     await Promise.all([waitFor(() => c1.connected, 6000), waitFor(() => c2.connected, 6000)]);
 
     let roomPlayerCount = 0;
-    let receivedSync = false;
+    let receivedSnapshotAck = false;
 
-    c2.on("player:sync", (payload) => {
-      if (payload?.id === c1.id && Number.isFinite(payload?.state?.x)) {
-        receivedSync = true;
+    c1.on("snapshot:world", (payload) => {
+      const ackSeq = Number(payload?.self?.seq) || 0;
+      if (ackSeq >= 1) {
+        receivedSnapshotAck = true;
       }
     });
 
@@ -158,16 +170,18 @@ async function checkSocketServer() {
       roomPlayerCount = Number(first?.count) || 0;
     });
 
-    c1.emit("player:sync", {
-      x: 12,
-      y: 1.72,
-      z: -6,
+    c1.emit("input:cmd", {
+      seq: 1,
+      moveX: 0.2,
+      moveZ: 0.8,
       yaw: 0.8,
-      pitch: -0.12
+      pitch: -0.12,
+      sprint: false,
+      jump: false
     });
     c1.emit("room:list");
 
-    await waitFor(() => receivedSync, 5000);
+    await waitFor(() => receivedSnapshotAck, 5000);
     await waitFor(() => roomPlayerCount >= 2, 5000);
 
     c2.disconnect();

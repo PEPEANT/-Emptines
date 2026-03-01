@@ -77,6 +77,15 @@ async function main() {
   checkFile("scripts/world-audit.mjs");
   checkFile("vite.config.js");
   checkFile("server.js");
+  checkFile("server/runtime/startRealtimeServer.js");
+  checkFile("server/runtime/AuthoritativeWorld.js");
+  checkFile("server/socket/registerSocketHandlers.js");
+  checkFile("server/domain/RoomService.js");
+  checkFile("server/domain/playerState.js");
+  checkFile("server/domain/spawn.js");
+  checkFile("server/http/createStatusServer.js");
+  checkFile("server/config/runtimeConfig.js");
+  checkFile("scripts/loadtest-bots.mjs");
   checkFile("src/main.js");
   checkFile("src/styles/main.css");
   checkFile("src/game/index.js");

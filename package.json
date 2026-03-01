@@ -17,6 +17,7 @@
     "prod:save": "npx pm2 save",
     "doctor": "node scripts/doctor.mjs",
     "audit:world": "node scripts/world-audit.mjs",
+    "loadtest:bots": "node scripts/loadtest-bots.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "check": "node scripts/verify.mjs",
