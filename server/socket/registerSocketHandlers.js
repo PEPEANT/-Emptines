@@ -105,11 +105,26 @@ export function registerSocketHandlers({
 
       socket.data.playerName = safeName;
       player.name = safeName;
+      const stateRaw = player?.state && typeof player.state === "object" ? player.state : null;
+      const sx = Number(stateRaw?.x);
+      const sy = Number(stateRaw?.y);
+      const sz = Number(stateRaw?.z);
+      const syaw = Number(stateRaw?.yaw);
+      const spitch = Number(stateRaw?.pitch);
+      const state =
+        Number.isFinite(sx) &&
+        Number.isFinite(sy) &&
+        Number.isFinite(sz) &&
+        Number.isFinite(syaw) &&
+        Number.isFinite(spitch)
+          ? { x: sx, y: sy, z: sz, yaw: syaw, pitch: spitch }
+          : null;
 
       io.to(room.code).emit("chat:message", {
         id: socket.id,
         name: safeName,
-        text: safeText
+        text: safeText,
+        state
       });
       roomService.emitRoomUpdate(room);
     });

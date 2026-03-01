@@ -2890,8 +2890,6 @@ export class GameRuntime {
     this.closeSurfacePainter();
 
     if (!this.socket || !this.networkConnected) {
-      const suffix = targetIds.length > 1 ? ` (${targetIds.length}면)` : "";
-      this.appendChatLine("", `로컬 반영 완료 (오프라인)${suffix}`, "system");
       return;
     }
 
@@ -3909,20 +3907,11 @@ export class GameRuntime {
   isPlayerInPortalZone() {
     const triggerRadius = this.portalRadius * 0.78;
     const triggerRadiusSquared = triggerRadius * triggerRadius;
-    const inPrimaryPortal = (() => {
-      const dx = this.playerPosition.x - this.portalFloorPosition.x;
-      const dz = this.playerPosition.z - this.portalFloorPosition.z;
-      return dx * dx + dz * dz <= triggerRadiusSquared;
-    })();
-    if (inPrimaryPortal) {
-      return true;
-    }
-    if (!this.portalReplicaGroup) {
-      return false;
-    }
-    const dxReplica = this.playerPosition.x - this.shrinePortalPosition.x;
-    const dzReplica = this.playerPosition.z - this.shrinePortalPosition.z;
-    return dxReplica * dxReplica + dzReplica * dzReplica <= triggerRadiusSquared;
+    // Only the city-end portal (under billboard) is interactive.
+    // Bridge/shrine-side portals remain decorative and must never trigger transfer.
+    const dx = this.playerPosition.x - this.portalFloorPosition.x;
+    const dz = this.playerPosition.z - this.portalFloorPosition.z;
+    return dx * dx + dz * dz <= triggerRadiusSquared;
   }
 
   setPortalTransition(active, text = "") {
@@ -5987,12 +5976,14 @@ export class GameRuntime {
         this.setChatOpen(true);
       });
       this.chatInputEl.addEventListener("keydown", (event) => {
-        if (event.code === "Enter") {
+        const isEnter = event.code === "Enter" || event.key === "Enter";
+        const isEscape = event.code === "Escape" || event.key === "Escape";
+        if (isEnter) {
           event.preventDefault();
           this.sendChatMessage();
           return;
         }
-        if (event.code === "Escape") {
+        if (isEscape) {
           event.preventDefault();
           this.setChatOpen(false);
           this.chatInputEl.blur();
@@ -6108,6 +6099,11 @@ export class GameRuntime {
     if (this.mobileChatBtnEl) {
       this.mobileChatBtnEl.addEventListener("pointerdown", () => {
         if (!this.mobileEnabled || !this.canUseGameplayControls()) {
+          return;
+        }
+        if (this.chatOpen) {
+          this.setChatOpen(false);
+          this.chatInputEl?.blur?.();
           return;
         }
         this.focusChatInput();
@@ -6643,6 +6639,14 @@ export class GameRuntime {
         this.chatToggleBtnEl.textContent = label;
       }
       this.chatToggleBtnEl.setAttribute("aria-pressed", this.chatOpen ? "true" : "false");
+      this.chatToggleBtnEl.classList.toggle("hidden", this.mobileEnabled && !this.chatOpen);
+    }
+    if (this.mobileChatBtnEl) {
+      this.mobileChatBtnEl.setAttribute("aria-pressed", this.chatOpen ? "true" : "false");
+      const mobileLabel = this.chatOpen ? "채팅 닫기" : "채팅";
+      if (this.mobileChatBtnEl.textContent !== mobileLabel) {
+        this.mobileChatBtnEl.textContent = mobileLabel;
+      }
     }
     if (this.chatOpen) {
       this.chalkDrawingActive = false;
@@ -7109,6 +7113,27 @@ export class GameRuntime {
     };
   }
 
+  parseChatMessageState(rawState) {
+    if (!rawState || typeof rawState !== "object") {
+      return null;
+    }
+    const x = Number(rawState.x);
+    const y = Number(rawState.y);
+    const z = Number(rawState.z);
+    const yaw = Number(rawState.yaw);
+    const pitch = Number(rawState.pitch);
+    if (
+      !Number.isFinite(x) ||
+      !Number.isFinite(y) ||
+      !Number.isFinite(z) ||
+      !Number.isFinite(yaw) ||
+      !Number.isFinite(pitch)
+    ) {
+      return null;
+    }
+    return { x, y, z, yaw, pitch };
+  }
+
   handleInputAck(payload = {}) {
     const ackSeq = Math.max(0, Math.trunc(Number(payload?.seq) || 0));
     if (!ackSeq || ackSeq <= this.lastAckInputSeq) {
@@ -7491,7 +7516,7 @@ export class GameRuntime {
       if (!meshVisible) {
         remote.nameLabel.visible = false;
       } else {
-        const labelVisible = distanceScore <= this.remoteLabelDistanceSq;
+        const labelVisible = distanceScore <= this.remoteLabelDistanceSq || remote.chatLabel.visible;
         remote.nameLabel.visible = labelVisible;
 
         let shouldUpdateTransform = true;
@@ -7506,6 +7531,9 @@ export class GameRuntime {
           remote.nextLodUpdateAt = nowSec;
         }
 
+        if (remote.chatLabel.visible) {
+          shouldUpdateTransform = true;
+        }
         if (shouldUpdateTransform) {
           remote.mesh.position.lerp(remote.targetPosition, alpha);
           remote.mesh.rotation.y = lerpAngle(remote.mesh.rotation.y, remote.targetYaw, alpha);
@@ -7551,6 +7579,7 @@ export class GameRuntime {
       if (!isRecentEcho) {
         this.appendChatLine(senderName, text, "self");
       }
+      this.showLocalChatBubble(text);
       this.lastLocalChatEcho = "";
       this.lastLocalChatEchoAt = 0;
       return;
@@ -7558,9 +7587,10 @@ export class GameRuntime {
 
     this.appendChatLine(senderName, text, "remote");
 
+    const senderState = this.parseChatMessageState(payload?.state);
     let remote = null;
     if (senderId) {
-      this.upsertRemotePlayer(senderId, null, senderName);
+      this.upsertRemotePlayer(senderId, senderState, senderName);
       remote = this.remotePlayers.get(senderId) ?? null;
     } else {
       remote = this.findRemotePlayerByName(senderName);
@@ -7577,6 +7607,7 @@ export class GameRuntime {
     this.setTextLabel(remote.chatLabel, text, "chat");
     remote.chatLabel.visible = true;
     remote.chatExpireAt = performance.now() + this.chatBubbleLifetimeMs;
+    remote.lastSeen = performance.now();
   }
 
   appendChatLine(name, text, type = "remote") {
