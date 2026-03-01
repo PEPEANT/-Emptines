@@ -778,6 +778,10 @@ export class RoomService {
     }
 
     const state = room.portalSchedule;
+    const currentMode = String(state.mode ?? "idle");
+    if (currentMode === "open_manual") {
+      return { ok: false, error: "portal is manually open" };
+    }
     state.mode = delaySeconds <= this.portalFinalCountdownSeconds ? "final_countdown" : "waiting";
     state.startAtMs = now + delaySeconds * 1000;
     state.openUntilMs = 0;

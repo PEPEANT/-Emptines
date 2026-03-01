@@ -384,6 +384,7 @@ export class GameRuntime {
       finalCountdownSeconds: 10,
       updatedAt: Date.now()
     };
+    this.authoritativeSyncGraceUntil = 0;
     this.chatOpen = false;
     this.lastLocalChatEcho = "";
     this.lastLocalChatEchoAt = 0;
@@ -4083,6 +4084,7 @@ export class GameRuntime {
         return;
       }
       this.pendingAuthoritativeStateSync = false;
+      this.authoritativeSyncGraceUntil = 0;
       const state = this.parsePackedSnapshotState(response?.state);
       if (state) {
         this.applyAuthoritativeSelfState(state, 0);
@@ -4183,6 +4185,7 @@ export class GameRuntime {
     const canControlPortal = visible && this.flowStage === "city_live";
     const schedule = this.getPortalScheduleComputed();
     const portalOpenNow = schedule.mode === "open" || schedule.mode === "open_manual";
+    const canSchedulePortal = canControlPortal && !portalOpenNow;
     const controlsBusy =
       this.portalForceOpenInFlight ||
       this.portalCloseInFlight ||
@@ -4207,13 +4210,13 @@ export class GameRuntime {
     }
 
     for (const button of this.hostDelayButtons) {
-      button.disabled = !canControlPortal || controlsBusy;
+      button.disabled = !canSchedulePortal || controlsBusy;
     }
     if (this.hostDelayMinutesInputEl) {
-      this.hostDelayMinutesInputEl.disabled = !canControlPortal || controlsBusy;
+      this.hostDelayMinutesInputEl.disabled = !canSchedulePortal || controlsBusy;
     }
     if (this.hostApplyDelayBtnEl) {
-      this.hostApplyDelayBtnEl.disabled = !canControlPortal || controlsBusy;
+      this.hostApplyDelayBtnEl.disabled = !canSchedulePortal || controlsBusy;
     }
     if (this.hostPortalTargetInputEl) {
       this.hostPortalTargetInputEl.disabled = !canControlPortal || controlsBusy;
@@ -4340,6 +4343,15 @@ export class GameRuntime {
   applyPortalScheduleUpdate(raw = {}, { announce = false } = {}) {
     const next = this.normalizePortalSchedule(raw);
     this.portalSchedule = next;
+    if (next.mode === "open" || next.mode === "open_manual") {
+      this.portalPhase = "open";
+      this.portalPhaseClock = next.mode === "open" ? Math.max(1, Number(next.remainingSec) || 0) : 0;
+      this.updatePortalVisual();
+    } else if (this.portalPhase === "open") {
+      this.portalPhase = "cooldown";
+      this.portalPhaseClock = 0;
+      this.updatePortalVisual();
+    }
     this.updatePortalTimeBillboard(0, true);
     this.syncHostControls();
 
@@ -4385,6 +4397,11 @@ export class GameRuntime {
     }
     if (!this.hubFlowEnabled || this.flowStage !== "city_live") {
       this.appendChatLine("", "도시 라이브 단계에서만 예약 가능합니다.", "system");
+      return;
+    }
+    const computed = this.getPortalScheduleComputed();
+    if (computed.mode === "open" || computed.mode === "open_manual") {
+      this.appendChatLine("", "포탈이 열려 있는 동안에는 예약을 변경할 수 없습니다. 먼저 닫아주세요.", "system");
       return;
     }
     if (this.portalScheduleSetInFlight) {
@@ -6677,16 +6694,16 @@ export class GameRuntime {
       this.lastAckInputSeq = 0;
       this.pendingInputQueue.length = 0;
       this.netPingPending.clear();
+      this.pendingAuthoritativeStateSync = true;
+      this.authoritativeSyncGraceUntil = performance.now() + 2200;
       this.updateRoomPlayerSnapshot([]);
       this.syncHostControls();
       this.hud.setStatus(this.getStatusText());
       this.syncFullscreenRestoreFlag();
+      this.requestAuthoritativeStateSync();
       this.syncPlayerNameIfConnected();
       this.startNetworkPing();
       this.requestHostClaim();
-      if (this.pendingAuthoritativeStateSync) {
-        this.requestAuthoritativeStateSync();
-      }
     });
 
     socket.on("disconnect", () => {
@@ -6710,6 +6727,7 @@ export class GameRuntime {
       this.pendingInputQueue.length = 0;
       this.netPingPending.clear();
       this.stopNetworkPing();
+      this.authoritativeSyncGraceUntil = 0;
       this.clearRemotePlayers();
       this.updateRoomPlayerSnapshot([]);
       this.setPlayerRosterVisible(false);
@@ -6735,6 +6753,7 @@ export class GameRuntime {
       this.lastSentInput = null;
       this.pendingJumpInput = false;
       this.pendingInputQueue.length = 0;
+      this.authoritativeSyncGraceUntil = 0;
       this.clearRemotePlayers();
       this.updateRoomPlayerSnapshot([]);
       this.setPlayerRosterVisible(false);
@@ -7028,11 +7047,16 @@ export class GameRuntime {
     const errorSq = dx * dx + dy * dy + dz * dz;
     const now = performance.now();
     const recentlyMoving = now - this.lastActiveMoveInputAt < 240;
+    const inReconnectStateSyncGrace =
+      this.pendingAuthoritativeStateSync && now < this.authoritativeSyncGraceUntil;
 
     // XZ-only error for snap decision: ignore Y so a jump doesn't cause a snap.
     const xzErrorSq = dx * dx + dz * dz;
 
     if (xzErrorSq > 64) {
+      if (inReconnectStateSyncGrace) {
+        return;
+      }
       // XZ error > 8 m: hard snap XZ to server. Only move Y if server is above (floor correction).
       this.playerPosition.x = targetX;
       this.playerPosition.z = targetZ;
@@ -7098,7 +7122,14 @@ export class GameRuntime {
     const selfState = this.parsePackedSnapshotState(payload?.self?.s);
     const selfSeq = Math.max(0, Math.trunc(Number(payload?.self?.seq) || 0));
     if (selfState) {
-      this.applyAuthoritativeSelfState(selfState, selfSeq);
+      if (this.pendingAuthoritativeStateSync) {
+        if (selfSeq > 0) {
+          this.handleInputAck({ seq: selfSeq });
+        }
+        this.requestAuthoritativeStateSync();
+      } else {
+        this.applyAuthoritativeSelfState(selfState, selfSeq);
+      }
     } else if (selfSeq > 0) {
       this.handleInputAck({ seq: selfSeq });
     }

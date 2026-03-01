@@ -24,8 +24,8 @@ export const DEFAULT_SERVER_SIM_CONFIG = {
 };
 
 export const DEFAULT_SNAPSHOT_CONFIG = {
-  aoiRadius: 64,
-  maxPeersPerClient: 24,
+  aoiRadius: 380,
+  maxPeersPerClient: 48,
   heartbeatMs: 950,
   minMoveSq: 0.00064,
   minYawDelta: 0.01,
@@ -182,13 +182,13 @@ export function loadRuntimeConfig(env = process.env) {
       )
     },
     snapshot: {
-      aoiRadius: parseBoundedNumber(env.SNAPSHOT_AOI_RADIUS, DEFAULT_SNAPSHOT_CONFIG.aoiRadius, 8, 256),
+      aoiRadius: parseBoundedNumber(env.SNAPSHOT_AOI_RADIUS, DEFAULT_SNAPSHOT_CONFIG.aoiRadius, 8, 512),
       maxPeersPerClient: Math.trunc(
         parseBoundedNumber(
           env.SNAPSHOT_MAX_PEERS,
           DEFAULT_SNAPSHOT_CONFIG.maxPeersPerClient,
           4,
-          128
+          256
         )
       ),
       heartbeatMs: parseBoundedNumber(

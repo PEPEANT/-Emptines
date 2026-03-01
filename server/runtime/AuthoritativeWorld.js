@@ -262,7 +262,8 @@ export class AuthoritativeWorld {
 
     const dx = nextX - currentX;
     const dz = nextZ - currentZ;
-    const maxSyncDistance = Math.max(40, worldLimit * 1.35);
+    const worldDiagonal = Math.sqrt((worldLimit * 2) ** 2 + (worldLimit * 2) ** 2);
+    const maxSyncDistance = Math.max(40, worldDiagonal + 12);
     if (dx * dx + dz * dz > maxSyncDistance * maxSyncDistance) {
       return { ok: false, error: "state sync too far" };
     }
