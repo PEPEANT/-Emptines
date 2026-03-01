@@ -2245,7 +2245,7 @@ export class GameRuntime {
   }
 
   getSurfacePaintTarget(maxDistance = null) {
-    if (!this.canUseGameplayControls() || this.surfacePainterOpen) {
+    if (!this.canMovePlayer() || this.surfacePainterOpen) {
       return null;
     }
     if (!this.paintableSurfaceMeshes.length) {
@@ -2254,7 +2254,7 @@ export class GameRuntime {
     const distanceLimit = Number.isFinite(maxDistance)
       ? Math.max(1, Number(maxDistance) || 0)
       : this.mobileEnabled
-        ? 9.5
+        ? 14
         : 6.2;
 
     this.surfacePaintRaycaster.setFromCamera(this.surfacePaintAimPoint, this.camera);
@@ -2290,8 +2290,7 @@ export class GameRuntime {
       return;
     }
 
-    const inCityLive = !this.hubFlowEnabled || this.flowStage === "city_live";
-    if (!inCityLive || this.chatOpen || this.surfacePainterOpen || !this.canUseGameplayControls()) {
+    if (this.chatOpen || this.surfacePainterOpen || !this.canMovePlayer()) {
       this.surfacePaintTarget = null;
       this.surfacePaintProbeClock = this.surfacePaintProbeInterval;
       this.surfacePaintPromptEl?.classList.add("hidden");
@@ -2313,7 +2312,7 @@ export class GameRuntime {
     const visible = Boolean(this.surfacePaintTarget);
     this.surfacePaintPromptEl?.classList.toggle("hidden", !visible || this.mobileEnabled);
     if (this.mobilePaintBtnEl) {
-      this.mobilePaintBtnEl.classList.toggle("hidden", !visible || !this.mobileEnabled);
+      this.mobilePaintBtnEl.classList.toggle("hidden", !this.mobileEnabled);
       this.mobilePaintBtnEl.disabled = !visible;
     }
   }
@@ -2326,7 +2325,9 @@ export class GameRuntime {
       return false;
     }
 
-    const target = this.surfacePaintTarget ?? this.getSurfacePaintTarget();
+    const target =
+      this.surfacePaintTarget ??
+      this.getSurfacePaintTarget(this.mobileEnabled ? 14 : 6.2);
     const surfaceId = String(target?.surfaceId ?? "").trim();
     if (!surfaceId) {
       return false;
@@ -2996,7 +2997,44 @@ export class GameRuntime {
     if (typeof document === "undefined" || !document.body) {
       return;
     }
-    document.body.classList.toggle("is-mobile-ui", Boolean(this.mobileEnabled));
+    const mobile = Boolean(this.mobileEnabled);
+    document.body.classList.toggle("is-mobile-ui", mobile);
+
+    const hudUi = document.getElementById("hud-ui");
+    const hudStatusRow = document.getElementById("hud-row-status");
+    const hudPositionRow = document.getElementById("hud-row-position");
+    const hudFpsRow = document.getElementById("hud-row-fps");
+    const hudPlayersRow = document.getElementById("hud-row-players");
+    const hudPlayersKey = hudPlayersRow?.querySelector?.(".hud-key");
+    const hubFlowUi = document.getElementById("hub-flow-ui");
+    const rosterHint = document.querySelector?.(".player-roster-hint");
+
+    hudStatusRow?.classList.toggle("hidden", mobile);
+    hudPositionRow?.classList.toggle("hidden", mobile);
+    hudFpsRow?.classList.toggle("hidden", mobile);
+    hudPlayersKey?.classList.toggle("hidden", mobile);
+    hubFlowUi?.classList.toggle("hidden", mobile);
+    rosterHint?.classList.toggle("hidden", mobile);
+
+    if (hudUi) {
+      if (mobile) {
+        hudUi.style.background = "transparent";
+        hudUi.style.border = "none";
+        hudUi.style.backdropFilter = "none";
+        hudUi.style.boxShadow = "none";
+        hudUi.style.padding = "0";
+        hudUi.style.minWidth = "0";
+        hudUi.style.gap = "0";
+      } else {
+        hudUi.style.background = "";
+        hudUi.style.border = "";
+        hudUi.style.backdropFilter = "";
+        hudUi.style.boxShadow = "";
+        hudUi.style.padding = "";
+        hudUi.style.minWidth = "";
+        hudUi.style.gap = "";
+      }
+    }
   }
 
   syncMobileUiState() {
@@ -3012,10 +3050,11 @@ export class GameRuntime {
       this.flowStage !== "portal_transfer" &&
       (this.nicknameGateEl?.classList.contains("hidden") ?? true);
     this.mobileUiEl.classList.toggle("hidden", !visible);
-    this.mobilePaintBtnEl?.classList.toggle(
-      "hidden",
-      !visible || !this.isSurfacePaintFeatureEnabled() || !this.surfacePaintTarget
-    );
+    if (this.mobilePaintBtnEl) {
+      const paintEnabled = this.isSurfacePaintFeatureEnabled();
+      this.mobilePaintBtnEl.classList.toggle("hidden", !visible || !paintEnabled);
+      this.mobilePaintBtnEl.disabled = !visible || !paintEnabled || !this.surfacePaintTarget;
+    }
     if (!visible) {
       this.resetMobileMoveInput();
       this.mobileSprintHeld = false;
@@ -3162,7 +3201,7 @@ export class GameRuntime {
   }
 
   setFlowHeadline(title, subtitle) {
-    if (this.hubFlowUiEl) {
+    if (this.hubFlowUiEl && !this.mobileEnabled) {
       this.hubFlowUiEl.classList.remove("hidden");
     }
     const nextTitle = String(title ?? "").trim();
@@ -5641,7 +5680,7 @@ export class GameRuntime {
     }
     if (this.mobilePaintBtnEl) {
       this.mobilePaintBtnEl.addEventListener("pointerdown", () => {
-        if (!this.mobileEnabled || !this.canUseGameplayControls()) {
+        if (!this.mobileEnabled || !this.canMovePlayer()) {
           return;
         }
         this.tryOpenSurfacePainterFromInteraction();
