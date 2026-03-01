@@ -10,6 +10,13 @@
   </head>
   <body>
     <div id="app"></div>
+    <button id="fullscreen-toggle" type="button" aria-pressed="false">전체화면</button>
+    <div id="mobile-rotate-overlay" class="hidden" aria-live="assertive" role="dialog" aria-modal="true">
+      <div id="mobile-rotate-card">
+        <strong>가로로 돌려주세요</strong>
+        <p>모바일은 가로 모드에서만 플레이할 수 있습니다.</p>
+      </div>
+    </div>
 
     <div id="hud-ui" aria-label="상태">
       <div class="hud-row" id="hud-row-status">

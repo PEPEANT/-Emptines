@@ -82,6 +82,27 @@ canvas {
   display: none !important;
 }
 
+#fullscreen-toggle {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 72;
+  min-width: 88px;
+  height: 32px;
+  border: 1px solid rgba(180, 212, 239, 0.66);
+  border-radius: 999px;
+  background: rgba(10, 24, 39, 0.84);
+  color: #e6f4ff;
+  font: 700 0.66rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+
+#fullscreen-toggle:hover {
+  border-color: rgba(214, 236, 255, 0.92);
+  background: rgba(19, 45, 69, 0.92);
+}
+
 #player-roster {
   position: fixed;
   top: 14px;
@@ -492,6 +513,41 @@ canvas {
   background: #000;
 }
 
+#mobile-rotate-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 96;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(3, 10, 16, 0.96);
+}
+
+#mobile-rotate-card {
+  width: min(90vw, 420px);
+  padding: 18px 16px;
+  border: 1px solid rgba(175, 211, 240, 0.6);
+  border-radius: 12px;
+  background: rgba(10, 26, 40, 0.92);
+  box-shadow: 0 14px 32px rgba(2, 8, 13, 0.42);
+  text-align: center;
+}
+
+#mobile-rotate-card strong {
+  display: block;
+  margin-bottom: 8px;
+  color: #ebf8ff;
+  font: 800 1rem/1.2 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.05em;
+}
+
+#mobile-rotate-card p {
+  margin: 0;
+  color: rgba(206, 231, 249, 0.94);
+  font: 700 0.8rem/1.4 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.03em;
+}
+
 #portal-transition {
   position: fixed;
   inset: 0;
@@ -592,9 +648,10 @@ canvas {
 #surface-paint-prompt {
   position: fixed;
   left: 50%;
-  bottom: 136px;
+  top: 50%;
+  bottom: auto;
   z-index: 60;
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
   background: rgba(6, 16, 28, 0.8);
   color: #d8eeff;
   font: 600 0.82rem/1.4 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
@@ -891,6 +948,18 @@ canvas {
   display: grid;
   gap: 8px;
   justify-items: end;
+  pointer-events: auto;
+}
+
+#mobile-paint {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  min-width: 116px;
+  height: 42px;
+  border-radius: 999px;
+  z-index: 66;
   pointer-events: auto;
 }
 
@@ -1445,7 +1514,9 @@ body.is-mobile-ui #chat-ui.mobile-fullscreen #chat-send {
   }
 
   #surface-paint-prompt {
-    bottom: 150px;
+    top: 50%;
+    bottom: auto;
+    transform: translate(-50%, -50%);
     font-size: 0.74rem;
   }
 
@@ -1609,6 +1680,21 @@ body.is-mobile-ui #surface-painter-actions button {
   min-width: 0;
   height: 42px;
   font-size: 0.72rem;
+}
+
+body.mobile-portrait-lock #tool-ui,
+body.mobile-portrait-lock #mobile-ui,
+body.mobile-portrait-lock #chat-ui,
+body.mobile-portrait-lock #host-controls,
+body.mobile-portrait-lock #player-roster,
+body.mobile-portrait-lock #hub-flow-ui,
+body.mobile-portrait-lock #nickname-gate,
+body.mobile-portrait-lock #surface-paint-prompt,
+body.mobile-portrait-lock #chalk-pickup-prompt,
+body.mobile-portrait-lock #surface-painter,
+body.mobile-portrait-lock #hud-ui,
+body.mobile-portrait-lock #fullscreen-toggle {
+  display: none !important;
 }
 
 /* Fallback mobile rules even when body.is-mobile-ui is not set */

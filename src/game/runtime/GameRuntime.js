@@ -214,6 +214,13 @@ export class GameRuntime {
     this.surfacePainterTargetId = "";
     this.surfacePainterSaveInFlight = false;
     this.surfacePaintSendInFlight = false;
+    this.surfacePaintRetryQueue = new Map();
+    this.surfacePaintRetryInFlight = false;
+    this.surfacePaintRetryTimer = null;
+    this.surfacePaintRetryDelayMs = 1700;
+    this.surfacePaintLinkWarningShown = false;
+    this.socketEndpointValidationError = "";
+    this.socketEndpointLinkRequired = false;
     this.surfacePainterEraserEnabled = false;
     this.surfacePainterCanvasLoadNonce = 0;
     this.surfacePaintProbeWorldPosition = new THREE.Vector3();
@@ -350,6 +357,8 @@ export class GameRuntime {
     this.mobileSprintBtnEl = document.getElementById("mobile-sprint");
     this.mobileChatBtnEl = document.getElementById("mobile-chat");
     this.mobilePaintBtnEl = document.getElementById("mobile-paint");
+    this.mobileRotateOverlayEl = document.getElementById("mobile-rotate-overlay");
+    this.fullscreenToggleBtnEl = document.getElementById("fullscreen-toggle");
     this.playerRosterEl = document.getElementById("player-roster");
     this.playerRosterCountEl = document.getElementById("player-roster-count");
     this.playerRosterListEl = document.getElementById("player-roster-list");
@@ -567,6 +576,7 @@ export class GameRuntime {
     this.scene.add(this.camera);
     this.syncBodyUiModeClass();
     this.resolveUiElements();
+    this.updateFullscreenToggleState();
     this.setupToolState();
     this.setChatOpen(false);
 
@@ -2549,7 +2559,7 @@ export class GameRuntime {
     this.surfacePainterTouchId = null;
     this.surfacePainterTargetId = normalizedId;
     this.surfacePainterSaveInFlight = false;
-    this.surfacePainterSaveBtnEl?.removeAttribute("disabled");
+    this.updateSurfacePainterSaveAvailability();
     this.setSurfacePainterEraserEnabled(false);
     if (this.surfacePainterApplyAllEl) {
       this.surfacePainterApplyAllEl.checked = false;
@@ -2559,6 +2569,7 @@ export class GameRuntime {
     }
 
     this.keys.clear();
+    this.resetMobileControlInputState();
     this.chalkDrawingActive = false;
     this.chalkLastStamp = null;
     this.setChatOpen(false);
@@ -2578,11 +2589,24 @@ export class GameRuntime {
     }
     this.surfacePainterOpen = false;
     this.surfacePainterDrawing = false;
+    if (
+      this.surfacePainterPointerId !== null &&
+      this.surfacePainterCanvasEl &&
+      typeof this.surfacePainterCanvasEl.releasePointerCapture === "function"
+    ) {
+      try {
+        this.surfacePainterCanvasEl.releasePointerCapture(this.surfacePainterPointerId);
+      } catch {
+        // ignore stale capture errors
+      }
+    }
     this.surfacePainterPointerId = null;
     this.surfacePainterTouchId = null;
     this.surfacePainterTargetId = "";
     this.surfacePainterCanvasLoadNonce += 1;
+    this.resetMobileControlInputState();
     this.surfacePainterEl?.classList.add("hidden");
+    this.updateSurfacePainterSaveAvailability();
     this.updateSurfacePaintPrompt();
     this.syncMobileUiState();
   }
@@ -2843,8 +2867,152 @@ export class GameRuntime {
     }
   }
 
-  requestSurfacePaintSnapshot() {
+  isSurfacePaintOnlineReady() {
+    return Boolean(this.socket && this.networkConnected && this.socketEndpoint);
+  }
+
+  getSurfacePaintSaveBlockedReason() {
+    if (this.surfacePainterSaveInFlight) {
+      return "그림 저장 중입니다.";
+    }
+    if (!this.socketEndpoint) {
+      const endpointError = String(this.socketEndpointValidationError ?? "").trim();
+      if (endpointError) {
+        return endpointError;
+      }
+      return "서버 링크가 필요합니다. ?server=https://... 형식으로 접속하세요.";
+    }
     if (!this.socket || !this.networkConnected) {
+      return "서버 연결 후 저장할 수 있습니다.";
+    }
+    return "";
+  }
+
+  showSurfacePaintLinkWarningOnce(message = "") {
+    const text = String(message ?? this.socketEndpointValidationError ?? "").trim();
+    if (!text || this.surfacePaintLinkWarningShown) {
+      return;
+    }
+    this.surfacePaintLinkWarningShown = true;
+    this.appendChatLine("", text, "system");
+  }
+
+  updateSurfacePainterSaveAvailability() {
+    if (!this.surfacePainterSaveBtnEl) {
+      return;
+    }
+    const blockedReason = this.getSurfacePaintSaveBlockedReason();
+    const canSave = !blockedReason;
+    this.surfacePainterSaveBtnEl.disabled = !canSave;
+    if (!canSave) {
+      this.surfacePainterSaveBtnEl.title = blockedReason;
+    } else {
+      this.surfacePainterSaveBtnEl.removeAttribute("title");
+    }
+  }
+
+  isRetryableSurfacePaintError(reason) {
+    const text = String(reason ?? "").trim().toLowerCase();
+    if (!text) {
+      return true;
+    }
+    return (
+      text.includes("offline") ||
+      text.includes("timeout") ||
+      text.includes("network") ||
+      text.includes("transport") ||
+      text.includes("room not found") ||
+      text.includes("player not in room") ||
+      text.includes("disconnected")
+    );
+  }
+
+  enqueueSurfacePaintRetry(surfaceId, imageDataUrl, reason = "") {
+    const normalizedId = String(surfaceId ?? "").trim();
+    const normalizedImage = String(imageDataUrl ?? "").trim();
+    if (!normalizedId || !normalizedImage.startsWith("data:image/")) {
+      return;
+    }
+    const previous = this.surfacePaintRetryQueue.get(normalizedId) ?? {};
+    this.surfacePaintRetryQueue.set(normalizedId, {
+      surfaceId: normalizedId,
+      imageDataUrl: normalizedImage,
+      retryCount: Math.max(0, Math.trunc(Number(previous.retryCount) || 0)),
+      lastError: String(reason ?? "").trim(),
+      queuedAt: Math.max(0, Math.trunc(Number(previous.queuedAt) || Date.now()))
+    });
+    this.scheduleSurfacePaintRetry();
+  }
+
+  scheduleSurfacePaintRetry(delayMs = this.surfacePaintRetryDelayMs) {
+    if (this.surfacePaintRetryQueue.size <= 0) {
+      return;
+    }
+    if (this.surfacePaintRetryTimer) {
+      window.clearTimeout(this.surfacePaintRetryTimer);
+      this.surfacePaintRetryTimer = null;
+    }
+    const waitMs = Math.max(120, Math.trunc(Number(delayMs) || this.surfacePaintRetryDelayMs));
+    this.surfacePaintRetryTimer = window.setTimeout(() => {
+      this.surfacePaintRetryTimer = null;
+      void this.flushSurfacePaintRetryQueue();
+    }, waitMs);
+  }
+
+  async flushSurfacePaintRetryQueue() {
+    if (this.surfacePaintRetryInFlight || this.surfacePaintRetryQueue.size <= 0) {
+      return;
+    }
+    if (!this.isSurfacePaintOnlineReady()) {
+      this.scheduleSurfacePaintRetry();
+      return;
+    }
+
+    this.surfacePaintRetryInFlight = true;
+    let successCount = 0;
+    try {
+      const items = Array.from(this.surfacePaintRetryQueue.entries()).slice(0, 8);
+      for (const [surfaceId, entry] of items) {
+        const response = await this.sendSurfacePaintUpdate(surfaceId, entry?.imageDataUrl ?? "");
+        if (response?.ok) {
+          this.surfacePaintRetryQueue.delete(surfaceId);
+          this.applySurfacePaintUpdate(response);
+          successCount += 1;
+          continue;
+        }
+        const reason = String(response?.error ?? "").trim() || "unknown";
+        if (!this.isRetryableSurfacePaintError(reason)) {
+          this.surfacePaintRetryQueue.delete(surfaceId);
+          this.appendChatLine("", `그림 재시도 중단(${surfaceId}): ${reason}`, "system");
+          continue;
+        }
+        const retryCount = Math.max(0, Math.trunc(Number(entry?.retryCount) || 0)) + 1;
+        if (retryCount > 15) {
+          this.surfacePaintRetryQueue.delete(surfaceId);
+          this.appendChatLine("", `그림 재시도 한도 초과(${surfaceId})`, "system");
+          continue;
+        }
+        this.surfacePaintRetryQueue.set(surfaceId, {
+          surfaceId,
+          imageDataUrl: String(entry?.imageDataUrl ?? ""),
+          retryCount,
+          lastError: reason,
+          queuedAt: Math.max(0, Math.trunc(Number(entry?.queuedAt) || Date.now()))
+        });
+      }
+    } finally {
+      this.surfacePaintRetryInFlight = false;
+    }
+    if (successCount > 0) {
+      this.requestSurfacePaintSnapshot();
+    }
+    if (this.surfacePaintRetryQueue.size > 0) {
+      this.scheduleSurfacePaintRetry();
+    }
+  }
+
+  requestSurfacePaintSnapshot() {
+    if (!this.isSurfacePaintOnlineReady()) {
       return;
     }
     this.socket.emit("paint:state:request");
@@ -2852,12 +3020,26 @@ export class GameRuntime {
 
   sendSurfacePaintUpdate(surfaceId, imageDataUrl) {
     return new Promise((resolve) => {
-      if (!this.socket || !this.networkConnected) {
+      if (!this.isSurfacePaintOnlineReady()) {
         resolve({ ok: false, error: "offline" });
         return;
       }
-      this.socket.emit("paint:surface:set", { surfaceId, imageDataUrl }, (response = {}) => {
+      let settled = false;
+      const finish = (response = {}) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        if (timeoutId) {
+          window.clearTimeout(timeoutId);
+        }
         resolve(response);
+      };
+      const timeoutId = window.setTimeout(() => {
+        finish({ ok: false, error: "timeout" });
+      }, 4500);
+      this.socket.emit("paint:surface:set", { surfaceId, imageDataUrl }, (response = {}) => {
+        finish(response);
       });
     });
   }
@@ -2876,59 +3058,68 @@ export class GameRuntime {
       return;
     }
 
-    const previousStates = new Map();
-    const previousUpdatedAt = new Map();
-    for (const targetId of targetIds) {
-      previousStates.set(targetId, String(this.surfacePaintState.get(targetId) ?? ""));
-      previousUpdatedAt.set(targetId, Math.max(0, Math.trunc(Number(this.surfacePaintUpdatedAt.get(targetId)) || 0)));
+    const blockedReason = this.getSurfacePaintSaveBlockedReason();
+    if (blockedReason) {
+      if (!this.socketEndpoint || this.socketEndpointLinkRequired) {
+        this.showSurfacePaintLinkWarningOnce(blockedReason);
+      } else {
+        this.appendChatLine("", blockedReason, "system");
+      }
+      this.updateSurfacePainterSaveAvailability();
+      return;
     }
 
     const imageDataUrl = this.surfacePainterCanvasEl.toDataURL("image/jpeg", 0.84);
-    for (const targetId of targetIds) {
-      this.applySurfacePaintUpdate({ surfaceId: targetId, imageDataUrl });
-    }
-    this.closeSurfacePainter();
-
-    if (!this.socket || !this.networkConnected) {
-      return;
-    }
-
     this.surfacePainterSaveInFlight = true;
     this.surfacePaintSendInFlight = true;
+    this.updateSurfacePainterSaveAvailability();
+    let successCount = 0;
+    let queuedCount = 0;
     let failedCount = 0;
     let lastReason = "";
-    const failedTargetIds = [];
-    for (const targetId of targetIds) {
-      const response = await this.sendSurfacePaintUpdate(targetId, imageDataUrl);
-      if (!response?.ok) {
-        failedCount += 1;
-        lastReason = String(response?.error ?? "").trim() || "알 수 없는 오류";
-        failedTargetIds.push(targetId);
-        continue;
-      }
-      this.applySurfacePaintUpdate(response);
-    }
-    this.surfacePainterSaveInFlight = false;
-    this.surfacePaintSendInFlight = false;
-    if (failedCount > 0) {
-      for (const targetId of failedTargetIds) {
-        const previousImage = String(previousStates.get(targetId) ?? "");
-        const previousTs = Math.max(0, Math.trunc(Number(previousUpdatedAt.get(targetId)) || 0));
-        if (previousImage && previousImage.startsWith("data:image/")) {
-          this.surfacePaintState.set(targetId, previousImage);
-          this.surfacePaintUpdatedAt.set(targetId, previousTs);
-          this.applySurfacePaintTexture(targetId, previousImage);
-        } else {
-          this.surfacePaintState.delete(targetId);
-          this.surfacePaintUpdatedAt.delete(targetId);
-          this.resetSurfacePaintTexture(targetId);
+    try {
+      for (const targetId of targetIds) {
+        const response = await this.sendSurfacePaintUpdate(targetId, imageDataUrl);
+        if (response?.ok) {
+          successCount += 1;
+          this.applySurfacePaintUpdate(response);
+          continue;
         }
+
+        const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
+        lastReason = reason;
+        if (this.isRetryableSurfacePaintError(reason)) {
+          queuedCount += 1;
+          this.enqueueSurfacePaintRetry(targetId, imageDataUrl, reason);
+          continue;
+        }
+        failedCount += 1;
       }
+    } finally {
+      this.surfacePainterSaveInFlight = false;
+      this.surfacePaintSendInFlight = false;
+      this.updateSurfacePainterSaveAvailability();
+    }
+
+    if (failedCount > 0) {
       this.requestSurfacePaintSnapshot();
       this.appendChatLine("", `그림 반영 실패(${failedCount}면): ${lastReason}`, "system");
-      return;
     }
-    if (targetIds.length > 1) {
+
+    if (queuedCount > 0) {
+      this.appendChatLine(
+        "",
+        `그림 저장 대기열 등록(${queuedCount}면): 연결 복구 시 자동 재시도`,
+        "system"
+      );
+      this.scheduleSurfacePaintRetry(600);
+    }
+
+    if (failedCount === 0 && (successCount > 0 || queuedCount > 0)) {
+      this.closeSurfacePainter();
+    }
+
+    if (failedCount === 0 && targetIds.length > 1) {
       this.appendChatLine("", `오브젝트 전체면(${targetIds.length}) 반영 완료`, "system");
     }
   }
@@ -3325,6 +3516,7 @@ export class GameRuntime {
     document.body.classList.toggle("is-mobile-ui", mobile);
     if (!mobile) {
       document.body.classList.remove("chat-mobile-open");
+      document.body.classList.remove("mobile-portrait-lock");
     }
 
     const hudUi = document.getElementById("hud-ui");
@@ -3354,12 +3546,34 @@ export class GameRuntime {
     }
   }
 
+  isMobilePortraitBlocked() {
+    if (!this.mobileEnabled || typeof window === "undefined") {
+      return false;
+    }
+    const width = Math.max(0, Number(window.innerWidth) || 0);
+    const height = Math.max(0, Number(window.innerHeight) || 0);
+    if (width <= 0 || height <= 0) {
+      return false;
+    }
+    return height > width;
+  }
+
   syncMobileUiState() {
     if (!this.mobileUiEl) {
       return;
     }
+    const portraitBlocked = this.isMobilePortraitBlocked();
+    this.mobileRotateOverlayEl?.classList.toggle("hidden", !portraitBlocked);
+    if (typeof document !== "undefined" && document.body) {
+      document.body.classList.toggle("mobile-portrait-lock", portraitBlocked);
+    }
+    if (portraitBlocked && this.chatOpen) {
+      this.setChatOpen(false);
+      return;
+    }
     const visible =
       this.mobileEnabled &&
+      !portraitBlocked &&
       !this.chatOpen &&
       this.canMovePlayer() &&
       !this.surfacePainterOpen &&
@@ -3374,21 +3588,36 @@ export class GameRuntime {
       this.mobilePaintBtnEl.disabled = !paintVisible;
     }
     if (!visible) {
-      this.resetMobileMoveInput();
-      this.mobileSprintHeld = false;
-      this.mobileJumpQueued = false;
-      this.mobileLookTouchId = null;
-      this.mobileSprintBtnEl?.classList.remove("active");
-      this.mobileJumpBtnEl?.classList.remove("active");
+      this.resetMobileControlInputState();
     }
   }
 
   resetMobileMoveInput() {
+    if (
+      this.mobileMovePointerId !== null &&
+      this.mobileMovePadEl &&
+      typeof this.mobileMovePadEl.releasePointerCapture === "function"
+    ) {
+      try {
+        this.mobileMovePadEl.releasePointerCapture(this.mobileMovePointerId);
+      } catch {
+        // ignore stale capture errors
+      }
+    }
     this.mobileMovePointerId = null;
     this.mobileMoveVector.set(0, 0);
     if (this.mobileMoveStickEl) {
       this.mobileMoveStickEl.style.transform = "translate(-50%, -50%)";
     }
+  }
+
+  resetMobileControlInputState() {
+    this.resetMobileMoveInput();
+    this.mobileLookTouchId = null;
+    this.mobileSprintHeld = false;
+    this.mobileJumpQueued = false;
+    this.mobileSprintBtnEl?.classList.remove("active");
+    this.mobileJumpBtnEl?.classList.remove("active");
   }
 
   updateMobileMoveFromPointer(clientX, clientY) {
@@ -3545,6 +3774,9 @@ export class GameRuntime {
   }
 
   canMovePlayer() {
+    if (this.isMobilePortraitBlocked()) {
+      return false;
+    }
     if (this.surfacePainterOpen) {
       return false;
     }
@@ -3561,6 +3793,9 @@ export class GameRuntime {
   }
 
   canUseGameplayControls() {
+    if (this.isMobilePortraitBlocked()) {
+      return false;
+    }
     if (this.surfacePainterOpen) {
       return false;
     }
@@ -3580,6 +3815,66 @@ export class GameRuntime {
 
   isFullscreenActive() {
     return Boolean(this.getFullscreenElement());
+  }
+
+  canUseFullscreenApi() {
+    if (typeof document === "undefined") {
+      return false;
+    }
+    const root = document.documentElement;
+    if (!root) {
+      return false;
+    }
+    const requestFn = root.requestFullscreen ?? root.webkitRequestFullscreen;
+    const exitFn = document.exitFullscreen ?? document.webkitExitFullscreen;
+    return typeof requestFn === "function" && typeof exitFn === "function";
+  }
+
+  updateFullscreenToggleState() {
+    if (!this.fullscreenToggleBtnEl) {
+      return;
+    }
+    if (!this.canUseFullscreenApi()) {
+      this.fullscreenToggleBtnEl.classList.add("hidden");
+      return;
+    }
+    const active = this.isFullscreenActive();
+    this.fullscreenToggleBtnEl.classList.remove("hidden");
+    this.fullscreenToggleBtnEl.textContent = active ? "전체해제" : "전체화면";
+    this.fullscreenToggleBtnEl.setAttribute("aria-pressed", active ? "true" : "false");
+    this.fullscreenToggleBtnEl.title = active ? "전체화면 종료" : "전체화면 진입";
+  }
+
+  toggleFullscreenFromInteraction() {
+    if (!this.canUseFullscreenApi() || typeof document === "undefined") {
+      return;
+    }
+    if (this.isFullscreenActive()) {
+      const exitFn = document.exitFullscreen ?? document.webkitExitFullscreen;
+      try {
+        const maybePromise = exitFn.call(document);
+        if (maybePromise && typeof maybePromise.catch === "function") {
+          maybePromise.catch(() => {});
+        }
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
+    const root = document.documentElement;
+    if (!root) {
+      return;
+    }
+    const requestFn = root.requestFullscreen ?? root.webkitRequestFullscreen;
+    try {
+      const maybePromise = requestFn.call(root);
+      if (maybePromise && typeof maybePromise.catch === "function") {
+        maybePromise.catch(() => {});
+      }
+    } catch {
+      // ignore
+    }
   }
 
   requestFullscreenFromInteraction() {
@@ -5736,8 +6031,17 @@ export class GameRuntime {
 
   bindEvents() {
     this.resolveUiElements();
+    this.updateFullscreenToggleState();
 
     window.addEventListener("resize", () => this.onResize());
+    document.addEventListener("fullscreenchange", () => this.updateFullscreenToggleState());
+    document.addEventListener("webkitfullscreenchange", () => this.updateFullscreenToggleState());
+
+    if (this.fullscreenToggleBtnEl) {
+      this.fullscreenToggleBtnEl.addEventListener("click", () => {
+        this.toggleFullscreenFromInteraction();
+      });
+    }
 
     window.addEventListener("keydown", (event) => {
       if (this.isTextInputTarget(event.target)) {
@@ -6485,6 +6789,12 @@ export class GameRuntime {
     if (!this.mobilePaintBtnEl) {
       this.mobilePaintBtnEl = document.getElementById("mobile-paint");
     }
+    if (!this.mobileRotateOverlayEl) {
+      this.mobileRotateOverlayEl = document.getElementById("mobile-rotate-overlay");
+    }
+    if (!this.fullscreenToggleBtnEl) {
+      this.fullscreenToggleBtnEl = document.getElementById("fullscreen-toggle");
+    }
     if (!this.hostControlsEl) {
       this.hostControlsEl = document.getElementById("host-controls");
     }
@@ -6758,6 +7068,8 @@ export class GameRuntime {
       this.syncHostControls();
       this.hud.setStatus(this.getStatusText());
       this.hud.setPlayers(0);
+      this.updateSurfacePainterSaveAvailability();
+      this.showSurfacePaintLinkWarningOnce();
       return;
     }
 
@@ -6800,6 +7112,10 @@ export class GameRuntime {
       this.requestAuthoritativeStateSync();
       this.syncPlayerNameIfConnected();
       this.requestSurfacePaintSnapshot();
+      if (this.surfacePaintRetryQueue.size > 0) {
+        this.scheduleSurfacePaintRetry(240);
+      }
+      this.updateSurfacePainterSaveAvailability();
       this.startNetworkPing();
       this.requestHostClaim();
     });
@@ -6833,6 +7149,7 @@ export class GameRuntime {
       this.syncHostControls();
       this.hud.setStatus(this.getStatusText());
       this.hud.setPlayers(0);
+      this.updateSurfacePainterSaveAvailability();
     });
 
     socket.on("connect_error", () => {
@@ -6860,6 +7177,7 @@ export class GameRuntime {
       this.stopNetworkPing();
       this.hud.setStatus(this.getStatusText());
       this.hud.setPlayers(0);
+      this.updateSurfacePainterSaveAvailability();
     });
 
     socket.on("room:update", (room) => {
@@ -6891,6 +7209,9 @@ export class GameRuntime {
 
     socket.on("paint:state", (payload = {}) => {
       this.applySurfacePaintSnapshot(payload);
+      if (this.surfacePaintRetryQueue.size > 0) {
+        this.scheduleSurfacePaintRetry(900);
+      }
     });
 
     socket.on("paint:surface:update", (payload = {}) => {
@@ -6982,11 +7303,42 @@ export class GameRuntime {
       return null;
     }
 
+    this.socketEndpointValidationError = "";
+    this.socketEndpointLinkRequired = false;
+    const pushEndpointError = (message, linkRequired = false) => {
+      this.socketEndpointValidationError = String(message ?? "").trim();
+      this.socketEndpointLinkRequired = Boolean(linkRequired);
+      return null;
+    };
+    const normalizeEndpoint = (raw, sourceLabel = "server") => {
+      const value = String(raw ?? "").trim();
+      if (!value) {
+        return null;
+      }
+      try {
+        const parsed = new URL(value, window.location.href);
+        if (parsed.protocol === "ws:") {
+          parsed.protocol = "http:";
+        } else if (parsed.protocol === "wss:") {
+          parsed.protocol = "https:";
+        }
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+          return pushEndpointError(`${sourceLabel} 주소는 http/https 형식이어야 합니다.`, true);
+        }
+        parsed.hash = "";
+        const pathname = parsed.pathname.replace(/\/+$/, "");
+        const normalizedPath = pathname && pathname !== "/" ? pathname : "";
+        return `${parsed.origin}${normalizedPath}${parsed.search}`;
+      } catch {
+        return pushEndpointError(`${sourceLabel} 주소를 확인하세요.`, true);
+      }
+    };
+
     const envEndpoint = String(
       import.meta.env?.VITE_SOCKET_ENDPOINT ?? import.meta.env?.VITE_CHAT_SERVER ?? ""
     ).trim();
     if (envEndpoint) {
-      return envEndpoint;
+      return normalizeEndpoint(envEndpoint, "환경변수 서버");
     }
 
     const query = new URLSearchParams(window.location.search);
@@ -6994,12 +7346,12 @@ export class GameRuntime {
       query.get("server") ?? query.get("socket") ?? query.get("ws") ?? ""
     ).trim();
     if (queryEndpoint) {
-      return queryEndpoint;
+      return normalizeEndpoint(queryEndpoint, "URL server 파라미터");
     }
 
     const globalEndpoint = String(window.__EMPTINES_SOCKET_ENDPOINT ?? "").trim();
     if (globalEndpoint) {
-      return globalEndpoint;
+      return normalizeEndpoint(globalEndpoint, "전역 서버");
     }
 
     const { protocol, hostname } = window.location;
@@ -7013,7 +7365,11 @@ export class GameRuntime {
     }
 
     if (hostname.endsWith("github.io")) {
-      return null;
+      const exampleUrl = `${window.location.origin}${window.location.pathname}?server=https://emptines-chat.onrender.com`;
+      return pushEndpointError(
+        `서버 링크가 없습니다. ${exampleUrl} 형식으로 접속하세요.`,
+        true
+      );
     }
 
     return `${protocol}//${hostname}`;
@@ -7098,6 +7454,9 @@ export class GameRuntime {
 
     const localPlayer = this.networkConnected ? 1 : 0;
     this.hud.setPlayers(this.remotePlayers.size + localPlayer);
+    if (this.surfacePaintRetryQueue.size > 0) {
+      this.scheduleSurfacePaintRetry(350);
+    }
   }
 
   parsePackedSnapshotState(rawState) {
@@ -8328,6 +8687,7 @@ export class GameRuntime {
       this.composer.setPixelRatio(this.currentPixelRatio);
       this.composer.setSize(window.innerWidth, window.innerHeight);
     }
+    this.updateFullscreenToggleState();
     this.syncMobileUiState();
   }
 }
