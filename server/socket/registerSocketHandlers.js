@@ -34,11 +34,20 @@ export function registerSocketHandlers({
       });
     };
 
+    const emitLeftBillboardState = () => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        return;
+      }
+      socket.emit("billboard:left:update", roomService.serializeLeftBillboard(room));
+    };
+
     const joinDefaultAndAck = (nameOverride, ackFn) => {
       const result = roomService.joinDefaultRoom(socket, nameOverride);
       if (result?.ok) {
         emitSurfacePaintState();
         emitSharedMusicState();
+        emitLeftBillboardState();
       }
       ack(ackFn, result);
       return result;
@@ -54,6 +63,7 @@ export function registerSocketHandlers({
     roomService.joinDefaultRoom(socket);
     emitSurfacePaintState();
     emitSharedMusicState();
+    emitLeftBillboardState();
     roomService.emitRoomList(socket);
 
     socket.on("chat:send", ({ name, text }) => {

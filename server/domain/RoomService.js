@@ -320,7 +320,6 @@ export class RoomService {
       hostId: room.hostId,
       portalTarget: String(room.portalTarget ?? "").trim(),
       portalSchedule: this.serializePortalSchedule(room),
-      leftBillboard: this.serializeLeftBillboard(room),
       rightBillboard: this.serializeRightBillboard(room),
       players: Array.from(room.players.values()).map((player) => ({
         id: player.id,
