@@ -248,7 +248,7 @@ export class GameRuntime {
     this.bloomPass = null;
 
     this.dynamicResolution = {
-      enabled: true,
+      enabled: this.mobileEnabled,
       minRatio: this.mobileEnabled
         ? GAME_CONSTANTS.DYNAMIC_RESOLUTION.mobileMinRatio
         : GAME_CONSTANTS.DYNAMIC_RESOLUTION.desktopMinRatio,
@@ -328,6 +328,7 @@ export class GameRuntime {
     this.chatBubbleFadeMs = 700;
     this.localChatLabel = null;
     this.localChatExpireAt = 0;
+    this.loopRafCallback = () => this.loop();
     this.chatLogMaxEntries = RUNTIME_TUNING.CHAT_LOG_MAX_ENTRIES;
     this.chatTitleEl = document.getElementById("chat-title");
     this.chatLogEl = document.getElementById("chat-log");
@@ -7014,10 +7015,18 @@ export class GameRuntime {
     const dz = targetZ - this.playerPosition.z;
     const errorSq = dx * dx + dy * dy + dz * dz;
 
-    if (errorSq > 36) {
-      this.playerPosition.set(targetX, targetY, targetZ);
-      this.verticalVelocity = 0;
-      this.onGround = targetY <= GAME_CONSTANTS.PLAYER_HEIGHT + 0.001;
+    // XZ-only error for snap decision: ignore Y so a jump doesn't cause a snap.
+    const xzErrorSq = dx * dx + dz * dz;
+
+    if (xzErrorSq > 64) {
+      // XZ error > 8 m: hard snap XZ to server. Only move Y if server is above (floor correction).
+      this.playerPosition.x = targetX;
+      this.playerPosition.z = targetZ;
+      if (dy > 0) {
+        this.playerPosition.y = targetY;
+        this.verticalVelocity = 0;
+        this.onGround = targetY <= GAME_CONSTANTS.PLAYER_HEIGHT + 0.001;
+      }
       if (!this.pointerLocked && !this.mobileEnabled) {
         this.yaw = targetYaw;
         this.pitch = targetPitch;
@@ -7025,12 +7034,22 @@ export class GameRuntime {
       return;
     }
 
-    // Only correct when error exceeds 0.5 units to avoid jitter from normal network latency.
-    if (errorSq > 0.25) {
-      const positionAlpha = errorSq > 9 ? 0.22 : errorSq > 2.25 ? 0.12 : 0.06;
-      this.playerPosition.x += dx * positionAlpha;
-      this.playerPosition.y += dy * positionAlpha;
-      this.playerPosition.z += dz * positionAlpha;
+    // Soft XZ correction: threshold 0.09 (0.3 m dead zone) prevents micro-jitter
+    // while still stopping error from accumulating to snap range.
+    if (xzErrorSq > 0.09) {
+      const alpha = xzErrorSq > 9 ? 0.28 : xzErrorSq > 2.25 ? 0.16 : 0.09;
+      this.playerPosition.x += dx * alpha;
+      this.playerPosition.z += dz * alpha;
+    }
+
+    // Y correction only when server is ABOVE client (client fell through floor).
+    // Never correct Y when client is above server — that would cancel a jump.
+    if (dy > 0.25) {
+      this.playerPosition.y += dy * 0.18;
+      if (dy > 1.0) {
+        this.verticalVelocity = 0;
+        this.onGround = targetY <= GAME_CONSTANTS.PLAYER_HEIGHT + 0.001;
+      }
     }
 
     // Avoid camera tug-of-war while the player is actively looking around.
@@ -7046,10 +7065,6 @@ export class GameRuntime {
       if (pitchDelta > 0.08) {
         this.pitch = THREE.MathUtils.lerp(this.pitch, targetPitch, 0.18);
       }
-    }
-
-    if (Math.abs(dy) > 0.35) {
-      this.verticalVelocity = 0;
     }
   }
 
@@ -7938,14 +7953,15 @@ export class GameRuntime {
   }
 
   loop() {
-    const delta = Math.min(this.clock.getDelta(), 0.05);
+    // Keep client prediction closer to server simulation even when FPS drops below 20.
+    const delta = Math.min(this.clock.getDelta(), 0.1);
     this.tick(delta);
     if (this.composer) {
       this.composer.render();
     } else {
       this.renderer.render(this.scene, this.camera);
     }
-    requestAnimationFrame(() => this.loop());
+    requestAnimationFrame(this.loopRafCallback);
   }
 
   updateDynamicResolution(delta) {
@@ -8019,10 +8035,10 @@ export class GameRuntime {
     this.isLowSpecMobile = this.isLikelyLowSpecMobileDevice();
 
     if (this.mobileEnabled) {
-      const remoteHardCap = this.isLowSpecMobile ? 72 : 96;
-      const meshDistance = this.isLowSpecMobile ? 92 : 110;
-      const labelDistance = this.isLowSpecMobile ? 26 : 34;
-      const farDistance = this.isLowSpecMobile ? 48 : 60;
+      const remoteHardCap = this.isLowSpecMobile ? 28 : 40;
+      const meshDistance = this.isLowSpecMobile ? 70 : 86;
+      const labelDistance = this.isLowSpecMobile ? 18 : 24;
+      const farDistance = this.isLowSpecMobile ? 36 : 46;
 
       this.remoteHardCap = Math.min(this.baseRemoteHardCap, remoteHardCap);
       this.remoteMeshDistanceSq = Math.pow(meshDistance, 2);
@@ -8036,17 +8052,26 @@ export class GameRuntime {
       this.dynamicResolution.minRatio = this.isLowSpecMobile
         ? 0.52
         : GAME_CONSTANTS.DYNAMIC_RESOLUTION.mobileMinRatio;
+      this.dynamicResolution.enabled = true;
     } else {
-      this.remoteHardCap = this.baseRemoteHardCap;
-      this.remoteMeshDistanceSq = this.baseRemoteMeshDistanceSq;
-      this.remoteLabelDistanceSq = this.baseRemoteLabelDistanceSq;
-      this.remoteFarDistanceSq = this.baseRemoteFarDistanceSq;
+      const remoteHardCap = Math.min(this.baseRemoteHardCap, 48);
+      const meshDistance = Math.min(Math.sqrt(this.baseRemoteMeshDistanceSq), 96);
+      const labelDistance = Math.min(Math.sqrt(this.baseRemoteLabelDistanceSq), 30);
+      const farDistance = Math.min(Math.sqrt(this.baseRemoteFarDistanceSq), 52);
+      this.remoteHardCap = remoteHardCap;
+      this.remoteMeshDistanceSq = Math.pow(meshDistance, 2);
+      this.remoteLabelDistanceSq = Math.pow(labelDistance, 2);
+      this.remoteFarDistanceSq = Math.pow(farDistance, 2);
 
       this.inputSendBaseInterval = 1 / 20;
       this.inputHeartbeatSeconds = 0.22;
       this.localSyncMinYaw = 0.012;
       this.localSyncMinPitch = 0.012;
       this.dynamicResolution.minRatio = GAME_CONSTANTS.DYNAMIC_RESOLUTION.desktopMinRatio;
+      this.dynamicResolution.enabled = false;
+      this.dynamicResolution.sampleTime = 0;
+      this.dynamicResolution.frameCount = 0;
+      this.dynamicResolution.cooldown = 0;
     }
 
     const devicePixelRatio = window.devicePixelRatio || 1;
