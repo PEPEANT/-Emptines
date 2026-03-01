@@ -33,6 +33,7 @@ function parseSeconds(raw, fallback, min = 0.1) {
 }
 
 const INTRO_BOOT_VIDEO_URL = new URL("../../../mp4/grok-video.0.mp4", import.meta.url).href;
+const ENTRY_BGM_URL = new URL("../../../mp3/TSUKUYOMI.mp3", import.meta.url).href;
 const AD_BILLBOARD_IMAGE_URL = new URL("../../../png/AD.41415786.1.png", import.meta.url).href;
 const DEFAULT_PORTAL_TARGET_URL =
   "http://localhost:5173/?server=http://localhost:3001&name=PLAYER";
@@ -320,6 +321,9 @@ export class GameRuntime {
     this.flowStage = this.hubFlowEnabled ? "boot_intro" : "city_live";
     this.bootIntroPending = this.hubFlowEnabled;
     this.bootIntroVideoPlaying = false;
+    this.entryMusicAudioEl = null;
+    this.entryMusicStarted = false;
+    this.entryMusicUnlockHandler = null;
     this.flowClock = 0;
     this.hubIntroDuration = parseSeconds(hubFlowConfig?.introSeconds, 4.8, 0.8);
     this.bridgeApproachSpawn = parseVec3(
@@ -1757,6 +1761,7 @@ export class GameRuntime {
       this.hubFlowUiEl?.classList.add("hidden");
       this.hideNicknameGate();
       this.lastSafePosition.copy(this.playerPosition);
+      this.ensureEntryMusicPlayback();
       return;
     }
 
@@ -1824,6 +1829,54 @@ export class GameRuntime {
     this.nicknameErrorEl.classList.toggle("hidden", !text);
   }
 
+  detachEntryMusicUnlockListeners() {
+    if (!this.entryMusicUnlockHandler) {
+      return;
+    }
+    const handler = this.entryMusicUnlockHandler;
+    this.entryMusicUnlockHandler = null;
+    window.removeEventListener("pointerdown", handler);
+    window.removeEventListener("keydown", handler);
+    window.removeEventListener("touchstart", handler);
+  }
+
+  attachEntryMusicUnlockListeners() {
+    if (this.entryMusicStarted || this.entryMusicUnlockHandler) {
+      return;
+    }
+    const handler = () => {
+      this.detachEntryMusicUnlockListeners();
+      this.ensureEntryMusicPlayback();
+    };
+    this.entryMusicUnlockHandler = handler;
+    window.addEventListener("pointerdown", handler, { passive: true });
+    window.addEventListener("keydown", handler);
+    window.addEventListener("touchstart", handler, { passive: true });
+  }
+
+  ensureEntryMusicPlayback() {
+    if (this.entryMusicStarted) {
+      return;
+    }
+    if (!this.entryMusicAudioEl) {
+      const audio = new Audio(ENTRY_BGM_URL);
+      audio.preload = "auto";
+      audio.loop = true;
+      audio.volume = 0.62;
+      this.entryMusicAudioEl = audio;
+    }
+
+    this.entryMusicAudioEl.play().then(
+      () => {
+        this.entryMusicStarted = true;
+        this.detachEntryMusicUnlockListeners();
+      },
+      () => {
+        this.attachEntryMusicUnlockListeners();
+      }
+    );
+  }
+
   beginBridgeApproachFlow() {
     this.bootIntroPending = false;
     this.bootIntroVideoPlaying = false;
@@ -1836,6 +1889,7 @@ export class GameRuntime {
     this.setFlowHeadline("BRIDGE ENTRY", "Move toward the checkpoint NPC.");
     this.hud.setStatus(this.getStatusText());
     this.syncGameplayUiForFlow();
+    this.ensureEntryMusicPlayback();
   }
 
   finishBootIntroVideo() {
