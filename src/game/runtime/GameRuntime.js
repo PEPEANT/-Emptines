@@ -260,6 +260,14 @@ export class GameRuntime {
       this.parseQueryFlag("hosting") ||
       this.parseQueryFlag("owner") ||
       Boolean(this.hostClaimKey);
+    const forceFullscreen =
+      this.parseQueryFlag("fullscreen") || this.parseQueryFlag("fs");
+    const disableFullscreen =
+      this.parseQueryFlag("no_fullscreen") ||
+      this.parseQueryFlag("nofullscreen") ||
+      this.parseQueryFlag("no_fs");
+    this.autoFullscreenEnabled = forceFullscreen || !disableFullscreen;
+    this.fullscreenRestorePending = this.autoFullscreenEnabled;
     this.autoHostClaimLastAttemptMs = 0;
     this.roomHostId = null;
     this.isRoomHost = false;
@@ -3194,6 +3202,72 @@ export class GameRuntime {
     return this.canMovePlayer() && !this.portalTransitioning;
   }
 
+  getFullscreenElement() {
+    if (typeof document === "undefined") {
+      return null;
+    }
+    return document.fullscreenElement ?? document.webkitFullscreenElement ?? null;
+  }
+
+  isFullscreenActive() {
+    return Boolean(this.getFullscreenElement());
+  }
+
+  requestFullscreenFromInteraction() {
+    if (!this.autoFullscreenEnabled) {
+      return;
+    }
+    if (typeof document === "undefined") {
+      return;
+    }
+    if (this.isFullscreenActive()) {
+      this.fullscreenRestorePending = false;
+      return;
+    }
+
+    const root = document.documentElement;
+    if (!root) {
+      return;
+    }
+
+    const requestFn =
+      root.requestFullscreen ??
+      root.webkitRequestFullscreen;
+    if (typeof requestFn !== "function") {
+      return;
+    }
+
+    try {
+      const maybePromise = requestFn.call(root, { navigationUI: "hide" });
+      if (maybePromise && typeof maybePromise.catch === "function") {
+        maybePromise.catch(() => {
+          this.fullscreenRestorePending = true;
+        });
+      }
+      this.fullscreenRestorePending = false;
+    } catch {
+      this.fullscreenRestorePending = true;
+    }
+  }
+
+  syncFullscreenRestoreFlag() {
+    if (!this.autoFullscreenEnabled) {
+      this.fullscreenRestorePending = false;
+      return;
+    }
+    this.fullscreenRestorePending = !this.isFullscreenActive();
+  }
+
+  tryEnterFullscreenFromInteraction() {
+    if (!this.autoFullscreenEnabled) {
+      return;
+    }
+    if (!this.fullscreenRestorePending && this.isFullscreenActive()) {
+      return;
+    }
+    this.requestFullscreenFromInteraction();
+  }
+
   updateHubFlow(delta) {
     if (!this.hubFlowEnabled) {
       return;
@@ -5186,6 +5260,12 @@ export class GameRuntime {
     this.resolveUiElements();
 
     window.addEventListener("resize", () => this.onResize());
+    document.addEventListener("fullscreenchange", () => {
+      this.syncFullscreenRestoreFlag();
+    });
+    document.addEventListener("webkitfullscreenchange", () => {
+      this.syncFullscreenRestoreFlag();
+    });
 
     window.addEventListener("keydown", (event) => {
       if (this.isTextInputTarget(event.target)) {
@@ -5284,11 +5364,16 @@ export class GameRuntime {
     });
 
     this.renderer.domElement.addEventListener("click", () => {
+      this.tryEnterFullscreenFromInteraction();
       if (this.canDrawChalk()) return;
       this.tryPointerLock();
     });
     // Catch clicks on HUD elements that sit above the canvas
     document.addEventListener("click", (event) => {
+      if (this.isTextInputTarget(event.target)) {
+        return;
+      }
+      this.tryEnterFullscreenFromInteraction();
       if (event.target === this.renderer.domElement) return;
       if (this.canDrawChalk()) return;
       if (this.chatOpen || this.nicknameGateEl?.classList.contains("hidden") === false) return;
@@ -6070,6 +6155,7 @@ export class GameRuntime {
       this.updateRoomPlayerSnapshot([]);
       this.syncHostControls();
       this.hud.setStatus(this.getStatusText());
+      this.syncFullscreenRestoreFlag();
       this.syncPlayerNameIfConnected();
       this.startNetworkPing();
       this.requestHostClaim();
