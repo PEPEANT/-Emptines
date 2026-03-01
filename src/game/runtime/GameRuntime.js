@@ -290,6 +290,7 @@ export class GameRuntime {
     this.chatLogMaxEntries = RUNTIME_TUNING.CHAT_LOG_MAX_ENTRIES;
     this.chatLogEl = document.getElementById("chat-log");
     this.chatControlsEl = document.getElementById("chat-controls");
+    this.chatToggleBtnEl = document.getElementById("chat-toggle");
     this.chatInputEl = document.getElementById("chat-input");
     this.toolHotbarEl = document.getElementById("tool-hotbar");
     this.chalkColorsEl = document.getElementById("chalk-colors");
@@ -448,6 +449,7 @@ export class GameRuntime {
     this.npcGreetingVideoEl = null;
     this.npcGreetingVideoTexture = null;
     this.npcGreetingPlayed = false;
+    this.npcWelcomeBubbleLabel = null;
     this.mirrorGateGroup = null;
     this.mirrorGatePanel = null;
     this.bridgeBoundaryMarker = null;
@@ -683,6 +685,10 @@ export class GameRuntime {
     }
     this.npcGreetingScreen = null;
     this.npcGreetingPlayed = false;
+    if (this.npcWelcomeBubbleLabel) {
+      this.disposeTextLabel(this.npcWelcomeBubbleLabel);
+      this.npcWelcomeBubbleLabel = null;
+    }
     if (this.portalBillboardTexture) {
       this.portalBillboardTexture.dispose?.();
       this.portalBillboardTexture = null;
@@ -712,6 +718,7 @@ export class GameRuntime {
     this.portalBillboardGroup = null;
     this.npcGuideGroup = null;
     this.npcGreetingScreen = null;
+    this.npcWelcomeBubbleLabel = null;
     this.mirrorGateGroup = null;
     this.mirrorGatePanel = null;
     this.bridgeBoundaryMarker = null;
@@ -1029,6 +1036,11 @@ export class GameRuntime {
     npcGuide.add(npcHoloFloor, npcHoloRing, npcHoloBeam, npcBody, npcHead, npcPad, npcHoloFrame);
     const npcGreetingScreen = this.createNpcGreetingScreen();
     npcGuide.add(npcGreetingScreen);
+    const npcWelcomeBubble = this.createTextLabel("어서와~ 여기는 대기장소야", "chat");
+    npcWelcomeBubble.position.set(0, 3.05, 0);
+    npcWelcomeBubble.renderOrder = 42;
+    npcGuide.add(npcWelcomeBubble);
+    this.npcWelcomeBubbleLabel = npcWelcomeBubble;
 
     const mirrorGate = new THREE.Group();
     mirrorGate.position.set(this.bridgeMirrorPosition.x, 0, this.bridgeMirrorPosition.z);
@@ -2190,7 +2202,7 @@ export class GameRuntime {
     if (!this.entryMusicAudioEl) {
       const audio = new Audio(ENTRY_BGM_URL);
       audio.preload = "auto";
-      audio.loop = true;
+      audio.loop = false;
       audio.volume = this.entryMusicBaseVolume;
       this.entryMusicAudioEl = audio;
     }
@@ -2706,6 +2718,7 @@ export class GameRuntime {
 
   updatePortalPhase(delta) {
     const now = Date.now();
+    const serverAuthoritativePortal = Boolean(this.socketEndpoint);
     const previousScheduleMode = String(this.portalSchedule?.mode ?? "idle");
     const schedule = this.getPortalScheduleComputed(now);
     const scheduleChanged =
@@ -2753,6 +2766,13 @@ export class GameRuntime {
       } else {
         this.setFlowHeadline("시작 대기", `${Math.ceil(this.portalPhaseClock)}초 후 포탈 개방`);
       }
+      return;
+    }
+
+    if (serverAuthoritativePortal) {
+      this.portalPhase = "cooldown";
+      this.portalPhaseClock = 0;
+      this.setFlowHeadline("도시 라이브", "방장 시작 대기 중");
       return;
     }
 
@@ -4827,7 +4847,31 @@ export class GameRuntime {
         }
       });
       this.chatInputEl.addEventListener("blur", () => {
+        if (this.mobileEnabled) {
+          return;
+        }
         this.setChatOpen(false);
+      });
+    }
+    if (this.chatToggleBtnEl) {
+      this.chatToggleBtnEl.addEventListener("click", () => {
+        if (!this.canUseGameplayControls()) {
+          return;
+        }
+        if (this.chatOpen) {
+          this.setChatOpen(false);
+          this.chatInputEl?.blur();
+        } else {
+          this.focusChatInput();
+        }
+      });
+    }
+    if (this.chatLogEl) {
+      this.chatLogEl.addEventListener("pointerdown", () => {
+        if (!this.mobileEnabled || this.chatOpen || !this.canUseGameplayControls()) {
+          return;
+        }
+        this.focusChatInput();
       });
     }
 
@@ -5088,6 +5132,9 @@ export class GameRuntime {
     if (!this.chatControlsEl) {
       this.chatControlsEl = document.getElementById("chat-controls");
     }
+    if (!this.chatToggleBtnEl) {
+      this.chatToggleBtnEl = document.getElementById("chat-toggle");
+    }
     if (!this.chatInputEl) {
       this.chatInputEl = document.getElementById("chat-input");
     }
@@ -5210,8 +5257,18 @@ export class GameRuntime {
     }
 
     this.chatOpen = Boolean(open);
+    if (this.chatUiEl) {
+      this.chatUiEl.classList.toggle("collapsed", this.mobileEnabled && !this.chatOpen);
+    }
     if (this.chatControlsEl) {
       this.chatControlsEl.classList.toggle("hidden", !this.chatOpen);
+    }
+    if (this.chatToggleBtnEl) {
+      const label = this.chatOpen ? "CHAT HIDE" : "CHAT OPEN";
+      if (this.chatToggleBtnEl.textContent !== label) {
+        this.chatToggleBtnEl.textContent = label;
+      }
+      this.chatToggleBtnEl.setAttribute("aria-pressed", this.chatOpen ? "true" : "false");
     }
     if (this.chatOpen) {
       this.chalkDrawingActive = false;
