@@ -106,6 +106,23 @@ export function startRealtimeServer(options = {}) {
     log.log(`Persistent room: ${config.defaultRoomCode} (capacity ${config.maxRoomPlayers})`);
   });
 
+  // Flush pending surface paint to disk before process exits
+  const flushAndExit = (code = 0) => {
+    const pending = roomService?.surfacePaintSaveQueued || roomService?.surfacePaintSaveTimer;
+    if (!pending) {
+      process.exit(code);
+      return;
+    }
+    if (roomService?.surfacePaintSaveTimer) {
+      clearTimeout(roomService.surfacePaintSaveTimer);
+      roomService.surfacePaintSaveTimer = null;
+    }
+    roomService.flushSurfacePaintToDisk().then(() => process.exit(code)).catch(() => process.exit(code));
+  };
+
+  process.once("SIGINT", () => flushAndExit(0));
+  process.once("SIGTERM", () => flushAndExit(0));
+
   return {
     config,
     io,
