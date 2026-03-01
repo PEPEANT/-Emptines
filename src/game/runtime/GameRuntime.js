@@ -1707,7 +1707,7 @@ export class GameRuntime {
       this.leftBillboardSetInFlight = false;
       this.syncHostControls();
       if (!response?.ok) {
-        const reason = String(response?.error ?? "").trim() || "unknown error";
+        const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
         this.appendChatLine("", `좌측 전광판 이미지 적용 실패: ${reason}`, "system");
         return;
       }
@@ -1751,7 +1751,7 @@ export class GameRuntime {
       this.syncHostControls();
       if (!response?.ok) {
         if (announceErrors) {
-          const reason = String(response?.error ?? "").trim() || "unknown error";
+          const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
           this.appendChatLine("", `좌측 전광판 복귀 실패: ${reason}`, "system");
         }
         return;
@@ -1791,7 +1791,7 @@ export class GameRuntime {
 
     this.socket.emit("billboard:right:play", { videoId }, (response = {}) => {
       if (!response?.ok) {
-        const reason = String(response?.error ?? "").trim() || "unknown error";
+        const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
         this.appendChatLine("", `우측 전광판 재생 실패: ${reason}`, "system");
         return;
       }
@@ -1835,7 +1835,7 @@ export class GameRuntime {
       this.syncHostControls();
       if (!response?.ok) {
         if (announceErrors) {
-          const reason = String(response?.error ?? "").trim() || "unknown error";
+          const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
           this.appendChatLine("", `우측 전광판 복귀 실패: ${reason}`, "system");
         }
         return;
@@ -2066,7 +2066,7 @@ export class GameRuntime {
         this.hostMusicSetInFlight = false;
         this.syncHostControls();
         if (!response?.ok) {
-          const reason = String(response?.error ?? "").trim() || "unknown error";
+          const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
           this.appendChatLine("", `음악 업로드 실패: ${reason}`, "system");
           return;
         }
@@ -2095,7 +2095,7 @@ export class GameRuntime {
       this.hostMusicSetInFlight = false;
       this.syncHostControls();
       if (!response?.ok) {
-        const reason = String(response?.error ?? "").trim() || "unknown error";
+        const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
         this.appendChatLine("", `음악 정지 실패: ${reason}`, "system");
         return;
       }
@@ -2389,7 +2389,7 @@ export class GameRuntime {
     this.surfacePainterSaveInFlight = false;
     this.surfacePainterSaveBtnEl?.removeAttribute("disabled");
     if (this.surfacePainterTitleEl) {
-      this.surfacePainterTitleEl.textContent = `SURFACE PAINT / ${normalizedId.toUpperCase()}`;
+      this.surfacePainterTitleEl.textContent = `표면 그리기 / ${normalizedId.toUpperCase()}`;
     }
 
     this.keys.clear();
@@ -2605,7 +2605,7 @@ export class GameRuntime {
       this.surfacePainterSaveInFlight = false;
       this.surfacePaintSendInFlight = false;
       if (!response?.ok) {
-        const reason = String(response?.error ?? "").trim() || "unknown error";
+        const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
         this.appendChatLine("", `그림 반영 실패: ${reason}`, "system");
         return;
       }
@@ -2718,7 +2718,7 @@ export class GameRuntime {
     this.yaw = this.getLookYaw(this.bridgeApproachSpawn, this.bridgeNpcPosition);
     this.pitch = -0.03;
     this.setFlowHeadline(
-      "ENTRY CHECK",
+      "입장 확인",
       "임시 닉네임을 입력하고 시작하세요."
     );
     this.hud.setStatus(this.getStatusText());
@@ -2879,7 +2879,7 @@ export class GameRuntime {
     this.chalkDrawingActive = false;
     this.chalkLastStamp = null;
     this.hideNicknameGate();
-    this.setFlowHeadline("BRIDGE ENTRY", "Move toward the checkpoint NPC.");
+    this.setFlowHeadline("다리 입장", "검문소 NPC 쪽으로 이동하세요.");
     this.hud.setStatus(this.getStatusText());
     this.syncGameplayUiForFlow();
     this.ensureEntryMusicPlayback();
@@ -2954,7 +2954,7 @@ export class GameRuntime {
 
     const raw = String(this.nicknameInputEl?.value ?? "").trim();
     if (raw.length < 2) {
-      this.setNicknameError("Callsign must be at least 2 characters.");
+      this.setNicknameError("콜사인은 최소 2자 이상이어야 합니다.");
       return;
     }
 
@@ -2973,7 +2973,7 @@ export class GameRuntime {
     this.chalkLastStamp = null;
     this.setMirrorGateVisible(true);
     this.yaw = this.getLookYaw(this.playerPosition, this.bridgeMirrorPosition);
-    this.setFlowHeadline("ENTRY SYNC", "Pass under the shrine gate to continue.");
+    this.setFlowHeadline("입장 동기화", "계속하려면 신사문 아래를 통과하세요.");
     this.hud.setStatus(this.getStatusText());
     this.syncGameplayUiForFlow();
   }
@@ -3126,7 +3126,7 @@ export class GameRuntime {
     this.chalkLastStamp = null;
     this.hideNicknameGate();
     this.setMirrorGateVisible(true);
-    this.setFlowHeadline("ENTRY SYNC", "Pass under the shrine gate to continue.");
+    this.setFlowHeadline("입장 동기화", "계속하려면 신사문 아래를 통과하세요.");
     this.hud.setStatus(this.getStatusText());
   }
 
@@ -3336,8 +3336,8 @@ export class GameRuntime {
     if (this.flowStage === "bridge_approach") {
       const npcDistance = this.getNpcDistance();
       this.setFlowHeadline(
-        "BRIDGE ENTRY",
-        `Distance to checkpoint NPC: ${Math.max(0, Math.ceil(npcDistance))}m`
+        "다리 입장",
+        `검문소 NPC까지 거리: ${Math.max(0, Math.ceil(npcDistance))}m`
       );
       this.updatePortalVisual();
       if (npcDistance <= this.bridgeNpcTriggerRadius) {
@@ -3350,7 +3350,7 @@ export class GameRuntime {
         }
         this.playNpcGreeting();
         if (this.flowStage === "bridge_dialogue") {
-          this.setFlowHeadline("CHECKPOINT BRIEFING", "Receiving NPC greeting...");
+          this.setFlowHeadline("검문 브리핑", "NPC 인사를 수신 중...");
         }
         this.hud.setStatus(this.getStatusText());
       }
@@ -3378,8 +3378,8 @@ export class GameRuntime {
         )
       );
       this.setFlowHeadline(
-        "ENTRY SYNC",
-        `Pass under the shrine gate (${gateDistance}m)`
+        "입장 동기화",
+        `신사문 아래를 통과하세요 (${gateDistance}m)`
       );
       this.updatePortalVisual();
       if (this.isPlayerPassingShrineGate()) {
@@ -3394,7 +3394,7 @@ export class GameRuntime {
         if (document.pointerLockElement === this.renderer.domElement) {
           document.exitPointerLock?.();
         }
-        this.setFlowHeadline("CITY TRANSIT", "Moving to city gate...");
+        this.setFlowHeadline("도시 이동", "도시 게이트로 이동 중...");
         this.hud.setStatus(this.getStatusText());
       }
       return;
@@ -3405,7 +3405,7 @@ export class GameRuntime {
       const alpha = THREE.MathUtils.clamp(this.flowClock / this.hubIntroDuration, 0, 1);
       this.playerPosition.lerpVectors(this.cityIntroStart, this.cityIntroEnd, alpha);
       const secondsLeft = Math.max(0, Math.ceil(this.hubIntroDuration - this.flowClock));
-      this.setFlowHeadline("CITY TRANSIT", `City gate opens in ${secondsLeft}s`);
+      this.setFlowHeadline("도시 이동", `${secondsLeft}초 후 도시 게이트가 열립니다`);
       if (!this.bridgeBoundaryDingTriggered) {
         const dx = this.playerPosition.x - this.bridgeCityEntry.x;
         const dz = this.playerPosition.z - this.bridgeCityEntry.z;
@@ -4136,7 +4136,7 @@ export class GameRuntime {
       this.syncHostControls();
 
       if (!response?.ok) {
-        const reason = String(response?.error ?? "").trim() || "unknown error";
+        const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
         this.appendChatLine("", `시작 예약 실패: ${reason}`, "system");
         return;
       }
@@ -4203,7 +4203,7 @@ export class GameRuntime {
       this.syncHostControls();
 
       if (!response?.ok) {
-        const reason = String(response?.error ?? "").trim() || "unknown error";
+        const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
         this.appendChatLine("", `포탈 개방 실패: ${reason}`, "system");
         return;
       }
@@ -4249,7 +4249,7 @@ export class GameRuntime {
             this.autoHostClaimEnabled = false;
           }
           if (manual) {
-            this.appendChatLine("", `방장 권한 요청 실패: ${reason || "unknown error"}`, "system");
+            this.appendChatLine("", `방장 권한 요청 실패: ${reason || "알 수 없는 오류"}`, "system");
           }
           return;
         }
@@ -4312,7 +4312,7 @@ export class GameRuntime {
 
       if (!response?.ok) {
         if (announceErrors) {
-          const reason = String(response?.error ?? "").trim() || "unknown error";
+          const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
           this.appendChatLine("", `포탈 링크 변경 실패: ${reason}`, "system");
         }
         return;
@@ -6065,7 +6065,7 @@ export class GameRuntime {
       this.chatControlsEl.classList.toggle("hidden", !this.chatOpen);
     }
     if (this.chatToggleBtnEl) {
-      const label = this.chatOpen ? "CHAT HIDE" : "CHAT OPEN";
+      const label = this.chatOpen ? "채팅 닫기" : "채팅 열기";
       if (this.chatToggleBtnEl.textContent !== label) {
         this.chatToggleBtnEl.textContent = label;
       }
@@ -7397,51 +7397,51 @@ export class GameRuntime {
 
   getStatusText() {
     const withHostTag = (text) =>
-      this.networkConnected && this.isRoomHost ? `${text} / HOST` : text;
+      this.networkConnected && this.isRoomHost ? `${text} / 호스트` : text;
 
     if (this.hubFlowEnabled) {
       if (this.flowStage === "boot_intro") {
         return this.networkConnected
-          ? withHostTag("ONLINE / ENTRY CHECK")
-          : "OFFLINE / ENTRY CHECK";
+          ? withHostTag("온라인 / 입장 확인")
+          : "오프라인 / 입장 확인";
       }
       if (this.flowStage === "bridge_approach") {
         return this.networkConnected
-          ? withHostTag("ONLINE / BRIDGE APPROACH")
-          : "OFFLINE / BRIDGE APPROACH";
+          ? withHostTag("온라인 / 다리 접근")
+          : "오프라인 / 다리 접근";
       }
       if (this.flowStage === "bridge_dialogue") {
         return this.networkConnected
-          ? withHostTag("ONLINE / NPC DIALOGUE")
-          : "OFFLINE / NPC DIALOGUE";
+          ? withHostTag("온라인 / NPC 대화")
+          : "오프라인 / NPC 대화";
       }
       if (this.flowStage === "bridge_name") {
         return this.networkConnected
-          ? withHostTag("ONLINE / NAME CHECK")
-          : "OFFLINE / NAME CHECK";
+          ? withHostTag("온라인 / 이름 확인")
+          : "오프라인 / 이름 확인";
       }
       if (this.flowStage === "bridge_mirror") {
         return this.networkConnected
-          ? withHostTag("ONLINE / SHRINE GATE")
-          : "OFFLINE / SHRINE GATE";
+          ? withHostTag("온라인 / 신사문 통과")
+          : "오프라인 / 신사문 통과";
       }
       if (this.flowStage === "city_intro") {
         return this.networkConnected
-          ? withHostTag("ONLINE / CITY TRANSIT")
-          : "OFFLINE / CITY TRANSIT";
+          ? withHostTag("온라인 / 도시 이동")
+          : "오프라인 / 도시 이동";
       }
       if (this.flowStage === "portal_transfer") {
-        return "PORTAL / TRANSFERRING";
+        return "포탈 / 이동 중";
       }
     }
 
     if (!this.networkConnected) {
-      return this.socketEndpoint ? "OFFLINE" : "OFFLINE / SERVER REQUIRED";
+      return this.socketEndpoint ? "오프라인" : "오프라인 / 서버 필요";
     }
     if (this.pointerLockSupported && !this.pointerLocked && !this.mobileEnabled) {
-      return withHostTag("ONLINE / CLICK TO LOCK");
+      return withHostTag("온라인 / 클릭해 고정");
     }
-    return withHostTag("ONLINE");
+    return withHostTag("온라인");
   }
 
   loop() {
@@ -7625,4 +7625,3 @@ export class GameRuntime {
     this.syncMobileUiState();
   }
 }
-
