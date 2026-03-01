@@ -2517,6 +2517,8 @@ export class GameRuntime {
     }
 
     const canvas = this.surfacePainterCanvasEl;
+    // Cancel any in-flight image restore from a previous open/clear cycle.
+    const loadNonce = ++this.surfacePainterCanvasLoadNonce;
     const bgColor = String(this.surfacePainterBgColorInputEl?.value ?? "#ffffff");
     context.save();
     context.globalCompositeOperation = "source-over";
@@ -2529,7 +2531,6 @@ export class GameRuntime {
       return;
     }
 
-    const loadNonce = ++this.surfacePainterCanvasLoadNonce;
     const image = new Image();
     image.onload = () => {
       if (loadNonce !== this.surfacePainterCanvasLoadNonce) {
@@ -2698,6 +2699,8 @@ export class GameRuntime {
     if (!this.surfacePainterOpen || !this.surfacePainterCanvasEl) {
       return;
     }
+    // User started editing; ignore any late async image draw callbacks.
+    this.surfacePainterCanvasLoadNonce += 1;
     const point = this.getSurfacePainterCanvasPoint(clientX, clientY);
     if (!point) {
       return;
