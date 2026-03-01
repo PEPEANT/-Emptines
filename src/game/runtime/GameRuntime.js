@@ -35,9 +35,36 @@ function parseSeconds(raw, fallback, min = 0.1) {
 const INTRO_BOOT_VIDEO_URL = new URL("../../../mp4/grok-video.0.mp4", import.meta.url).href;
 const ENTRY_BGM_URL = new URL("../../../mp3/TSUKUYOMI.mp3", import.meta.url).href;
 const AD_BILLBOARD_IMAGE_URL = new URL("../../../png/AD.41415786.1.png", import.meta.url).href;
+const RIGHT_BILLBOARD_VIDEO_PATHS = Object.freeze({
+  YTDown1: "mp4/av/YTDown1.mp4",
+  YTDown2: "mp4/av/YTDown2.mp4",
+  YTDown3: "mp4/av/YTDown3.mp4",
+  YTDown4: "mp4/av/YTDown4.mp4",
+  YTDown5: "mp4/av/YTDown5.mp4",
+  YTDown6: "mp4/av/YTDown6.mp4",
+  YTDown7: "mp4/av/YTDown7.mp4",
+  YTDown8: "mp4/av/YTDown8.mp4"
+});
 const DEFAULT_PORTAL_TARGET_URL =
   "http://localhost:5173/?server=http://localhost:3001&name=PLAYER";
 const BOX_FACE_KEYS = ["px", "nx", "py", "ny", "pz", "nz"];
+
+function resolveRuntimeAssetUrl(relativePath) {
+  const normalized = String(relativePath ?? "").trim().replace(/^\/+/, "");
+  if (!normalized) {
+    return "";
+  }
+
+  if (typeof window !== "undefined") {
+    try {
+      return new URL(normalized, window.location.href).toString();
+    } catch {
+      // fall through
+    }
+  }
+
+  return `/${normalized}`;
+}
 
 export class GameRuntime {
   constructor(mount, options = {}) {
@@ -166,6 +193,17 @@ export class GameRuntime {
     this.surfacePainterTargetId = "";
     this.surfacePainterSaveInFlight = false;
     this.surfacePaintSendInFlight = false;
+    this.plazaBillboardAdTexture = null;
+    this.plazaBillboardLeftScreenMaterial = null;
+    this.plazaBillboardRightScreenMaterial = null;
+    this.plazaBillboardRightVideoEl = null;
+    this.plazaBillboardRightVideoTexture = null;
+    this.rightBillboardState = {
+      mode: "ad",
+      videoId: "",
+      updatedAt: Date.now()
+    };
+    this.rightBillboardResetInFlight = false;
     this.beach = null;
     this.shoreFoam = null;
     this.shoreWetBand = null;
@@ -273,6 +311,9 @@ export class GameRuntime {
     this.hostDelayButtons = Array.from(document.querySelectorAll(".host-delay-btn[data-delay-min]"));
     this.hostDelayMinutesInputEl = document.getElementById("host-delay-minutes");
     this.hostApplyDelayBtnEl = document.getElementById("host-apply-delay");
+    this.hostRightVideoSelectEl = document.getElementById("host-right-video");
+    this.hostPlayRightVideoBtnEl = document.getElementById("host-right-play");
+    this.hostResetRightVideoBtnEl = document.getElementById("host-right-reset");
     this.playerRosterVisible = false;
     this.roomPlayerSnapshot = [];
     this.portalForceOpenInFlight = false;
@@ -324,6 +365,16 @@ export class GameRuntime {
     this.entryMusicAudioEl = null;
     this.entryMusicStarted = false;
     this.entryMusicUnlockHandler = null;
+    this.entryMusicBaseVolume = 0.62;
+    this.entryMusicMinDistance = 8;
+    this.entryMusicMaxDistance = 260;
+    this.entryMusicRolloff = 1.15;
+    this.entryMusicSourcePosition = new THREE.Vector3(0, 4.2, 16);
+    this.rightBillboardBaseVolume = 0.9;
+    this.rightBillboardMinDistance = 5;
+    this.rightBillboardMaxDistance = 180;
+    this.rightBillboardRolloff = 1.35;
+    this.rightBillboardSourcePosition = new THREE.Vector3(0, 7, 18.8);
     this.flowClock = 0;
     this.hubIntroDuration = parseSeconds(hubFlowConfig?.introSeconds, 4.8, 0.8);
     this.bridgeApproachSpawn = parseVec3(
@@ -348,6 +399,7 @@ export class GameRuntime {
       cityConfig?.spawn,
       [0, GAME_CONSTANTS.PLAYER_HEIGHT, -8]
     );
+    this.entryMusicSourcePosition.set(this.citySpawn.x, 4.2, this.citySpawn.z + 18);
     this.bridgeWidth = Math.max(4, Number(bridgeConfig?.width) || 10);
     this.bridgeGateHalfWidth = Math.max(1.5, this.bridgeWidth * 0.28);
     this.bridgeGateTriggerDepth = Math.max(0.5, Number(bridgeConfig?.gateTriggerDepth) || 0.8);
@@ -612,6 +664,11 @@ export class GameRuntime {
   }
 
   clearHubFlowWorld() {
+    this.showDefaultBillboardAdOnRight();
+    this.plazaBillboardAdTexture = null;
+    this.plazaBillboardLeftScreenMaterial = null;
+    this.plazaBillboardRightScreenMaterial = null;
+
     if (this.npcGreetingVideoEl) {
       this.npcGreetingVideoEl.onended = null;
       this.npcGreetingVideoEl.onerror = null;
@@ -1141,6 +1198,7 @@ export class GameRuntime {
     const adTexture = this.textureLoader.load(AD_BILLBOARD_IMAGE_URL);
     adTexture.colorSpace = THREE.SRGBColorSpace;
     adTexture.anisotropy = this.mobileEnabled ? Math.min(2, maxAnisotropy) : Math.min(8, maxAnisotropy);
+    this.plazaBillboardAdTexture = adTexture;
 
     const supportMaterial = new THREE.MeshStandardMaterial({
       color: 0x2f3946,
@@ -1155,11 +1213,6 @@ export class GameRuntime {
       metalness: 0.42,
       emissive: 0x213041,
       emissiveIntensity: 0.22
-    });
-    const screenMaterial = new THREE.MeshBasicMaterial({
-      map: adTexture,
-      color: 0xffffff,
-      toneMapped: false
     });
     const glowMaterial = new THREE.MeshBasicMaterial({
       color: 0x5ecbff,
@@ -1188,7 +1241,7 @@ export class GameRuntime {
       { x: 15.2, z: 14.8, yaw: Math.PI }
     ];
 
-    for (const placement of placements) {
+    placements.forEach((placement, index) => {
       const board = new THREE.Group();
       board.position.set(placement.x, 0, placement.z);
       board.rotation.y = placement.yaw;
@@ -1212,6 +1265,11 @@ export class GameRuntime {
       frame.castShadow = !this.mobileEnabled;
       frame.receiveShadow = true;
 
+      const screenMaterial = new THREE.MeshBasicMaterial({
+        map: adTexture,
+        color: 0xffffff,
+        toneMapped: false
+      });
       const screen = new THREE.Mesh(new THREE.PlaneGeometry(screenWidth, screenHeight), screenMaterial);
       screen.position.set(0, frameY, 0.09 * boardScale);
       screen.renderOrder = 15;
@@ -1222,7 +1280,277 @@ export class GameRuntime {
 
       board.add(leftColumn, rightColumn, frame, glow, screen);
       cityGroup.add(board);
+      if (index === 0) {
+        this.plazaBillboardLeftScreenMaterial = screenMaterial;
+      } else if (index === 1) {
+        this.plazaBillboardRightScreenMaterial = screenMaterial;
+        this.rightBillboardSourcePosition.set(
+          this.citySpawn.x + placement.x,
+          frameY,
+          this.citySpawn.z + 4 + placement.z
+        );
+      }
+    });
+
+    this.applyRightBillboardState(this.rightBillboardState, { force: true });
+  }
+
+  normalizeRightBillboardVideoId(rawVideoId) {
+    const text = String(rawVideoId ?? "").trim();
+    if (!text) {
+      return "";
     }
+
+    const match = text.match(/^YTDown(\d+)$/i);
+    if (!match) {
+      return "";
+    }
+
+    const normalized = `YTDown${Math.trunc(Number(match[1]) || 0)}`;
+    return Object.prototype.hasOwnProperty.call(RIGHT_BILLBOARD_VIDEO_PATHS, normalized)
+      ? normalized
+      : "";
+  }
+
+  normalizeRightBillboardState(rawState = {}) {
+    const videoId = this.normalizeRightBillboardVideoId(rawState?.videoId ?? rawState?.id ?? "");
+    const modeRaw = String(rawState?.mode ?? "ad").trim().toLowerCase();
+    const mode = modeRaw === "video" && videoId ? "video" : "ad";
+    return {
+      mode,
+      videoId: mode === "video" ? videoId : "",
+      updatedAt: Math.max(0, Math.trunc(Number(rawState?.updatedAt) || Date.now()))
+    };
+  }
+
+  getRightBillboardVideoUrl(rawVideoId) {
+    const videoId = this.normalizeRightBillboardVideoId(rawVideoId);
+    if (!videoId) {
+      return "";
+    }
+    const relativePath = RIGHT_BILLBOARD_VIDEO_PATHS[videoId];
+    return resolveRuntimeAssetUrl(relativePath);
+  }
+
+  stopRightBillboardVideoPlayback() {
+    if (this.plazaBillboardRightVideoEl) {
+      const video = this.plazaBillboardRightVideoEl;
+      this.plazaBillboardRightVideoEl = null;
+      video.onended = null;
+      video.onerror = null;
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
+    }
+
+    if (this.plazaBillboardRightVideoTexture) {
+      this.plazaBillboardRightVideoTexture.dispose();
+      this.plazaBillboardRightVideoTexture = null;
+    }
+  }
+
+  showDefaultBillboardAdOnRight() {
+    this.stopRightBillboardVideoPlayback();
+    if (!this.plazaBillboardRightScreenMaterial) {
+      return;
+    }
+    if (!this.plazaBillboardAdTexture) {
+      return;
+    }
+
+    this.plazaBillboardRightScreenMaterial.map = this.plazaBillboardAdTexture;
+    this.plazaBillboardRightScreenMaterial.needsUpdate = true;
+  }
+
+  startRightBillboardVideoPlayback(rawVideoId) {
+    const videoId = this.normalizeRightBillboardVideoId(rawVideoId);
+    if (!videoId || !this.plazaBillboardRightScreenMaterial) {
+      this.showDefaultBillboardAdOnRight();
+      return false;
+    }
+
+    const sourceUrl = this.getRightBillboardVideoUrl(videoId);
+    if (!sourceUrl) {
+      this.showDefaultBillboardAdOnRight();
+      return false;
+    }
+
+    this.stopRightBillboardVideoPlayback();
+
+    const video = document.createElement("video");
+    video.preload = "auto";
+    video.playsInline = true;
+    video.muted = false;
+    video.loop = false;
+    video.crossOrigin = "anonymous";
+    video.setAttribute("webkit-playsinline", "true");
+    video.src = sourceUrl;
+    video.currentTime = 0;
+
+    const texture = new THREE.VideoTexture(video);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.generateMipmaps = false;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+
+    this.plazaBillboardRightVideoEl = video;
+    this.plazaBillboardRightVideoTexture = texture;
+    this.plazaBillboardRightScreenMaterial.map = texture;
+    this.plazaBillboardRightScreenMaterial.needsUpdate = true;
+
+    const finishPlayback = () => {
+      if (this.plazaBillboardRightVideoEl !== video) {
+        return;
+      }
+      this.handleRightBillboardVideoFinished(videoId);
+    };
+    video.onended = finishPlayback;
+    video.onerror = finishPlayback;
+
+    video.play().then(
+      () => {
+        this.updateSpatialAudioMix();
+      },
+      () => {
+        video.muted = true;
+        video.play().then(
+          () => {
+            this.updateSpatialAudioMix();
+          },
+          () => {
+            finishPlayback();
+          }
+        );
+      }
+    );
+    return true;
+  }
+
+  applyRightBillboardState(rawState = {}, { force = false } = {}) {
+    const next = this.normalizeRightBillboardState(rawState);
+    const previous = this.normalizeRightBillboardState(this.rightBillboardState);
+    if (
+      !force &&
+      previous.mode === next.mode &&
+      previous.videoId === next.videoId
+    ) {
+      return false;
+    }
+
+    this.rightBillboardState = next;
+    if (next.mode === "video" && next.videoId) {
+      this.startRightBillboardVideoPlayback(next.videoId);
+      return true;
+    }
+
+    this.showDefaultBillboardAdOnRight();
+    return true;
+  }
+
+  handleRightBillboardVideoFinished(rawVideoId) {
+    const finishedVideoId = this.normalizeRightBillboardVideoId(rawVideoId);
+    const current = this.normalizeRightBillboardState(this.rightBillboardState);
+    if (
+      current.mode !== "video" ||
+      !current.videoId ||
+      (finishedVideoId && current.videoId !== finishedVideoId)
+    ) {
+      return;
+    }
+
+    const fallbackState = {
+      mode: "ad",
+      videoId: "",
+      updatedAt: Date.now()
+    };
+    this.applyRightBillboardState(fallbackState, { force: true });
+    this.requestRightBillboardReset({ announceErrors: false });
+  }
+
+  requestRightBillboardVideoPlay(rawVideoId) {
+    const videoId = this.normalizeRightBillboardVideoId(rawVideoId);
+    if (!videoId) {
+      this.appendChatLine("", "우측 전광판 영상 ID를 확인하세요.", "system");
+      return;
+    }
+
+    const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
+    if (!this.socket || !this.networkConnected) {
+      if (localHostMode) {
+        this.applyRightBillboardState(
+          {
+            mode: "video",
+            videoId,
+            updatedAt: Date.now()
+          },
+          { force: true }
+        );
+        return;
+      }
+      this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
+      return;
+    }
+
+    if (!this.isRoomHost) {
+      this.appendChatLine("", "우측 전광판 제어는 방장만 가능합니다.", "system");
+      return;
+    }
+
+    this.socket.emit("billboard:right:play", { videoId }, (response = {}) => {
+      if (!response?.ok) {
+        const reason = String(response?.error ?? "").trim() || "unknown error";
+        this.appendChatLine("", `우측 전광판 재생 실패: ${reason}`, "system");
+        return;
+      }
+      this.applyRightBillboardState(response?.state ?? {}, { force: true });
+    });
+  }
+
+  requestRightBillboardReset({ announceErrors = true } = {}) {
+    const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
+    if (!this.socket || !this.networkConnected) {
+      if (localHostMode) {
+        this.applyRightBillboardState(
+          {
+            mode: "ad",
+            videoId: "",
+            updatedAt: Date.now()
+          },
+          { force: true }
+        );
+      } else if (announceErrors) {
+        this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
+      }
+      return;
+    }
+
+    if (!this.isRoomHost) {
+      if (announceErrors) {
+        this.appendChatLine("", "우측 전광판 제어는 방장만 가능합니다.", "system");
+      }
+      return;
+    }
+
+    if (this.rightBillboardResetInFlight) {
+      return;
+    }
+    this.rightBillboardResetInFlight = true;
+    this.syncHostControls();
+
+    this.socket.emit("billboard:right:reset", {}, (response = {}) => {
+      this.rightBillboardResetInFlight = false;
+      this.syncHostControls();
+      if (!response?.ok) {
+        if (announceErrors) {
+          const reason = String(response?.error ?? "").trim() || "unknown error";
+          this.appendChatLine("", `우측 전광판 복귀 실패: ${reason}`, "system");
+        }
+        return;
+      }
+      this.applyRightBillboardState(response?.state ?? {}, { force: true });
+    });
   }
 
   addChalkTable(cityGroup) {
@@ -1856,25 +2184,74 @@ export class GameRuntime {
 
   ensureEntryMusicPlayback() {
     if (this.entryMusicStarted) {
+      this.updateSpatialAudioMix();
       return;
     }
     if (!this.entryMusicAudioEl) {
       const audio = new Audio(ENTRY_BGM_URL);
       audio.preload = "auto";
       audio.loop = true;
-      audio.volume = 0.62;
+      audio.volume = this.entryMusicBaseVolume;
       this.entryMusicAudioEl = audio;
     }
 
     this.entryMusicAudioEl.play().then(
       () => {
         this.entryMusicStarted = true;
+        this.updateSpatialAudioMix();
         this.detachEntryMusicUnlockListeners();
       },
       () => {
         this.attachEntryMusicUnlockListeners();
       }
     );
+  }
+
+  computeSpatialAudioGain(sourcePosition, minDistance = 8, maxDistance = 240, rolloff = 1.2) {
+    if (!sourcePosition) {
+      return 1;
+    }
+
+    const dx = this.playerPosition.x - sourcePosition.x;
+    const dy = this.playerPosition.y - sourcePosition.y;
+    const dz = this.playerPosition.z - sourcePosition.z;
+    const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (distance <= minDistance) {
+      return 1;
+    }
+    if (distance >= maxDistance) {
+      return 0;
+    }
+
+    const span = Math.max(0.001, maxDistance - minDistance);
+    const normalized = THREE.MathUtils.clamp((distance - minDistance) / span, 0, 1);
+    return Math.pow(1 - normalized, Math.max(0.2, Number(rolloff) || 1.2));
+  }
+
+  updateSpatialAudioMix() {
+    if (this.entryMusicAudioEl) {
+      const gain = this.computeSpatialAudioGain(
+        this.entryMusicSourcePosition,
+        this.entryMusicMinDistance,
+        this.entryMusicMaxDistance,
+        this.entryMusicRolloff
+      );
+      this.entryMusicAudioEl.volume = THREE.MathUtils.clamp(this.entryMusicBaseVolume * gain, 0, 1);
+    }
+
+    if (this.plazaBillboardRightVideoEl) {
+      const gain = this.computeSpatialAudioGain(
+        this.rightBillboardSourcePosition,
+        this.rightBillboardMinDistance,
+        this.rightBillboardMaxDistance,
+        this.rightBillboardRolloff
+      );
+      this.plazaBillboardRightVideoEl.volume = THREE.MathUtils.clamp(
+        this.rightBillboardBaseVolume * gain,
+        0,
+        1
+      );
+    }
   }
 
   beginBridgeApproachFlow() {
@@ -2872,7 +3249,10 @@ export class GameRuntime {
     const hasHostPrivilege = this.isRoomHost || localHostMode;
     const visible = this.hubFlowEnabled && hasHostPrivilege;
     const canControlPortal = visible && this.flowStage === "city_live";
-    const controlsBusy = this.portalForceOpenInFlight || this.portalScheduleSetInFlight;
+    const controlsBusy =
+      this.portalForceOpenInFlight ||
+      this.portalScheduleSetInFlight ||
+      this.rightBillboardResetInFlight;
 
     this.hostControlsEl.classList.toggle("hidden", !visible);
     if (this.hostOpenPortalBtnEl) {
@@ -2890,6 +3270,15 @@ export class GameRuntime {
     }
     if (this.hostApplyDelayBtnEl) {
       this.hostApplyDelayBtnEl.disabled = !canControlPortal || controlsBusy;
+    }
+    if (this.hostRightVideoSelectEl) {
+      this.hostRightVideoSelectEl.disabled = !canControlPortal || controlsBusy;
+    }
+    if (this.hostPlayRightVideoBtnEl) {
+      this.hostPlayRightVideoBtnEl.disabled = !canControlPortal || controlsBusy;
+    }
+    if (this.hostResetRightVideoBtnEl) {
+      this.hostResetRightVideoBtnEl.disabled = !canControlPortal || controlsBusy;
     }
   }
 
@@ -4570,6 +4959,26 @@ export class GameRuntime {
         this.hostApplyDelayBtnEl?.click?.();
       });
     }
+    if (this.hostPlayRightVideoBtnEl) {
+      this.hostPlayRightVideoBtnEl.addEventListener("click", () => {
+        const videoId = String(this.hostRightVideoSelectEl?.value ?? "").trim();
+        this.requestRightBillboardVideoPlay(videoId);
+      });
+    }
+    if (this.hostRightVideoSelectEl) {
+      this.hostRightVideoSelectEl.addEventListener("keydown", (event) => {
+        if (event.code !== "Enter") {
+          return;
+        }
+        event.preventDefault();
+        this.hostPlayRightVideoBtnEl?.click?.();
+      });
+    }
+    if (this.hostResetRightVideoBtnEl) {
+      this.hostResetRightVideoBtnEl.addEventListener("click", () => {
+        this.requestRightBillboardReset({ announceErrors: true });
+      });
+    }
 
     if (this.surfacePainterCanvasEl) {
       this.surfacePainterCanvasEl.addEventListener("pointerdown", (event) => {
@@ -4727,6 +5136,15 @@ export class GameRuntime {
     if (!this.hostApplyDelayBtnEl) {
       this.hostApplyDelayBtnEl = document.getElementById("host-apply-delay");
     }
+    if (!this.hostRightVideoSelectEl) {
+      this.hostRightVideoSelectEl = document.getElementById("host-right-video");
+    }
+    if (!this.hostPlayRightVideoBtnEl) {
+      this.hostPlayRightVideoBtnEl = document.getElementById("host-right-play");
+    }
+    if (!this.hostResetRightVideoBtnEl) {
+      this.hostResetRightVideoBtnEl = document.getElementById("host-right-reset");
+    }
     if (!this.playerRosterEl) {
       this.playerRosterEl = document.getElementById("player-roster");
     }
@@ -4874,6 +5292,7 @@ export class GameRuntime {
       this.localPlayerId = null;
       this.roomHostId = null;
       this.isRoomHost = false;
+      this.rightBillboardResetInFlight = false;
       this.portalForceOpenInFlight = false;
       this.clearRemotePlayers();
       this.updateRoomPlayerSnapshot([]);
@@ -4904,6 +5323,7 @@ export class GameRuntime {
       this.portalTargetSetInFlight = false;
       this.portalForceOpenInFlight = false;
       this.portalScheduleSetInFlight = false;
+      this.rightBillboardResetInFlight = false;
       this.remoteSyncClock = 0;
       this.lastSentInput = null;
       this.localInputSeq = 0;
@@ -4928,6 +5348,7 @@ export class GameRuntime {
       this.portalTargetSetInFlight = false;
       this.portalForceOpenInFlight = false;
       this.portalScheduleSetInFlight = false;
+      this.rightBillboardResetInFlight = false;
       this.remoteSyncClock = 0;
       this.lastSentInput = null;
       this.pendingJumpInput = false;
@@ -4949,6 +5370,7 @@ export class GameRuntime {
       this.isRoomHost = false;
       this.portalScheduleSetInFlight = false;
       this.portalForceOpenInFlight = false;
+      this.rightBillboardResetInFlight = false;
       this.remoteSyncClock = 0;
       this.lastSentInput = null;
       this.pendingJumpInput = false;
@@ -4989,6 +5411,10 @@ export class GameRuntime {
 
     socket.on("paint:surface:update", (payload = {}) => {
       this.applySurfacePaintUpdate(payload);
+    });
+
+    socket.on("billboard:right:update", (payload = {}) => {
+      this.applyRightBillboardState(payload ?? {}, { force: true });
     });
 
     socket.on("snapshot:world", (payload) => {
@@ -5107,6 +5533,9 @@ export class GameRuntime {
     }
     if (room?.portalSchedule && typeof room.portalSchedule === "object") {
       this.applyPortalScheduleUpdate(room.portalSchedule, { announce: false });
+    }
+    if (room?.rightBillboard && typeof room.rightBillboard === "object") {
+      this.applyRightBillboardState(room.rightBillboard, { force: true });
     }
 
     const players = Array.isArray(room?.players) ? room.players : [];
@@ -5385,6 +5814,7 @@ export class GameRuntime {
     this.updateRemotePlayers(delta);
     this.updateLocalChatBubble();
     this.emitLocalSync(delta);
+    this.updateSpatialAudioMix();
     this.updateDynamicResolution(delta);
     this.updateHud(delta);
   }

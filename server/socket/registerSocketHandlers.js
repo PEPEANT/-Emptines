@@ -276,6 +276,65 @@ export function registerSocketHandlers({
       ack(ackFn, { ok: true, openedAt, schedule: forceResult.schedule });
     });
 
+    socket.on("billboard:right:play", (payload = {}, ackFn) => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        ack(ackFn, { ok: false, error: "room not found" });
+        return;
+      }
+      if (!roomService.isHost(room, socket.id)) {
+        ack(ackFn, { ok: false, error: "host only" });
+        return;
+      }
+
+      const result = roomService.setRightBillboardVideo(
+        room,
+        payload?.videoId ?? payload?.id ?? ""
+      );
+      if (!result.ok) {
+        ack(ackFn, result);
+        return;
+      }
+
+      if (result.changed) {
+        roomService.emitRightBillboardUpdate(room);
+      }
+
+      ack(ackFn, {
+        ok: true,
+        changed: Boolean(result.changed),
+        state: result.state
+      });
+    });
+
+    socket.on("billboard:right:reset", (_payload = {}, ackFn) => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        ack(ackFn, { ok: false, error: "room not found" });
+        return;
+      }
+      if (!roomService.isHost(room, socket.id)) {
+        ack(ackFn, { ok: false, error: "host only" });
+        return;
+      }
+
+      const result = roomService.resetRightBillboard(room);
+      if (!result.ok) {
+        ack(ackFn, result);
+        return;
+      }
+
+      if (result.changed) {
+        roomService.emitRightBillboardUpdate(room);
+      }
+
+      ack(ackFn, {
+        ok: true,
+        changed: Boolean(result.changed),
+        state: result.state
+      });
+    });
+
     socket.on("disconnecting", () => {
       roomService.leaveCurrentRoom(socket);
     });

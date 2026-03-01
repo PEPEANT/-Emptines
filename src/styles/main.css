@@ -241,6 +241,56 @@ canvas {
   cursor: default;
 }
 
+#host-billboard-controls {
+  display: grid;
+  gap: 6px;
+  padding: 7px 8px;
+  border: 1px solid rgba(148, 196, 230, 0.46);
+  border-radius: 9px;
+  background: rgba(8, 22, 35, 0.72);
+}
+
+.host-control-label {
+  color: #a9d7f6;
+  font: 700 0.6rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.1em;
+}
+
+#host-right-video {
+  width: 102px;
+  height: 28px;
+  padding: 0 5px;
+  border: 1px solid rgba(163, 206, 239, 0.62);
+  border-radius: 7px;
+  background: rgba(10, 24, 37, 0.9);
+  color: #e6f5ff;
+  font: 700 0.64rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+}
+
+#host-right-play,
+#host-right-reset {
+  min-width: 0;
+  height: 28px;
+  border: 1px solid rgba(161, 203, 235, 0.58);
+  border-radius: 7px;
+  background: rgba(10, 26, 40, 0.82);
+  color: #dcefff;
+  font: 700 0.62rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+#host-right-play {
+  flex: 1;
+}
+
+#host-right-play:disabled,
+#host-right-reset:disabled,
+#host-right-video:disabled {
+  opacity: 0.62;
+  cursor: default;
+}
+
 #hub-flow-ui {
   position: fixed;
   top: 14px;
@@ -922,6 +972,22 @@ canvas {
     width: 56px;
     height: 26px;
     font-size: 0.62rem;
+  }
+
+  #host-billboard-controls {
+    padding: 6px;
+    gap: 4px;
+  }
+
+  #host-right-video,
+  #host-right-play,
+  #host-right-reset {
+    height: 26px;
+    font-size: 0.58rem;
+  }
+
+  #host-right-video {
+    width: 84px;
   }
 
   .hud-row {

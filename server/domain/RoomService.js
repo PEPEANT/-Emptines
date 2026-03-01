@@ -3,6 +3,7 @@ import { chooseDistributedSpawnState } from "./spawn.js";
 
 const SURFACE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,96}$/;
 const MAX_SURFACE_IMAGE_CHARS = 1_400_000;
+const RIGHT_BILLBOARD_VIDEO_ID_PATTERN = /^YTDown([1-8])$/i;
 
 function normalizeRoomPortalTarget(rawValue, fallback = "") {
   const text = String(rawValue ?? "").trim().slice(0, 2048);
@@ -55,12 +56,30 @@ function createPortalScheduleState() {
   };
 }
 
+function createRightBillboardState() {
+  return {
+    mode: "ad",
+    videoId: "",
+    updatedAt: Date.now()
+  };
+}
+
+function normalizeRightBillboardVideoId(rawValue) {
+  const text = String(rawValue ?? "").trim();
+  const match = text.match(RIGHT_BILLBOARD_VIDEO_ID_PATTERN);
+  if (!match) {
+    return "";
+  }
+  return `YTDown${Math.trunc(Number(match[1]) || 0)}`;
+}
+
 function createPersistentRoom(code, defaultPortalTargetUrl) {
   return {
     code,
     hostId: null,
     portalTarget: defaultPortalTargetUrl,
     portalSchedule: createPortalScheduleState(),
+    rightBillboard: createRightBillboardState(),
     surfacePaint: new Map(),
     players: new Map(),
     persistent: true,
@@ -126,6 +145,7 @@ export class RoomService {
       hostId: room.hostId,
       portalTarget: String(room.portalTarget ?? "").trim(),
       portalSchedule: this.serializePortalSchedule(room),
+      rightBillboard: this.serializeRightBillboard(room),
       players: Array.from(room.players.values()).map((player) => ({
         id: player.id,
         name: player.name,
@@ -183,6 +203,84 @@ export class RoomService {
 
   emitPortalScheduleUpdate(room) {
     this.io.to(room.code).emit("portal:schedule:update", this.serializePortalSchedule(room));
+  }
+
+  serializeRightBillboard(room) {
+    const state = room?.rightBillboard ?? createRightBillboardState();
+    const videoId = normalizeRightBillboardVideoId(state.videoId);
+    const modeRaw = String(state.mode ?? "ad").trim().toLowerCase();
+    const mode = modeRaw === "video" && videoId ? "video" : "ad";
+
+    return {
+      mode,
+      videoId: mode === "video" ? videoId : "",
+      updatedAt: Math.max(0, Math.trunc(Number(state.updatedAt) || Date.now()))
+    };
+  }
+
+  emitRightBillboardUpdate(room) {
+    this.io.to(room.code).emit("billboard:right:update", this.serializeRightBillboard(room));
+  }
+
+  setRightBillboardVideo(room, rawVideoId) {
+    if (!room) {
+      return { ok: false, error: "room not found" };
+    }
+
+    const videoId = normalizeRightBillboardVideoId(rawVideoId);
+    if (!videoId) {
+      return { ok: false, error: "invalid video id" };
+    }
+
+    const previous = this.serializeRightBillboard(room);
+    if (previous.mode === "video" && previous.videoId === videoId) {
+      return {
+        ok: true,
+        changed: false,
+        state: previous
+      };
+    }
+
+    if (!room.rightBillboard || typeof room.rightBillboard !== "object") {
+      room.rightBillboard = createRightBillboardState();
+    }
+    room.rightBillboard.mode = "video";
+    room.rightBillboard.videoId = videoId;
+    room.rightBillboard.updatedAt = Date.now();
+
+    return {
+      ok: true,
+      changed: true,
+      state: this.serializeRightBillboard(room)
+    };
+  }
+
+  resetRightBillboard(room) {
+    if (!room) {
+      return { ok: false, error: "room not found" };
+    }
+
+    const previous = this.serializeRightBillboard(room);
+    if (previous.mode === "ad" && !previous.videoId) {
+      return {
+        ok: true,
+        changed: false,
+        state: previous
+      };
+    }
+
+    if (!room.rightBillboard || typeof room.rightBillboard !== "object") {
+      room.rightBillboard = createRightBillboardState();
+    }
+    room.rightBillboard.mode = "ad";
+    room.rightBillboard.videoId = "";
+    room.rightBillboard.updatedAt = Date.now();
+
+    return {
+      ok: true,
+      changed: true,
+      state: this.serializeRightBillboard(room)
+    };
   }
 
   serializeSurfacePaint(room) {
