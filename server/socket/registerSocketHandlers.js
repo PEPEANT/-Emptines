@@ -307,6 +307,36 @@ export function registerSocketHandlers({
       ack(ackFn, { ok: true, openedAt, schedule: forceResult.schedule });
     });
 
+    socket.on("portal:close", (_payload = {}, ackFn) => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        ack(ackFn, { ok: false, error: "room not found" });
+        return;
+      }
+
+      if (!roomService.isHost(room, socket.id)) {
+        ack(ackFn, { ok: false, error: "host only" });
+        return;
+      }
+
+      const closeResult = roomService.closePortal(room);
+      if (!closeResult.ok) {
+        ack(ackFn, closeResult);
+        return;
+      }
+
+      const closedAt = Date.now();
+      roomService.emitPortalScheduleUpdate(room);
+      io.to(room.code).emit("portal:force-close", {
+        roomCode: room.code,
+        hostId: socket.id,
+        closedAt,
+        schedule: closeResult.schedule
+      });
+
+      ack(ackFn, { ok: true, closedAt, changed: Boolean(closeResult.changed), schedule: closeResult.schedule });
+    });
+
     socket.on("billboard:right:play", (payload = {}, ackFn) => {
       const room = roomService.getRoomBySocket(socket);
       if (!room) {

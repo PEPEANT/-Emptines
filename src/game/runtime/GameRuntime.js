@@ -284,14 +284,9 @@ export class GameRuntime {
       this.parseQueryFlag("hosting") ||
       this.parseQueryFlag("owner") ||
       Boolean(this.hostClaimKey);
-    const forceFullscreen =
-      this.parseQueryFlag("fullscreen") || this.parseQueryFlag("fs");
-    const disableFullscreen =
-      this.parseQueryFlag("no_fullscreen") ||
-      this.parseQueryFlag("nofullscreen") ||
-      this.parseQueryFlag("no_fs");
-    this.autoFullscreenEnabled = forceFullscreen || !disableFullscreen;
-    this.fullscreenRestorePending = this.autoFullscreenEnabled;
+    // Auto-fullscreen is disabled to avoid interrupting host control popups.
+    this.autoFullscreenEnabled = false;
+    this.fullscreenRestorePending = false;
     this.autoHostClaimLastAttemptMs = 0;
     this.roomHostId = null;
     this.isRoomHost = false;
@@ -360,6 +355,8 @@ export class GameRuntime {
     this.hostDelayButtons = Array.from(document.querySelectorAll(".host-delay-btn[data-delay-min]"));
     this.hostDelayMinutesInputEl = document.getElementById("host-delay-minutes");
     this.hostApplyDelayBtnEl = document.getElementById("host-apply-delay");
+    this.hostPortalTargetInputEl = document.getElementById("host-portal-target");
+    this.hostPortalTargetApplyBtnEl = document.getElementById("host-portal-target-apply");
     this.hostLeftImageFileInputEl = document.getElementById("host-left-image-file");
     this.hostResetLeftImageBtnEl = document.getElementById("host-left-image-reset");
     this.hostMusicFileInputEl = document.getElementById("host-music-file");
@@ -375,6 +372,7 @@ export class GameRuntime {
     this.playerRosterVisible = false;
     this.roomPlayerSnapshot = [];
     this.portalForceOpenInFlight = false;
+    this.portalCloseInFlight = false;
     this.portalScheduleSetInFlight = false;
     this.portalSchedule = {
       mode: "idle",
@@ -3556,10 +3554,7 @@ export class GameRuntime {
         this.bridgeBoundaryDingClock = 0;
         this.keys.clear();
         this.setMirrorGateVisible(false);
-        this.playerPosition.copy(this.citySpawn);
         this.lastSafePosition.copy(this.playerPosition);
-        this.pendingAuthoritativeStateSync = true;
-        this.requestAuthoritativeStateSync();
         this.setFlowHeadline("도시 라이브", "자유 이동");
         this.hud.setStatus(this.getStatusText());
         this.syncGameplayUiForFlow();
@@ -3593,8 +3588,6 @@ export class GameRuntime {
         this.keys.clear();
         this.setMirrorGateVisible(false);
         this.lastSafePosition.copy(this.playerPosition);
-        this.pendingAuthoritativeStateSync = true;
-        this.requestAuthoritativeStateSync();
         this.setFlowHeadline("도시 라이브", "자유 이동");
         this.hud.setStatus(this.getStatusText());
         this.syncGameplayUiForFlow();
@@ -3603,15 +3596,10 @@ export class GameRuntime {
     }
 
     if (this.flowStage === "city_intro") {
-      // Legacy compatibility: disable forced auto-move and promote immediately.
+      // Legacy compatibility: promote stage immediately, no forced position teleport.
       this.flowStage = "city_live";
       this.flowClock = 0;
-      this.playerPosition.copy(this.citySpawn);
       this.lastSafePosition.copy(this.playerPosition);
-      this.yaw = this.getLookYaw(this.citySpawn, this.portalFloorPosition);
-      this.pitch = -0.02;
-      this.pendingAuthoritativeStateSync = true;
-      this.requestAuthoritativeStateSync();
       this.setFlowHeadline("도시 라이브", "자유 이동");
       this.hud.setStatus(this.getStatusText());
       this.syncGameplayUiForFlow();
@@ -3646,13 +3634,16 @@ export class GameRuntime {
     }
 
     if (schedule.mode !== "idle") {
-      if (schedule.mode === "open") {
+      if (schedule.mode === "open" || schedule.mode === "open_manual") {
         this.portalPhase = "open";
-        this.portalPhaseClock = Math.max(0, Number(schedule.remainingSec) || 0);
+        const timedOpen = schedule.mode === "open";
+        this.portalPhaseClock = timedOpen ? Math.max(0, Number(schedule.remainingSec) || 0) : 0;
         if (this.portalTargetUrl) {
           this.setFlowHeadline(
             "포탈 개방",
-            `입장 가능 (${Math.ceil(this.portalPhaseClock)}초 남음)`
+            timedOpen
+              ? `입장 가능 (${Math.ceil(this.portalPhaseClock)}초 남음)`
+              : "입장 가능 (호스트가 닫기 전까지 유지)"
           );
         } else {
           this.setFlowHeadline(
@@ -3743,7 +3734,9 @@ export class GameRuntime {
     const localTime = `${hours}:${minutes}:${seconds}`;
     const schedule = this.getPortalScheduleComputed(now.getTime());
     let startLabel = "( 대 기 중 )";
-    if (schedule.mode === "open") {
+    if (schedule.mode === "open_manual") {
+      startLabel = "입장 가능 (수동 종료)";
+    } else if (schedule.mode === "open") {
       startLabel = "입장 가능";
     } else if (schedule.mode === "final_countdown") {
       startLabel = `${Math.max(0, Math.trunc(Number(schedule.remainingSec) || 0))}초`;
@@ -4174,19 +4167,29 @@ export class GameRuntime {
     const hasHostPrivilege = this.isRoomHost || localHostMode;
     const visible = this.hubFlowEnabled && hasHostPrivilege;
     const canControlPortal = visible && this.flowStage === "city_live";
+    const schedule = this.getPortalScheduleComputed();
+    const portalOpenNow = schedule.mode === "open" || schedule.mode === "open_manual";
     const controlsBusy =
       this.portalForceOpenInFlight ||
+      this.portalCloseInFlight ||
       this.portalScheduleSetInFlight ||
+      this.portalTargetSetInFlight ||
       this.leftBillboardSetInFlight ||
       this.rightBillboardResetInFlight ||
       this.hostMusicSetInFlight;
 
     this.hostControlsEl.classList.toggle("hidden", !visible);
     if (this.hostOpenPortalBtnEl) {
+      const nextLabel = portalOpenNow ? "포탈 닫기" : "포탈 열기";
+      if (this.hostOpenPortalBtnEl.textContent !== nextLabel) {
+        this.hostOpenPortalBtnEl.textContent = nextLabel;
+      }
       this.hostOpenPortalBtnEl.disabled = !canControlPortal || controlsBusy;
-      this.hostOpenPortalBtnEl.title = canControlPortal
-        ? "방장 포탈 즉시 개방"
-        : "도시 라이브 단계에서만 사용 가능";
+      this.hostOpenPortalBtnEl.title = !canControlPortal
+        ? "도시 라이브 단계에서만 사용 가능"
+        : portalOpenNow
+          ? "방장 포탈 즉시 닫기"
+          : "방장 포탈 즉시 개방";
     }
 
     for (const button of this.hostDelayButtons) {
@@ -4197,6 +4200,18 @@ export class GameRuntime {
     }
     if (this.hostApplyDelayBtnEl) {
       this.hostApplyDelayBtnEl.disabled = !canControlPortal || controlsBusy;
+    }
+    if (this.hostPortalTargetInputEl) {
+      this.hostPortalTargetInputEl.disabled = !canControlPortal || controlsBusy;
+      if (document.activeElement !== this.hostPortalTargetInputEl) {
+        const nextValue = String(this.hostPortalTargetCandidate || this.portalTargetUrl || "").trim();
+        if (this.hostPortalTargetInputEl.value !== nextValue) {
+          this.hostPortalTargetInputEl.value = nextValue;
+        }
+      }
+    }
+    if (this.hostPortalTargetApplyBtnEl) {
+      this.hostPortalTargetApplyBtnEl.disabled = !canControlPortal || controlsBusy;
     }
     if (this.hostRightVideoSelectEl) {
       this.hostRightVideoSelectEl.disabled = !canControlPortal || controlsBusy;
@@ -4230,7 +4245,7 @@ export class GameRuntime {
 
   normalizePortalSchedule(raw = {}) {
     const modeRaw = String(raw?.mode ?? "idle").trim().toLowerCase();
-    const mode = ["idle", "waiting", "final_countdown", "open"].includes(modeRaw)
+    const mode = ["idle", "waiting", "final_countdown", "open", "open_manual"].includes(modeRaw)
       ? modeRaw
       : "idle";
     const finalCountdownSeconds = THREE.MathUtils.clamp(
@@ -4294,6 +4309,8 @@ export class GameRuntime {
         mode = "idle";
         remainingSec = 0;
       }
+    } else if (mode === "open_manual") {
+      remainingSec = 0;
     } else {
       mode = "idle";
       remainingSec = 0;
@@ -4312,7 +4329,7 @@ export class GameRuntime {
     this.updatePortalTimeBillboard(0, true);
     this.syncHostControls();
 
-    if (announce && next.mode === "open") {
+    if (announce && (next.mode === "open" || next.mode === "open_manual")) {
       this.appendChatLine("", "방장이 포탈을 즉시 개방했습니다.", "system");
     }
   }
@@ -4385,10 +4402,10 @@ export class GameRuntime {
 
     const now = Date.now();
     const fallbackSchedule = {
-      mode: "open",
+      mode: "open_manual",
       startAtMs: now,
-      openUntilMs: now + this.portalOpenSeconds * 1000,
-      remainingSec: this.portalOpenSeconds,
+      openUntilMs: 0,
+      remainingSec: 0,
       finalCountdownSeconds: 10,
       updatedAt: now
     };
@@ -4396,11 +4413,38 @@ export class GameRuntime {
     this.applyPortalScheduleUpdate(schedule, { announce: false });
     const computed = this.getPortalScheduleComputed();
     this.portalPhase = "open";
-    this.portalPhaseClock = Math.max(1, Number(computed.remainingSec) || this.portalOpenSeconds);
+    this.portalPhaseClock = computed.mode === "open_manual"
+      ? 0
+      : Math.max(1, Number(computed.remainingSec) || this.portalOpenSeconds);
     this.updatePortalVisual();
 
     if (announce) {
       this.appendChatLine("", "방장이 포탈을 즉시 개방했습니다.", "system");
+    }
+  }
+
+  handlePortalForceClose(_payload = {}, { announce = true } = {}) {
+    if (!this.hubFlowEnabled) {
+      return;
+    }
+
+    const now = Date.now();
+    const fallbackSchedule = {
+      mode: "idle",
+      startAtMs: 0,
+      openUntilMs: 0,
+      remainingSec: 0,
+      finalCountdownSeconds: 10,
+      updatedAt: now
+    };
+    const schedule = _payload?.schedule ?? fallbackSchedule;
+    this.applyPortalScheduleUpdate(schedule, { announce: false });
+    this.portalPhase = "cooldown";
+    this.portalPhaseClock = 0;
+    this.updatePortalVisual();
+
+    if (announce) {
+      this.appendChatLine("", "방장이 포탈을 닫았습니다.", "system");
     }
   }
 
@@ -4441,7 +4485,47 @@ export class GameRuntime {
 
       // Apply immediately for local host; room broadcast will update everyone else.
       this.handlePortalForceOpen(response, { announce: false });
-      this.appendChatLine("", "포탈을 즉시 개방했습니다.", "system");
+      this.appendChatLine("", "포탈을 즉시 개방했습니다. (직접 닫을 때까지 유지)", "system");
+    });
+  }
+
+  requestPortalForceClose() {
+    const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
+    if (!this.socket || !this.networkConnected) {
+      if (localHostMode) {
+        this.handlePortalForceClose({}, { announce: false });
+        this.appendChatLine("", "로컬 모드에서 포탈을 닫았습니다.", "system");
+        return;
+      }
+      this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
+      return;
+    }
+    if (!this.isRoomHost) {
+      this.appendChatLine("", "포탈 닫기는 방장만 가능합니다.", "system");
+      return;
+    }
+    if (!this.hubFlowEnabled || this.flowStage !== "city_live") {
+      this.appendChatLine("", "도시 라이브 단계에서만 포탈 닫기 가능합니다.", "system");
+      return;
+    }
+    if (this.portalCloseInFlight) {
+      return;
+    }
+
+    this.portalCloseInFlight = true;
+    this.syncHostControls();
+    this.socket.emit("portal:close", {}, (response = {}) => {
+      this.portalCloseInFlight = false;
+      this.syncHostControls();
+
+      if (!response?.ok) {
+        const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
+        this.appendChatLine("", `포탈 닫기 실패: ${reason}`, "system");
+        return;
+      }
+
+      this.handlePortalForceClose(response, { announce: false });
+      this.appendChatLine("", "포탈을 닫았습니다.", "system");
     });
   }
 
@@ -5541,12 +5625,6 @@ export class GameRuntime {
     this.resolveUiElements();
 
     window.addEventListener("resize", () => this.onResize());
-    document.addEventListener("fullscreenchange", () => {
-      this.syncFullscreenRestoreFlag();
-    });
-    document.addEventListener("webkitfullscreenchange", () => {
-      this.syncFullscreenRestoreFlag();
-    });
 
     window.addEventListener("keydown", (event) => {
       if (this.isTextInputTarget(event.target)) {
@@ -5645,7 +5723,6 @@ export class GameRuntime {
     });
 
     this.renderer.domElement.addEventListener("click", () => {
-      this.tryEnterFullscreenFromInteraction();
       if (this.canDrawChalk()) return;
       this.tryPointerLock();
     });
@@ -5654,7 +5731,6 @@ export class GameRuntime {
       if (this.isTextInputTarget(event.target)) {
         return;
       }
-      this.tryEnterFullscreenFromInteraction();
       if (event.target === this.renderer.domElement) return;
       if (this.canDrawChalk()) return;
       if (this.chatOpen || this.nicknameGateEl?.classList.contains("hidden") === false) return;
@@ -5923,6 +5999,12 @@ export class GameRuntime {
 
     if (this.hostOpenPortalBtnEl) {
       this.hostOpenPortalBtnEl.addEventListener("click", () => {
+        const schedule = this.getPortalScheduleComputed();
+        const portalOpenNow = schedule.mode === "open" || schedule.mode === "open_manual";
+        if (portalOpenNow) {
+          this.requestPortalForceClose();
+          return;
+        }
         this.requestPortalForceOpen();
       });
     }
@@ -5957,6 +6039,29 @@ export class GameRuntime {
         }
         event.preventDefault();
         this.hostApplyDelayBtnEl?.click?.();
+      });
+    }
+    if (this.hostPortalTargetApplyBtnEl) {
+      this.hostPortalTargetApplyBtnEl.addEventListener("click", () => {
+        const raw = String(this.hostPortalTargetInputEl?.value ?? "").trim();
+        const normalized = this.normalizePortalTargetUrl(raw, "");
+        if (!normalized) {
+          this.appendChatLine("", "유효한 http/https 링크를 입력하세요.", "system");
+          this.hostPortalTargetInputEl?.focus?.();
+          return;
+        }
+        this.hostPortalTargetCandidate = normalized;
+        this.hostPortalTargetSynced = false;
+        this.requestPortalTargetUpdate(normalized, { announceSuccess: true, announceErrors: true });
+      });
+    }
+    if (this.hostPortalTargetInputEl) {
+      this.hostPortalTargetInputEl.addEventListener("keydown", (event) => {
+        if (event.code !== "Enter") {
+          return;
+        }
+        event.preventDefault();
+        this.hostPortalTargetApplyBtnEl?.click?.();
       });
     }
     if (this.hostPlayRightVideoBtnEl) {
@@ -6277,6 +6382,12 @@ export class GameRuntime {
     if (!this.hostApplyDelayBtnEl) {
       this.hostApplyDelayBtnEl = document.getElementById("host-apply-delay");
     }
+    if (!this.hostPortalTargetInputEl) {
+      this.hostPortalTargetInputEl = document.getElementById("host-portal-target");
+    }
+    if (!this.hostPortalTargetApplyBtnEl) {
+      this.hostPortalTargetApplyBtnEl = document.getElementById("host-portal-target-apply");
+    }
     if (!this.hostRightVideoSelectEl) {
       this.hostRightVideoSelectEl = document.getElementById("host-right-video");
     }
@@ -6541,6 +6652,7 @@ export class GameRuntime {
       this.hostPortalTargetSynced = false;
       this.portalTargetSetInFlight = false;
       this.portalForceOpenInFlight = false;
+      this.portalCloseInFlight = false;
       this.portalScheduleSetInFlight = false;
       this.leftBillboardSetInFlight = false;
       this.rightBillboardResetInFlight = false;
@@ -6572,6 +6684,7 @@ export class GameRuntime {
       this.hostPortalTargetSynced = false;
       this.portalTargetSetInFlight = false;
       this.portalForceOpenInFlight = false;
+      this.portalCloseInFlight = false;
       this.portalScheduleSetInFlight = false;
       this.leftBillboardSetInFlight = false;
       this.rightBillboardResetInFlight = false;
@@ -6599,6 +6712,7 @@ export class GameRuntime {
       this.isRoomHost = false;
       this.portalScheduleSetInFlight = false;
       this.portalForceOpenInFlight = false;
+      this.portalCloseInFlight = false;
       this.leftBillboardSetInFlight = false;
       this.rightBillboardResetInFlight = false;
       this.hostMusicSetInFlight = false;
@@ -6636,6 +6750,12 @@ export class GameRuntime {
       const hostId = String(payload?.hostId ?? "").trim();
       const localId = String(this.localPlayerId ?? "").trim();
       this.handlePortalForceOpen(payload, { announce: Boolean(hostId && hostId !== localId) });
+    });
+
+    socket.on("portal:force-close", (payload = {}) => {
+      const hostId = String(payload?.hostId ?? "").trim();
+      const localId = String(this.localPlayerId ?? "").trim();
+      this.handlePortalForceClose(payload, { announce: Boolean(hostId && hostId !== localId) });
     });
 
     socket.on("paint:state", (payload = {}) => {
@@ -6904,8 +7024,9 @@ export class GameRuntime {
       return;
     }
 
-    if (errorSq > 0.0004) {
-      const positionAlpha = errorSq > 2.25 ? 0.34 : errorSq > 0.36 ? 0.2 : 0.12;
+    // Only correct when error exceeds 0.5 units to avoid jitter from normal network latency.
+    if (errorSq > 0.25) {
+      const positionAlpha = errorSq > 9 ? 0.22 : errorSq > 2.25 ? 0.12 : 0.06;
       this.playerPosition.x += dx * positionAlpha;
       this.playerPosition.y += dy * positionAlpha;
       this.playerPosition.z += dz * positionAlpha;

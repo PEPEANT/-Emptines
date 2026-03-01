@@ -803,16 +803,44 @@ export class RoomService {
     }
 
     const state = room.portalSchedule;
-    state.mode = "open";
+    state.mode = "open_manual";
     state.startAtMs = now;
-    state.openUntilMs = now + this.portalOpenSeconds * 1000;
-    state.remainingSec = this.portalOpenSeconds;
+    state.openUntilMs = 0;
+    state.remainingSec = 0;
     state.finalCountdownSeconds = this.portalFinalCountdownSeconds;
     state.updatedAt = now;
 
     return {
       ok: true,
       changed: true,
+      schedule: this.serializePortalSchedule(room)
+    };
+  }
+
+  closePortal(room) {
+    if (!room) {
+      return { ok: false, error: "room not found" };
+    }
+
+    if (!room.portalSchedule) {
+      room.portalSchedule = createPortalScheduleState();
+    }
+
+    const state = room.portalSchedule;
+    const prevMode = String(state.mode ?? "idle");
+    const prevRemaining = Math.max(0, Math.trunc(Number(state.remainingSec) || 0));
+    const changed = prevMode !== "idle" || prevRemaining !== 0;
+
+    state.mode = "idle";
+    state.startAtMs = 0;
+    state.openUntilMs = 0;
+    state.remainingSec = 0;
+    state.finalCountdownSeconds = this.portalFinalCountdownSeconds;
+    state.updatedAt = Date.now();
+
+    return {
+      ok: true,
+      changed,
       schedule: this.serializePortalSchedule(room)
     };
   }
@@ -855,6 +883,9 @@ export class RoomService {
         state.startAtMs = 0;
         state.openUntilMs = 0;
       }
+    } else if (prevMode === "open_manual") {
+      nextMode = "open_manual";
+      nextRemaining = 0;
     } else {
       nextMode = "idle";
       nextRemaining = 0;

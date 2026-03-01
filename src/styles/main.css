@@ -223,7 +223,8 @@ canvas {
   gap: 4px;
 }
 
-#host-delay-minutes {
+#host-delay-minutes,
+#host-portal-target {
   width: 64px;
   height: 28px;
   padding: 0 6px;
@@ -234,7 +235,14 @@ canvas {
   font: 700 0.68rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
 }
 
-#host-apply-delay {
+#host-portal-target {
+  flex: 1;
+  width: 100%;
+  min-width: 130px;
+}
+
+#host-apply-delay,
+#host-portal-target-apply {
   flex: 1;
   min-width: 0;
   height: 28px;
@@ -247,7 +255,9 @@ canvas {
   cursor: pointer;
 }
 
-#host-apply-delay:disabled {
+#host-apply-delay:disabled,
+#host-portal-target-apply:disabled,
+#host-portal-target:disabled {
   opacity: 0.62;
   cursor: default;
 }
@@ -1180,7 +1190,8 @@ body.is-mobile-ui .player-roster-hint {
   }
 
   .host-delay-btn,
-  #host-apply-delay {
+  #host-apply-delay,
+  #host-portal-target-apply {
     height: 26px;
     font-size: 0.6rem;
   }
@@ -1214,6 +1225,10 @@ body.is-mobile-ui .player-roster-hint {
 
   #host-right-video {
     width: 84px;
+  }
+
+  #host-portal-target {
+    min-width: 96px;
   }
 
   .hud-row {
