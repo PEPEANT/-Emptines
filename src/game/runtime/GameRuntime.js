@@ -175,12 +175,15 @@ export class GameRuntime {
     this.surfacePaintRaycaster = new THREE.Raycaster();
     this.surfacePaintAimPoint = new THREE.Vector2(0, 0);
     this.surfacePaintTarget = null;
+    this.surfacePaintProbeInterval = this.mobileEnabled ? 0.2 : 0.1;
+    this.surfacePaintProbeClock = this.surfacePaintProbeInterval;
     this.surfacePaintPromptEl = null;
     this.surfacePainterEl = null;
     this.surfacePainterTitleEl = null;
     this.surfacePainterCanvasEl = null;
     this.surfacePainterContext = null;
     this.surfacePainterColorInputEl = null;
+    this.surfacePainterBgColorInputEl = null;
     this.surfacePainterSizeInputEl = null;
     this.surfacePainterClearBtnEl = null;
     this.surfacePainterCancelBtnEl = null;
@@ -353,6 +356,7 @@ export class GameRuntime {
     this.surfacePainterTitleEl = document.getElementById("surface-painter-title");
     this.surfacePainterCanvasEl = document.getElementById("surface-painter-canvas");
     this.surfacePainterColorInputEl = document.getElementById("surface-painter-color");
+    this.surfacePainterBgColorInputEl = document.getElementById("surface-painter-bg");
     this.surfacePainterSizeInputEl = document.getElementById("surface-painter-size");
     this.surfacePainterClearBtnEl = document.getElementById("surface-painter-clear");
     this.surfacePainterCancelBtnEl = document.getElementById("surface-painter-cancel");
@@ -943,7 +947,7 @@ export class GameRuntime {
       emissive: 0x20262d,
       emissiveIntensity: 0.09
     });
-    const plazaPaintableCount = 8;
+    const plazaPaintableCount = this.mobileEnabled ? 5 : 8;
     const plazaPaintableRadius = 17.8;
     for (let index = 0; index < plazaPaintableCount; index += 1) {
       const angle = (index / plazaPaintableCount) * Math.PI * 2 + Math.PI * 0.125;
@@ -959,7 +963,7 @@ export class GameRuntime {
         height * 0.5,
         Math.sin(angle) * plazaPaintableRadius
       );
-      kiosk.castShadow = !this.mobileEnabled;
+      kiosk.castShadow = false;
       kiosk.receiveShadow = true;
       cityGroup.add(kiosk);
     }
@@ -971,7 +975,9 @@ export class GameRuntime {
       emissive: 0x1c2128,
       emissiveIntensity: 0.08
     });
-    const bridgePanelOffsets = [-36, -24, -12, 0, 12, 24, 36];
+    const bridgePanelOffsets = this.mobileEnabled
+      ? [-24, -12, 0, 12, 24]
+      : [-36, -24, -12, 0, 12, 24, 36];
     let bridgePanelIndex = 0;
     for (const offsetZ of bridgePanelOffsets) {
       for (const side of [-1, 1]) {
@@ -982,7 +988,7 @@ export class GameRuntime {
           `bridge_panel_${bridgePanelIndex}`
         );
         panel.position.set(side * this.bridgeWidth * 0.62, panelHeight * 0.5 + 0.28, offsetZ);
-        panel.castShadow = !this.mobileEnabled;
+        panel.castShadow = false;
         panel.receiveShadow = true;
         bridgeGroup.add(panel);
         bridgePanelIndex += 1;
@@ -1509,8 +1515,20 @@ export class GameRuntime {
 
     this.plazaBillboardRightVideoEl = video;
     this.plazaBillboardRightVideoTexture = texture;
-    this.plazaBillboardRightScreenMaterial.map = texture;
-    this.plazaBillboardRightScreenMaterial.needsUpdate = true;
+
+    // Keep showing the AD image until video has enough data to display,
+    // so joining players see the AD briefly instead of a black frame.
+    video.addEventListener(
+      "canplay",
+      () => {
+        if (this.plazaBillboardRightVideoEl !== video) return;
+        if (this.plazaBillboardRightScreenMaterial) {
+          this.plazaBillboardRightScreenMaterial.map = texture;
+          this.plazaBillboardRightScreenMaterial.needsUpdate = true;
+        }
+      },
+      { once: true }
+    );
 
     const finishPlayback = () => {
       if (this.plazaBillboardRightVideoEl !== video) {
@@ -1826,10 +1844,11 @@ export class GameRuntime {
     return null;
   }
 
-  updateSurfacePaintPrompt() {
+  updateSurfacePaintPrompt(delta = 0) {
     const inCityLive = !this.hubFlowEnabled || this.flowStage === "city_live";
     if (!inCityLive || this.chatOpen || this.surfacePainterOpen || !this.canUseGameplayControls()) {
       this.surfacePaintTarget = null;
+      this.surfacePaintProbeClock = this.surfacePaintProbeInterval;
       this.surfacePaintPromptEl?.classList.add("hidden");
       if (this.mobilePaintBtnEl) {
         this.mobilePaintBtnEl.classList.add("hidden");
@@ -1838,9 +1857,15 @@ export class GameRuntime {
       return;
     }
 
-    const target = this.getSurfacePaintTarget();
-    this.surfacePaintTarget = target;
-    const visible = Boolean(target);
+    this.surfacePaintProbeClock += Math.max(0, Number(delta) || 0);
+    const shouldProbe =
+      this.surfacePaintProbeClock >= this.surfacePaintProbeInterval || !this.surfacePaintTarget;
+    if (shouldProbe) {
+      this.surfacePaintProbeClock = 0;
+      this.surfacePaintTarget = this.getSurfacePaintTarget();
+    }
+
+    const visible = Boolean(this.surfacePaintTarget);
     this.surfacePaintPromptEl?.classList.toggle("hidden", !visible || this.mobileEnabled);
     if (this.mobilePaintBtnEl) {
       this.mobilePaintBtnEl.classList.toggle("hidden", !visible || !this.mobileEnabled);
@@ -1876,10 +1901,11 @@ export class GameRuntime {
     }
 
     const canvas = this.surfacePainterCanvasEl;
+    const bgColor = String(this.surfacePainterBgColorInputEl?.value ?? "#ffffff");
     context.save();
     context.globalCompositeOperation = "source-over";
     context.globalAlpha = 1;
-    context.fillStyle = "#ffffff";
+    context.fillStyle = bgColor;
     context.fillRect(0, 0, canvas.width, canvas.height);
     context.restore();
 
@@ -5226,6 +5252,9 @@ export class GameRuntime {
     if (!this.surfacePainterColorInputEl) {
       this.surfacePainterColorInputEl = document.getElementById("surface-painter-color");
     }
+    if (!this.surfacePainterBgColorInputEl) {
+      this.surfacePainterBgColorInputEl = document.getElementById("surface-painter-bg");
+    }
     if (!this.surfacePainterSizeInputEl) {
       this.surfacePainterSizeInputEl = document.getElementById("surface-painter-size");
     }
@@ -5713,7 +5742,8 @@ export class GameRuntime {
       this.applyPortalScheduleUpdate(room.portalSchedule, { announce: false });
     }
     if (room?.rightBillboard && typeof room.rightBillboard === "object") {
-      this.applyRightBillboardState(room.rightBillboard, { force: true });
+      // No force: same-video state won't restart playback when another player joins
+      this.applyRightBillboardState(room.rightBillboard);
     }
 
     const players = Array.isArray(room?.players) ? room.players : [];
@@ -5983,7 +6013,7 @@ export class GameRuntime {
     this.updateMovement(delta);
     this.updateHubFlow(delta);
     this.updateChalkPickupPrompt();
-    this.updateSurfacePaintPrompt();
+    this.updateSurfacePaintPrompt(delta);
     this.updatePortalTimeBillboard(delta);
     this.syncMobileUiState();
     this.updateChalkDrawing();
