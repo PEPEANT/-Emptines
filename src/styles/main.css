@@ -345,9 +345,7 @@ canvas {
   display: grid;
   place-items: center;
   padding: 18px;
-  background:
-    radial-gradient(circle at 22% 20%, rgba(99, 188, 248, 0.2), transparent 48%),
-    linear-gradient(180deg, rgba(4, 10, 17, 0.76), rgba(4, 10, 17, 0.9));
+  background: rgba(0, 0, 0, 0.98);
 }
 
 #nickname-form {

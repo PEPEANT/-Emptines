@@ -6227,10 +6227,10 @@ export class GameRuntime {
       .replace(/\s+/g, "_")
       .slice(0, 16);
     if (!name) {
-      return "?뚮젅?댁뼱";
+      return "PLAYER";
     }
     if (/^PLAYER(?:_\d+)?$/i.test(name)) {
-      return name.replace(/^PLAYER/i, "?뚮젅?댁뼱");
+      return name.toUpperCase();
     }
     return name;
   }
