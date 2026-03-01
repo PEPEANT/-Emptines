@@ -2665,11 +2665,18 @@ export class GameRuntime {
       return;
     }
 
-    // Auto-skip intro if returning player has a saved nickname
+    // Keep bridge entry as default. Fast city rejoin is opt-in via query.
     let savedNickname = "";
     try { savedNickname = String(localStorage.getItem("emptines_nickname") ?? "").trim(); } catch (_) {}
     if (savedNickname.length >= 2) {
       this.localPlayerName = this.formatPlayerName(savedNickname);
+    }
+    const allowFastCityRejoin =
+      this.parseQueryFlag("skip_bridge") ||
+      this.parseQueryFlag("skipBridge") ||
+      this.parseQueryFlag("rejoin_city") ||
+      this.parseQueryFlag("city_live");
+    if (allowFastCityRejoin && savedNickname.length >= 2) {
       this.pendingPlayerNameSync = true;
       this.flowStage = "city_live";
       this.playerPosition.copy(this.citySpawn);
@@ -6382,31 +6389,49 @@ export class GameRuntime {
       this.handleInputAck({ seq: ackSeq });
     }
 
+    const targetX = Number(state.x) || 0;
     const targetY = Math.max(GAME_CONSTANTS.PLAYER_HEIGHT, Number(state.y) || GAME_CONSTANTS.PLAYER_HEIGHT);
-    const dx = (Number(state.x) || 0) - this.playerPosition.x;
+    const targetZ = Number(state.z) || 0;
+    const targetYaw = Number(state.yaw) || 0;
+    const targetPitch = THREE.MathUtils.clamp(Number(state.pitch) || 0, -1.52, 1.52);
+
+    const dx = targetX - this.playerPosition.x;
     const dy = targetY - this.playerPosition.y;
-    const dz = (Number(state.z) || 0) - this.playerPosition.z;
+    const dz = targetZ - this.playerPosition.z;
     const errorSq = dx * dx + dy * dy + dz * dz;
 
-    if (errorSq > 25) {
-      this.playerPosition.set(Number(state.x) || 0, targetY, Number(state.z) || 0);
-      this.yaw = Number(state.yaw) || 0;
-      this.pitch = THREE.MathUtils.clamp(Number(state.pitch) || 0, -1.52, 1.52);
+    if (errorSq > 36) {
+      this.playerPosition.set(targetX, targetY, targetZ);
       this.verticalVelocity = 0;
       this.onGround = targetY <= GAME_CONSTANTS.PLAYER_HEIGHT + 0.001;
+      if (!this.pointerLocked && !this.mobileEnabled) {
+        this.yaw = targetYaw;
+        this.pitch = targetPitch;
+      }
       return;
     }
 
-    const alpha = errorSq > 1 ? 0.4 : 0.22;
-    this.playerPosition.x += dx * alpha;
-    this.playerPosition.y += dy * alpha;
-    this.playerPosition.z += dz * alpha;
-    this.yaw = lerpAngle(this.yaw, Number(state.yaw) || 0, alpha);
-    this.pitch = THREE.MathUtils.lerp(
-      this.pitch,
-      THREE.MathUtils.clamp(Number(state.pitch) || 0, -1.52, 1.52),
-      alpha
-    );
+    if (errorSq > 0.0004) {
+      const positionAlpha = errorSq > 2.25 ? 0.34 : errorSq > 0.36 ? 0.2 : 0.12;
+      this.playerPosition.x += dx * positionAlpha;
+      this.playerPosition.y += dy * positionAlpha;
+      this.playerPosition.z += dz * positionAlpha;
+    }
+
+    // Avoid camera tug-of-war while the player is actively looking around.
+    if (!this.pointerLocked && !this.mobileEnabled) {
+      const yawDelta = Math.abs(
+        Math.atan2(Math.sin(targetYaw - this.yaw), Math.cos(targetYaw - this.yaw))
+      );
+      if (yawDelta > 0.14) {
+        this.yaw = lerpAngle(this.yaw, targetYaw, 0.18);
+      }
+
+      const pitchDelta = Math.abs(targetPitch - this.pitch);
+      if (pitchDelta > 0.08) {
+        this.pitch = THREE.MathUtils.lerp(this.pitch, targetPitch, 0.18);
+      }
+    }
 
     if (Math.abs(dy) > 0.35) {
       this.verticalVelocity = 0;
