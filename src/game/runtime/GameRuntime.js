@@ -33,6 +33,7 @@ function parseSeconds(raw, fallback, min = 0.1) {
 }
 
 const INTRO_BOOT_VIDEO_URL = new URL("../../../mp4/grok-video.0.mp4", import.meta.url).href;
+const NPC_GREETING_VIDEO_URL = new URL("../../../mp4/grok-video.webm", import.meta.url).href;
 const ENTRY_BGM_URL = new URL("../../../mp3/TSUKUYOMI.mp3", import.meta.url).href;
 const AD_BILLBOARD_IMAGE_URL = new URL("../../../png/AD.41415786.1.png", import.meta.url).href;
 const RIGHT_BILLBOARD_VIDEO_PATHS = Object.freeze({
@@ -64,6 +65,7 @@ const MAX_LEFT_BILLBOARD_IMAGE_CHARS = 4_200_000;
 const DEFAULT_PORTAL_TARGET_URL =
   "http://localhost:5173/?server=http://localhost:3001&name=PLAYER";
 const BOX_FACE_KEYS = ["px", "nx", "py", "ny", "pz", "nz"];
+const NPC_GREETING_SESSION_KEY = "emptines_npc_greeting_seen_v1";
 
 function resolveRuntimeAssetUrl(relativePath) {
   const normalized = String(relativePath ?? "").trim().replace(/^\/+/, "");
@@ -530,7 +532,7 @@ export class GameRuntime {
     this.npcGreetingScreen = null;
     this.npcGreetingVideoEl = null;
     this.npcGreetingVideoTexture = null;
-    this.npcGreetingPlayed = false;
+    this.npcGreetingPlayed = this.hasSeenNpcGreetingInSession();
     this.npcWelcomeBubbleLabel = null;
     this.mirrorGateGroup = null;
     this.mirrorGatePanel = null;
@@ -768,7 +770,7 @@ export class GameRuntime {
       this.npcGreetingVideoTexture = null;
     }
     this.npcGreetingScreen = null;
-    this.npcGreetingPlayed = false;
+    this.npcGreetingPlayed = this.hasSeenNpcGreetingInSession();
     if (this.npcWelcomeBubbleLabel) {
       this.disposeTextLabel(this.npcWelcomeBubbleLabel);
       this.npcWelcomeBubbleLabel = null;
@@ -3401,6 +3403,7 @@ export class GameRuntime {
     this.hud.setStatus(this.getStatusText());
     this.syncGameplayUiForFlow();
     this.ensureEntryMusicPlayback();
+    this.playNpcGreeting();
   }
 
   finishBootIntroVideo() {
@@ -3696,15 +3699,119 @@ export class GameRuntime {
     screen.rotation.y = Math.PI;
     screen.renderOrder = 12;
     screen.frustumCulled = false;
+    screen.visible = false;
     this.npcGreetingVideoEl = null;
     this.npcGreetingVideoTexture = null;
     this.npcGreetingScreen = screen;
-    this.npcGreetingPlayed = true;
     return screen;
   }
 
+  hasSeenNpcGreetingInSession() {
+    if (typeof window === "undefined") {
+      return false;
+    }
+    try {
+      return String(window.sessionStorage.getItem(NPC_GREETING_SESSION_KEY) ?? "") === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  markNpcGreetingSeenInSession() {
+    this.npcGreetingPlayed = true;
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      window.sessionStorage.setItem(NPC_GREETING_SESSION_KEY, "1");
+    } catch {
+      // ignore storage failures
+    }
+  }
+
   playNpcGreeting() {
-    this.openBridgeNameGate();
+    if (!this.hubFlowEnabled || this.npcGreetingPlayed || !this.npcGreetingScreen) {
+      return;
+    }
+    const sourceUrl = String(NPC_GREETING_VIDEO_URL ?? "").trim();
+    if (!sourceUrl) {
+      this.markNpcGreetingSeenInSession();
+      return;
+    }
+
+    if (this.npcGreetingVideoEl) {
+      return;
+    }
+    this.markNpcGreetingSeenInSession();
+
+    const screenMaterial =
+      this.npcGreetingScreen && !Array.isArray(this.npcGreetingScreen.material)
+        ? this.npcGreetingScreen.material
+        : null;
+    if (!screenMaterial) {
+      return;
+    }
+
+    const video = document.createElement("video");
+    video.preload = "auto";
+    video.playsInline = true;
+    video.muted = true;
+    video.loop = false;
+    video.crossOrigin = "anonymous";
+    video.disablePictureInPicture = true;
+    video.setAttribute("playsinline", "true");
+    video.setAttribute("webkit-playsinline", "true");
+    video.setAttribute("disableremoteplayback", "true");
+    video.src = sourceUrl;
+    video.currentTime = 0;
+
+    const texture = new THREE.VideoTexture(video);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.generateMipmaps = false;
+
+    const finishPlayback = () => {
+      if (this.npcGreetingVideoEl !== video) {
+        return;
+      }
+      this.npcGreetingVideoEl = null;
+      if (video) {
+        video.onended = null;
+        video.onerror = null;
+        video.pause();
+        video.removeAttribute("src");
+        video.load();
+      }
+      if (this.npcGreetingScreen && !Array.isArray(this.npcGreetingScreen.material)) {
+        const mat = this.npcGreetingScreen.material;
+        if (mat.map === texture) {
+          mat.map = null;
+        }
+        mat.color.setHex(0x5ecbff);
+        mat.opacity = 0.08;
+        mat.needsUpdate = true;
+        this.npcGreetingScreen.visible = false;
+      }
+      if (this.npcGreetingVideoTexture === texture) {
+        this.npcGreetingVideoTexture = null;
+      }
+      texture.dispose();
+    };
+
+    screenMaterial.map = texture;
+    screenMaterial.color.setHex(0xffffff);
+    screenMaterial.opacity = 1;
+    screenMaterial.needsUpdate = true;
+    this.npcGreetingScreen.visible = true;
+
+    this.npcGreetingVideoEl = video;
+    this.npcGreetingVideoTexture = texture;
+    video.onended = finishPlayback;
+    video.onerror = finishPlayback;
+    video.play().catch(() => {
+      finishPlayback();
+    });
   }
 
   getNpcDistance() {
