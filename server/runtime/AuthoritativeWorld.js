@@ -9,6 +9,12 @@ function clamp(value, min, max, fallback = min) {
   return Math.min(max, Math.max(min, number));
 }
 
+function normalizeAngle(value, fallback = 0) {
+  const number = Number(value);
+  const base = Number.isFinite(number) ? number : Number(fallback) || 0;
+  return Math.atan2(Math.sin(base), Math.cos(base));
+}
+
 function normalizeMove(inputX, inputZ) {
   const x = Number(inputX) || 0;
   const z = Number(inputZ) || 0;
@@ -206,7 +212,7 @@ export class AuthoritativeWorld {
     const sequence = Math.max(0, Math.trunc(Number(payload?.seq) || 0));
     const moveX = clamp(payload?.moveX, -1, 1, 0);
     const moveZ = clamp(payload?.moveZ, -1, 1, 0);
-    const yaw = clamp(payload?.yaw, -Math.PI, Math.PI, Number(result.player?.state?.yaw) || 0);
+    const yaw = normalizeAngle(payload?.yaw, Number(result.player?.state?.yaw) || 0);
     const pitch = clamp(payload?.pitch, -1.55, 1.55, Number(result.player?.state?.pitch) || 0);
     const sprint = Boolean(payload?.sprint);
     const jump = Boolean(payload?.jump);
@@ -251,7 +257,7 @@ export class AuthoritativeWorld {
     const nextX = clamp(payload?.x, -worldLimit, worldLimit, currentX);
     const nextY = clamp(payload?.y, playerHeight, 32, currentY);
     const nextZ = clamp(payload?.z, -worldLimit, worldLimit, currentZ);
-    const nextYaw = clamp(payload?.yaw, -Math.PI, Math.PI, Number(player.state.yaw) || 0);
+    const nextYaw = normalizeAngle(payload?.yaw, Number(player.state.yaw) || 0);
     const nextPitch = clamp(payload?.pitch, -1.55, 1.55, Number(player.state.pitch) || 0);
 
     const dx = nextX - currentX;
@@ -314,7 +320,7 @@ export class AuthoritativeWorld {
       x: Number(player.state.x) || 0,
       y: Number(player.state.y) || Number(this.config?.sim?.playerHeight || 1.72),
       z: Number(player.state.z) || 0,
-      yaw: Number(player.state.yaw) || 0,
+      yaw: normalizeAngle(Number(player.state.yaw) || 0, 0),
       pitch: Number(player.state.pitch) || 0
     };
 
@@ -326,7 +332,7 @@ export class AuthoritativeWorld {
     const inputMoveX = staleInput ? 0 : clamp(input.moveX, -1, 1, 0);
     const inputMoveZ = staleInput ? 0 : clamp(input.moveZ, -1, 1, 0);
     const normalized = normalizeMove(inputMoveX, inputMoveZ);
-    const yaw = clamp(input.yaw, -Math.PI, Math.PI, state.yaw);
+    const yaw = normalizeAngle(input.yaw, state.yaw);
     const pitch = clamp(input.pitch, -1.55, 1.55, state.pitch);
     const speed = staleInput
       ? Number(this.config?.sim?.playerSpeed || 8.8)

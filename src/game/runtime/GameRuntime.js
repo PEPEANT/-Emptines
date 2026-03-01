@@ -3333,6 +3333,7 @@ export class GameRuntime {
 
     // Increase mobile drag sensitivity to reduce sluggish camera response.
     this.yaw -= deltaX * 0.005;
+    this.yaw = this.normalizeYawAngle(this.yaw);
     this.pitch -= deltaY * 0.0038;
     this.pitch = THREE.MathUtils.clamp(this.pitch, -1.52, 1.52);
   }
@@ -3441,6 +3442,14 @@ export class GameRuntime {
       return this.yaw;
     }
     return Math.atan2(-dx, -dz);
+  }
+
+  normalizeYawAngle(value) {
+    const raw = Number(value);
+    if (!Number.isFinite(raw)) {
+      return 0;
+    }
+    return Math.atan2(Math.sin(raw), Math.cos(raw));
   }
 
   canMovePlayer() {
@@ -5855,6 +5864,7 @@ export class GameRuntime {
         const sensitivityX = this.mobileEnabled ? 0.0018 : 0.0023;
         const sensitivityY = this.mobileEnabled ? 0.0016 : 0.002;
         this.yaw -= event.movementX * sensitivityX;
+        this.yaw = this.normalizeYawAngle(this.yaw);
         this.pitch -= event.movementY * sensitivityY;
         this.pitch = THREE.MathUtils.clamp(this.pitch, -1.52, 1.52);
       },
@@ -7009,7 +7019,7 @@ export class GameRuntime {
     const targetX = Number(state.x) || 0;
     const targetY = Math.max(GAME_CONSTANTS.PLAYER_HEIGHT, Number(state.y) || GAME_CONSTANTS.PLAYER_HEIGHT);
     const targetZ = Number(state.z) || 0;
-    const targetYaw = Number(state.yaw) || 0;
+    const targetYaw = this.normalizeYawAngle(Number(state.yaw) || 0);
     const targetPitch = THREE.MathUtils.clamp(Number(state.pitch) || 0, -1.52, 1.52);
 
     const dx = targetX - this.playerPosition.x;
@@ -7039,17 +7049,17 @@ export class GameRuntime {
     }
 
     // Soften correction while actively moving to avoid visible tug-of-war on higher RTT links.
-    const xzThresholdSq = recentlyMoving ? 1.0 : 0.25;
+    const xzThresholdSq = recentlyMoving ? 1.44 : 0.36;
     if (xzErrorSq > xzThresholdSq) {
       const alpha = recentlyMoving
         ? xzErrorSq > 9
-          ? 0.12
-          : 0.05
+          ? 0.09
+          : 0.04
         : xzErrorSq > 9
-          ? 0.2
+          ? 0.16
           : xzErrorSq > 2.25
-            ? 0.1
-            : 0.06;
+            ? 0.09
+            : 0.05;
       this.playerPosition.x += dx * alpha;
       this.playerPosition.z += dz * alpha;
     }
@@ -7285,6 +7295,7 @@ export class GameRuntime {
     const keyForward = movement.forward;
     const keyStrafe = movement.strafe;
     const sprinting = movement.sprinting;
+    this.yaw = this.normalizeYawAngle(this.yaw);
     if (movementEnabled && (Math.abs(keyForward) > 0.001 || Math.abs(keyStrafe) > 0.001)) {
       this.lastActiveMoveInputAt = performance.now();
     }
@@ -7822,12 +7833,14 @@ export class GameRuntime {
     this.remoteSyncClock = 0;
 
     const movement = this.getMovementIntent();
+    const normalizedYaw = this.normalizeYawAngle(this.yaw);
+    this.yaw = normalizedYaw;
     const outboundInput = {
       moveX: movement.strafe,
       moveZ: movement.forward,
       sprint: movement.sprinting,
       jump: Boolean(this.pendingJumpInput),
-      yaw: this.yaw,
+      yaw: normalizedYaw,
       pitch: this.pitch
     };
 
@@ -7969,7 +7982,7 @@ export class GameRuntime {
 
   loop() {
     // Reduce drift when FPS drops by allowing larger catch-up step.
-    const delta = Math.min(this.clock.getDelta(), 0.2);
+    const delta = Math.min(this.clock.getDelta(), 0.15);
     this.tick(delta);
     if (this.composer) {
       this.composer.render();
