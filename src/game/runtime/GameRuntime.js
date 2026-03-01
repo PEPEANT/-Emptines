@@ -316,8 +316,7 @@ export class GameRuntime {
     this.hostDelayButtons = Array.from(document.querySelectorAll(".host-delay-btn[data-delay-min]"));
     this.hostDelayMinutesInputEl = document.getElementById("host-delay-minutes");
     this.hostApplyDelayBtnEl = document.getElementById("host-apply-delay");
-    this.hostLeftImageUrlInputEl = document.getElementById("host-left-image-url");
-    this.hostSetLeftImageBtnEl = document.getElementById("host-left-image-set");
+    this.hostLeftImageFileInputEl = document.getElementById("host-left-image-file");
     this.hostResetLeftImageBtnEl = document.getElementById("host-left-image-reset");
     this.hostRightVideoSelectEl = document.getElementById("host-right-video");
     this.hostPlayRightVideoBtnEl = document.getElementById("host-right-play");
@@ -996,7 +995,13 @@ export class GameRuntime {
     }
 
     this.addPlazaBillboards(cityGroup);
-    this.addChalkTable(cityGroup);
+    if (this.isChalkFeatureEnabled()) {
+      this.addChalkTable(cityGroup);
+    } else {
+      this.chalkTableWorldPos = null;
+      this.chalkTableChalkGroup = null;
+      this.chalkPickupEl?.classList.add("hidden");
+    }
 
     const npcGuide = new THREE.Group();
     npcGuide.position.set(this.bridgeNpcPosition.x, 0, this.bridgeNpcPosition.z);
@@ -1684,7 +1689,7 @@ export class GameRuntime {
   }
 
   addChalkTable(cityGroup) {
-    if (!cityGroup) return;
+    if (!cityGroup || !this.isChalkFeatureEnabled()) return;
     // Table placed 6 units right of city group center (world ≈ 6, 0, -5)
     const localX = 6;
     const localZ = -1;
@@ -1743,6 +1748,7 @@ export class GameRuntime {
   }
 
   tryPickupChalk() {
+    if (!this.isChalkFeatureEnabled()) return;
     if (this.hasChalk || !this.chalkTableWorldPos) return;
     const dx = this.playerPosition.x - this.chalkTableWorldPos.x;
     const dz = this.playerPosition.z - this.chalkTableWorldPos.z;
@@ -1754,6 +1760,10 @@ export class GameRuntime {
   }
 
   updateChalkPickupPrompt() {
+    if (!this.isChalkFeatureEnabled()) {
+      this.chalkPickupEl?.classList.add("hidden");
+      return;
+    }
     if (!this.chalkPickupEl || !this.chalkTableWorldPos || this.hasChalk) {
       this.chalkPickupEl?.classList.add("hidden");
       return;
@@ -1845,6 +1855,17 @@ export class GameRuntime {
   }
 
   updateSurfacePaintPrompt(delta = 0) {
+    if (!this.isDrawingInteractionEnabled()) {
+      this.surfacePaintTarget = null;
+      this.surfacePaintProbeClock = this.surfacePaintProbeInterval;
+      this.surfacePaintPromptEl?.classList.add("hidden");
+      if (this.mobilePaintBtnEl) {
+        this.mobilePaintBtnEl.classList.add("hidden");
+        this.mobilePaintBtnEl.disabled = true;
+      }
+      return;
+    }
+
     const inCityLive = !this.hubFlowEnabled || this.flowStage === "city_live";
     if (!inCityLive || this.chatOpen || this.surfacePainterOpen || !this.canUseGameplayControls()) {
       this.surfacePaintTarget = null;
@@ -1874,6 +1895,9 @@ export class GameRuntime {
   }
 
   tryOpenSurfacePainterFromInteraction() {
+    if (!this.isDrawingInteractionEnabled()) {
+      return false;
+    }
     if (this.surfacePainterOpen) {
       return false;
     }
@@ -2520,7 +2544,10 @@ export class GameRuntime {
 
   syncGameplayUiForFlow() {
     const gameplayEnabled = !this.hubFlowEnabled || this.flowStage === "city_live";
-    this.toolUiEl?.classList.toggle("hidden", !gameplayEnabled);
+    this.toolUiEl?.classList.toggle(
+      "hidden",
+      !gameplayEnabled || !this.isDrawingInteractionEnabled()
+    );
     this.chatUiEl?.classList.toggle("hidden", !gameplayEnabled);
     if (!gameplayEnabled) {
       this.setChatOpen(false);
@@ -2543,7 +2570,10 @@ export class GameRuntime {
       this.flowStage !== "portal_transfer" &&
       (this.nicknameGateEl?.classList.contains("hidden") ?? true);
     this.mobileUiEl.classList.toggle("hidden", !visible);
-    this.mobilePaintBtnEl?.classList.toggle("hidden", !visible || !this.surfacePaintTarget);
+    this.mobilePaintBtnEl?.classList.toggle(
+      "hidden",
+      !visible || !this.isDrawingInteractionEnabled() || !this.surfacePaintTarget
+    );
     if (!visible) {
       this.resetMobileMoveInput();
       this.mobileSprintHeld = false;
@@ -3401,11 +3431,8 @@ export class GameRuntime {
     if (this.hostResetRightVideoBtnEl) {
       this.hostResetRightVideoBtnEl.disabled = !canControlPortal || controlsBusy;
     }
-    if (this.hostLeftImageUrlInputEl) {
-      this.hostLeftImageUrlInputEl.disabled = !canControlPortal;
-    }
-    if (this.hostSetLeftImageBtnEl) {
-      this.hostSetLeftImageBtnEl.disabled = !canControlPortal;
+    if (this.hostLeftImageFileInputEl) {
+      this.hostLeftImageFileInputEl.disabled = !canControlPortal;
     }
     if (this.hostResetLeftImageBtnEl) {
       this.hostResetLeftImageBtnEl.disabled = !canControlPortal;
@@ -5149,16 +5176,22 @@ export class GameRuntime {
         this.requestRightBillboardReset({ announceErrors: true });
       });
     }
-    if (this.hostSetLeftImageBtnEl) {
-      this.hostSetLeftImageBtnEl.addEventListener("click", () => {
-        const url = String(this.hostLeftImageUrlInputEl?.value ?? "").trim();
-        this.setLeftBillboardImage(url);
+    if (this.hostLeftImageFileInputEl) {
+      this.hostLeftImageFileInputEl.addEventListener("change", () => {
+        const file = this.hostLeftImageFileInputEl?.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          this.setLeftBillboardImage(String(e.target?.result ?? ""));
+        };
+        reader.readAsDataURL(file);
+        this.hostLeftImageFileInputEl.value = "";
       });
     }
     if (this.hostResetLeftImageBtnEl) {
       this.hostResetLeftImageBtnEl.addEventListener("click", () => {
         this.resetLeftBillboardImage();
-        if (this.hostLeftImageUrlInputEl) this.hostLeftImageUrlInputEl.value = "";
+        if (this.hostLeftImageFileInputEl) this.hostLeftImageFileInputEl.value = "";
       });
     }
 
@@ -5333,11 +5366,8 @@ export class GameRuntime {
     if (!this.hostResetRightVideoBtnEl) {
       this.hostResetRightVideoBtnEl = document.getElementById("host-right-reset");
     }
-    if (!this.hostLeftImageUrlInputEl) {
-      this.hostLeftImageUrlInputEl = document.getElementById("host-left-image-url");
-    }
-    if (!this.hostSetLeftImageBtnEl) {
-      this.hostSetLeftImageBtnEl = document.getElementById("host-left-image-set");
+    if (!this.hostLeftImageFileInputEl) {
+      this.hostLeftImageFileInputEl = document.getElementById("host-left-image-file");
     }
     if (!this.hostResetLeftImageBtnEl) {
       this.hostResetLeftImageBtnEl = document.getElementById("host-left-image-reset");
@@ -5374,6 +5404,21 @@ export class GameRuntime {
     }
     this.selectedChalkColor = this.chalkPalette[0] ?? fallbackColors[0];
     this.buildChalkPaletteButtons();
+    const drawingEnabled = this.isDrawingInteractionEnabled();
+    this.hasChalk = drawingEnabled ? this.hasChalk : false;
+    this.toolUiEl?.classList.toggle("hidden", !drawingEnabled);
+    this.chalkPickupEl?.classList.add("hidden");
+    this.surfacePaintPromptEl?.classList.add("hidden");
+    if (this.mobilePaintBtnEl) {
+      this.mobilePaintBtnEl.classList.add("hidden");
+      this.mobilePaintBtnEl.disabled = true;
+    }
+    for (const button of this.toolButtons) {
+      if (String(button?.dataset?.tool ?? "") === "chalk") {
+        button.classList.toggle("hidden", !drawingEnabled);
+        button.disabled = !drawingEnabled;
+      }
+    }
     this.setActiveTool("move");
     this.setChalkColor(this.selectedChalkColor);
   }
@@ -5428,7 +5473,8 @@ export class GameRuntime {
   }
 
   setActiveTool(tool) {
-    const nextTool = tool === "chalk" ? "chalk" : "move";
+    const chalkAllowed = this.isChalkFeatureEnabled() && this.hasChalk;
+    const nextTool = tool === "chalk" && chalkAllowed ? "chalk" : "move";
     this.activeTool = nextTool;
     for (const button of this.toolButtons) {
       const isActive = String(button?.dataset?.tool ?? "") === nextTool;
@@ -5455,6 +5501,9 @@ export class GameRuntime {
   }
 
   setChalkColorByIndex(index) {
+    if (!this.isChalkFeatureEnabled()) {
+      return;
+    }
     if (!Number.isInteger(index) || index < 0 || index >= this.chalkPalette.length) {
       return;
     }
@@ -5474,6 +5523,14 @@ export class GameRuntime {
       const buttonColor = String(button?.dataset?.color ?? "").toLowerCase();
       button.classList.toggle("active", buttonColor === normalized.toLowerCase());
     }
+  }
+
+  isChalkFeatureEnabled() {
+    return Boolean(this.worldContent?.chalk?.enabled);
+  }
+
+  isDrawingInteractionEnabled() {
+    return this.isChalkFeatureEnabled();
   }
 
   tryPointerLock() {
