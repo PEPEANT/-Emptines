@@ -948,6 +948,43 @@ canvas {
   font-size: 0.95rem;
 }
 
+body.is-mobile-ui #hud-ui {
+  top: 8px;
+  left: 8px;
+  min-width: 0;
+  padding: 0;
+  gap: 0;
+  background: transparent;
+  border: none;
+  backdrop-filter: none;
+  box-shadow: none;
+}
+
+body.is-mobile-ui #hud-row-status,
+body.is-mobile-ui #hud-row-position,
+body.is-mobile-ui #hud-row-fps {
+  display: none !important;
+}
+
+body.is-mobile-ui #hud-row-players {
+  gap: 4px;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  color: rgba(220, 240, 255, 0.92);
+}
+
+body.is-mobile-ui #hud-row-players .hud-key {
+  display: none;
+}
+
+body.is-mobile-ui #hub-flow-ui {
+  display: none !important;
+}
+
+body.is-mobile-ui .player-roster-hint {
+  display: none !important;
+}
+
 @media (max-width: 640px) {
   /* Mobile HUD: show only player count, no panel background */
   #hud-ui {
@@ -963,21 +1000,21 @@ canvas {
   }
 
   /* Hide status, position, fps rows on mobile */
-  #hud-ui .hud-row:has(#hud-status),
-  #hud-ui .hud-row:has(#hud-position),
-  #hud-ui .hud-row:has(#hud-fps) {
+  #hud-row-status,
+  #hud-row-position,
+  #hud-row-fps {
     display: none !important;
   }
 
   /* Player count: plain white text, no label */
-  #hud-ui .hud-row:has(#hud-players) {
+  #hud-row-players {
     gap: 4px;
     font-size: 0.78rem;
     letter-spacing: 0.04em;
     color: rgba(220, 240, 255, 0.92);
   }
 
-  #hud-ui .hud-row:has(#hud-players) .hud-key {
+  #hud-row-players .hud-key {
     display: none;
   }
 
@@ -1056,37 +1093,7 @@ canvas {
   }
 
   #hub-flow-ui {
-    top: 6px;
-    left: auto;
-    right: 8px;
-    transform: none;
-    width: auto;
-    max-width: 58vw;
-  }
-
-  #hub-billboard {
-    padding: 0;
-    gap: 2px;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-    box-shadow: none;
-    backdrop-filter: none;
-    text-align: right;
-  }
-
-  #hub-phase-title {
-    font-size: 0.75rem;
-    line-height: 1.16;
-  }
-
-  #hub-phase-subtitle {
-    font-size: 0.62rem;
-    line-height: 1.15;
-  }
-
-  .hub-kicker {
-    display: none;
+    display: none !important;
   }
 
   #nickname-form {

@@ -528,6 +528,7 @@ export class GameRuntime {
     this._initialized = true;
     this.mount.appendChild(this.renderer.domElement);
     this.scene.add(this.camera);
+    this.syncBodyUiModeClass();
     this.resolveUiElements();
     this.setupToolState();
     this.setChatOpen(false);
@@ -2191,7 +2192,7 @@ export class GameRuntime {
   }
 
   createPaintableBoxMesh(geometry, baseMaterial, surfaceBaseId) {
-    if (!this.isDrawingInteractionEnabled()) {
+    if (!this.isSurfacePaintFeatureEnabled()) {
       return new THREE.Mesh(geometry, baseMaterial.clone());
     }
     const materials = [];
@@ -2243,13 +2244,18 @@ export class GameRuntime {
     return `${baseId}:${faceKey}`;
   }
 
-  getSurfacePaintTarget(maxDistance = 6.2) {
+  getSurfacePaintTarget(maxDistance = null) {
     if (!this.canUseGameplayControls() || this.surfacePainterOpen) {
       return null;
     }
     if (!this.paintableSurfaceMeshes.length) {
       return null;
     }
+    const distanceLimit = Number.isFinite(maxDistance)
+      ? Math.max(1, Number(maxDistance) || 0)
+      : this.mobileEnabled
+        ? 9.5
+        : 6.2;
 
     this.surfacePaintRaycaster.setFromCamera(this.surfacePaintAimPoint, this.camera);
     const intersections = this.surfacePaintRaycaster.intersectObjects(this.paintableSurfaceMeshes, false);
@@ -2257,7 +2263,7 @@ export class GameRuntime {
       if (!intersection || !Number.isFinite(intersection.distance)) {
         continue;
       }
-      if (intersection.distance > maxDistance) {
+      if (intersection.distance > distanceLimit) {
         continue;
       }
       const surfaceId = this.getSurfacePaintIdFromIntersection(intersection);
@@ -2273,7 +2279,7 @@ export class GameRuntime {
   }
 
   updateSurfacePaintPrompt(delta = 0) {
-    if (!this.isDrawingInteractionEnabled()) {
+    if (!this.isSurfacePaintFeatureEnabled()) {
       this.surfacePaintTarget = null;
       this.surfacePaintProbeClock = this.surfacePaintProbeInterval;
       this.surfacePaintPromptEl?.classList.add("hidden");
@@ -2313,7 +2319,7 @@ export class GameRuntime {
   }
 
   tryOpenSurfacePainterFromInteraction() {
-    if (!this.isDrawingInteractionEnabled()) {
+    if (!this.isSurfacePaintFeatureEnabled()) {
       return false;
     }
     if (this.surfacePainterOpen) {
@@ -2986,6 +2992,13 @@ export class GameRuntime {
     this.syncHostControls();
   }
 
+  syncBodyUiModeClass() {
+    if (typeof document === "undefined" || !document.body) {
+      return;
+    }
+    document.body.classList.toggle("is-mobile-ui", Boolean(this.mobileEnabled));
+  }
+
   syncMobileUiState() {
     if (!this.mobileUiEl) {
       return;
@@ -3001,7 +3014,7 @@ export class GameRuntime {
     this.mobileUiEl.classList.toggle("hidden", !visible);
     this.mobilePaintBtnEl?.classList.toggle(
       "hidden",
-      !visible || !this.isDrawingInteractionEnabled() || !this.surfacePaintTarget
+      !visible || !this.isSurfacePaintFeatureEnabled() || !this.surfacePaintTarget
     );
     if (!visible) {
       this.resetMobileMoveInput();
@@ -5957,19 +5970,20 @@ export class GameRuntime {
     }
     this.selectedChalkColor = this.chalkPalette[0] ?? fallbackColors[0];
     this.buildChalkPaletteButtons();
-    const drawingEnabled = this.isDrawingInteractionEnabled();
-    this.hasChalk = drawingEnabled ? this.hasChalk : false;
-    this.toolUiEl?.classList.toggle("hidden", !drawingEnabled);
+    const chalkEnabled = this.isChalkFeatureEnabled();
+    const surfacePaintEnabled = this.isSurfacePaintFeatureEnabled();
+    this.hasChalk = chalkEnabled ? this.hasChalk : false;
+    this.toolUiEl?.classList.toggle("hidden", !chalkEnabled);
     this.chalkPickupEl?.classList.add("hidden");
     this.surfacePaintPromptEl?.classList.add("hidden");
     if (this.mobilePaintBtnEl) {
-      this.mobilePaintBtnEl.classList.add("hidden");
-      this.mobilePaintBtnEl.disabled = true;
+      this.mobilePaintBtnEl.classList.toggle("hidden", !surfacePaintEnabled);
+      this.mobilePaintBtnEl.disabled = !surfacePaintEnabled;
     }
     for (const button of this.toolButtons) {
       if (String(button?.dataset?.tool ?? "") === "chalk") {
-        button.classList.toggle("hidden", !drawingEnabled);
-        button.disabled = !drawingEnabled;
+        button.classList.toggle("hidden", !chalkEnabled);
+        button.disabled = !chalkEnabled;
       }
     }
     this.setActiveTool("move");
@@ -6080,6 +6094,14 @@ export class GameRuntime {
 
   isChalkFeatureEnabled() {
     return Boolean(this.worldContent?.chalk?.enabled);
+  }
+
+  isSurfacePaintFeatureEnabled() {
+    const explicit = this.worldContent?.surfacePaint?.enabled;
+    if (typeof explicit === "boolean") {
+      return explicit;
+    }
+    return true;
   }
 
   isDrawingInteractionEnabled() {
@@ -7551,6 +7573,7 @@ export class GameRuntime {
     }
 
     this.applyDeviceRuntimeProfile();
+    this.syncBodyUiModeClass();
 
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
