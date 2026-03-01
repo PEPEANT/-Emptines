@@ -98,6 +98,15 @@ export function registerSocketHandlers({
       worldRuntime?.handleInputCommand(socket, payload);
     });
 
+    socket.on("player:state:sync", (payload = {}, ackFn) => {
+      const result = worldRuntime?.handleClientStateSync(socket, payload);
+      if (!result) {
+        ack(ackFn, { ok: false, error: "runtime unavailable" });
+        return;
+      }
+      ack(ackFn, result);
+    });
+
     socket.on("net:ping", (payload = {}) => {
       socket.emit("net:pong", {
         id: Math.trunc(Number(payload?.id) || 0),

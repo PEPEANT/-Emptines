@@ -229,6 +229,70 @@ export class AuthoritativeWorld {
     this.metrics.inputsAccepted += 1;
   }
 
+  handleClientStateSync(socket, payload = {}) {
+    const result = this.getPlayerForSocket(socket);
+    if (!result) {
+      return { ok: false, error: "room not found" };
+    }
+
+    const { player } = result;
+    if (!player?.state) {
+      player.state = sanitizePlayerState();
+    }
+
+    const now = Date.now();
+    const worldLimit = Number(this.config?.sim?.worldLimit || 95);
+    const playerHeight = Number(this.config?.sim?.playerHeight || 1.72);
+
+    const currentX = Number(player.state.x) || 0;
+    const currentY = Number(player.state.y) || playerHeight;
+    const currentZ = Number(player.state.z) || 0;
+
+    const nextX = clamp(payload?.x, -worldLimit, worldLimit, currentX);
+    const nextY = clamp(payload?.y, playerHeight, 32, currentY);
+    const nextZ = clamp(payload?.z, -worldLimit, worldLimit, currentZ);
+    const nextYaw = clamp(payload?.yaw, -Math.PI, Math.PI, Number(player.state.yaw) || 0);
+    const nextPitch = clamp(payload?.pitch, -1.55, 1.55, Number(player.state.pitch) || 0);
+
+    const dx = nextX - currentX;
+    const dz = nextZ - currentZ;
+    const maxSyncDistance = Math.max(40, worldLimit * 1.35);
+    if (dx * dx + dz * dz > maxSyncDistance * maxSyncDistance) {
+      return { ok: false, error: "state sync too far" };
+    }
+
+    const sequence = Math.max(0, Math.trunc(Number(player?.lastInputSeq) || 0));
+    player.input = {
+      seq: sequence,
+      moveX: 0,
+      moveZ: 0,
+      sprint: false,
+      jump: false,
+      yaw: nextYaw,
+      pitch: nextPitch,
+      updatedAt: now
+    };
+    player.lastProcessedInputSeq = sequence;
+    player.velocityY = 0;
+    player.onGround = nextY <= playerHeight + 0.001;
+    player.state = quantizeState({
+      x: nextX,
+      y: nextY,
+      z: nextZ,
+      yaw: nextYaw,
+      pitch: nextPitch,
+      updatedAt: now
+    });
+
+    socket.data.lastAckInputSeq = sequence;
+    socket.emit("ack:input", { seq: sequence, t: now });
+
+    return {
+      ok: true,
+      state: toSnapshotState(player.state)
+    };
+  }
+
   simulatePlayer(player, dt, now) {
     if (!player?.state) {
       player.state = sanitizePlayerState();

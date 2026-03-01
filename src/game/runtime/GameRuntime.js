@@ -176,7 +176,7 @@ export class GameRuntime {
     this.surfacePaintRaycaster = new THREE.Raycaster();
     this.surfacePaintAimPoint = new THREE.Vector2(0, 0);
     this.surfacePaintTarget = null;
-    this.surfacePaintProbeInterval = this.mobileEnabled ? 0.2 : 0.1;
+    this.surfacePaintProbeInterval = this.mobileEnabled ? 0.3 : 0.2;
     this.surfacePaintProbeClock = this.surfacePaintProbeInterval;
     this.surfacePaintPromptEl = null;
     this.surfacePainterEl = null;
@@ -189,14 +189,21 @@ export class GameRuntime {
     this.surfacePainterClearBtnEl = null;
     this.surfacePainterCancelBtnEl = null;
     this.surfacePainterSaveBtnEl = null;
+    this.surfacePainterEraserBtnEl = null;
+    this.surfacePainterApplyAllEl = null;
     this.surfacePainterOpen = false;
     this.surfacePainterDrawing = false;
     this.surfacePainterPointerId = null;
+    this.surfacePainterTouchId = null;
     this.surfacePainterLastX = 0;
     this.surfacePainterLastY = 0;
     this.surfacePainterTargetId = "";
     this.surfacePainterSaveInFlight = false;
     this.surfacePaintSendInFlight = false;
+    this.surfacePainterEraserEnabled = false;
+    this.surfacePaintProbeWorldPosition = new THREE.Vector3();
+    this.surfacePaintProbeCameraLocal = new THREE.Vector3();
+    this.surfacePaintProbeForwardVector = new THREE.Vector3();
     this.plazaBillboardAdTexture = null;
     this.plazaBillboardLeftCustomTexture = null;
     this.plazaBillboardLeftScreenMaterial = null;
@@ -275,6 +282,9 @@ export class GameRuntime {
     this.hostPortalTargetCandidate = this.resolveRequestedPortalTargetCandidate();
     this.hostPortalTargetSynced = false;
     this.pendingPlayerNameSync = false;
+    this.pendingAuthoritativeStateSync = false;
+    this.authoritativeStateSyncInFlight = false;
+    this.lastAuthoritativeStateSyncAt = 0;
     this.remotePlayers = new Map();
     this.remoteSyncClock = 0;
     this.localInputSeq = 0;
@@ -379,6 +389,8 @@ export class GameRuntime {
     this.surfacePainterClearBtnEl = document.getElementById("surface-painter-clear");
     this.surfacePainterCancelBtnEl = document.getElementById("surface-painter-cancel");
     this.surfacePainterSaveBtnEl = document.getElementById("surface-painter-save");
+    this.surfacePainterEraserBtnEl = document.getElementById("surface-painter-eraser");
+    this.surfacePainterApplyAllEl = document.getElementById("surface-painter-apply-all");
     this.surfacePainterContext = this.surfacePainterCanvasEl?.getContext?.("2d") ?? null;
 
     const hubFlowConfig = this.worldContent?.hubFlow ?? {};
@@ -2275,7 +2287,97 @@ export class GameRuntime {
         distance: intersection.distance
       };
     }
+    if (this.mobileEnabled) {
+      return this.getMobileSurfacePaintTargetByProximity(Math.max(distanceLimit, 16));
+    }
     return null;
+  }
+
+  resolveSurfacePaintFaceFromCamera(mesh) {
+    if (!mesh || !this.camera) {
+      return "";
+    }
+    this.surfacePaintProbeCameraLocal.copy(this.camera.position);
+    mesh.worldToLocal(this.surfacePaintProbeCameraLocal);
+    const lx = this.surfacePaintProbeCameraLocal.x;
+    const ly = this.surfacePaintProbeCameraLocal.y;
+    const lz = this.surfacePaintProbeCameraLocal.z;
+    const ax = Math.abs(lx);
+    const ay = Math.abs(ly);
+    const az = Math.abs(lz);
+    if (ax >= ay && ax >= az) {
+      return lx >= 0 ? "px" : "nx";
+    }
+    if (ay >= ax && ay >= az) {
+      return ly >= 0 ? "py" : "ny";
+    }
+    return lz >= 0 ? "pz" : "nz";
+  }
+
+  getMobileSurfacePaintTargetByProximity(maxDistance = 16) {
+    if (!this.mobileEnabled || !this.paintableSurfaceMeshes.length || !this.camera) {
+      return null;
+    }
+
+    const cameraPos = this.camera.position;
+    this.surfacePaintProbeForwardVector
+      .set(0, 0, -1)
+      .applyQuaternion(this.camera.quaternion)
+      .normalize();
+
+    let bestTarget = null;
+    let bestScore = Number.POSITIVE_INFINITY;
+
+    for (const mesh of this.paintableSurfaceMeshes) {
+      if (!mesh) {
+        continue;
+      }
+      const baseId = String(mesh.userData?.paintSurfaceBaseId ?? "").trim();
+      if (!baseId) {
+        continue;
+      }
+
+      mesh.getWorldPosition(this.surfacePaintProbeWorldPosition);
+      const dx = this.surfacePaintProbeWorldPosition.x - cameraPos.x;
+      const dy = this.surfacePaintProbeWorldPosition.y - cameraPos.y;
+      const dz = this.surfacePaintProbeWorldPosition.z - cameraPos.z;
+      const horizontalDistance = Math.hypot(dx, dz);
+      if (!Number.isFinite(horizontalDistance) || horizontalDistance > maxDistance) {
+        continue;
+      }
+      const distance = Math.hypot(dx, dy * 0.22, dz);
+
+      const inv = distance > 0.0001 ? 1 / distance : 1;
+      const facingDot =
+        (dx * this.surfacePaintProbeForwardVector.x +
+          dy * this.surfacePaintProbeForwardVector.y +
+          dz * this.surfacePaintProbeForwardVector.z) *
+        inv;
+      if (facingDot < -0.15) {
+        continue;
+      }
+
+      const faceKey = this.resolveSurfacePaintFaceFromCamera(mesh);
+      if (!faceKey) {
+        continue;
+      }
+      const surfaceId = `${baseId}:${faceKey}`;
+      if (!this.paintableSurfaceMap.has(surfaceId)) {
+        continue;
+      }
+
+      const score = distance - facingDot * 1.35;
+      if (score >= bestScore) {
+        continue;
+      }
+      bestScore = score;
+      bestTarget = {
+        surfaceId,
+        distance
+      };
+    }
+
+    return bestTarget;
   }
 
   updateSurfacePaintPrompt(delta = 0) {
@@ -2385,9 +2487,14 @@ export class GameRuntime {
     this.surfacePainterOpen = true;
     this.surfacePainterDrawing = false;
     this.surfacePainterPointerId = null;
+    this.surfacePainterTouchId = null;
     this.surfacePainterTargetId = normalizedId;
     this.surfacePainterSaveInFlight = false;
     this.surfacePainterSaveBtnEl?.removeAttribute("disabled");
+    this.setSurfacePainterEraserEnabled(false);
+    if (this.surfacePainterApplyAllEl) {
+      this.surfacePainterApplyAllEl.checked = false;
+    }
     if (this.surfacePainterTitleEl) {
       this.surfacePainterTitleEl.textContent = `표면 그리기 / ${normalizedId.toUpperCase()}`;
     }
@@ -2413,6 +2520,7 @@ export class GameRuntime {
     this.surfacePainterOpen = false;
     this.surfacePainterDrawing = false;
     this.surfacePainterPointerId = null;
+    this.surfacePainterTouchId = null;
     this.surfacePainterTargetId = "";
     this.surfacePainterEl?.classList.add("hidden");
     this.updateSurfacePaintPrompt();
@@ -2436,7 +2544,44 @@ export class GameRuntime {
   }
 
   getSurfacePainterBrushColor() {
+    if (this.surfacePainterEraserEnabled) {
+      return String(this.surfacePainterBgColorInputEl?.value ?? "#ffffff");
+    }
     return String(this.surfacePainterColorInputEl?.value ?? "#111111");
+  }
+
+  setSurfacePainterEraserEnabled(enabled) {
+    this.surfacePainterEraserEnabled = Boolean(enabled);
+    if (this.surfacePainterEraserBtnEl) {
+      this.surfacePainterEraserBtnEl.classList.toggle("active", this.surfacePainterEraserEnabled);
+      this.surfacePainterEraserBtnEl.setAttribute(
+        "aria-pressed",
+        this.surfacePainterEraserEnabled ? "true" : "false"
+      );
+    }
+  }
+
+  getSurfacePainterTargetIds(surfaceId) {
+    const normalized = String(surfaceId ?? "").trim();
+    if (!normalized) {
+      return [];
+    }
+    if (!this.surfacePainterApplyAllEl?.checked) {
+      return [normalized];
+    }
+    const separatorIndex = normalized.indexOf(":");
+    if (separatorIndex <= 0) {
+      return [normalized];
+    }
+    const baseId = normalized.slice(0, separatorIndex);
+    const targetIds = [];
+    for (const faceKey of BOX_FACE_KEYS) {
+      const faceId = `${baseId}:${faceKey}`;
+      if (this.paintableSurfaceMap.has(faceId)) {
+        targetIds.push(faceId);
+      }
+    }
+    return targetIds.length > 0 ? targetIds : [normalized];
   }
 
   getSurfacePainterBrushSize() {
@@ -2453,6 +2598,7 @@ export class GameRuntime {
     }
     const context = this.surfacePainterContext;
     context.save();
+    context.globalCompositeOperation = "source-over";
     context.strokeStyle = this.getSurfacePainterBrushColor();
     context.lineWidth = this.getSurfacePainterBrushSize();
     context.lineCap = "round";
@@ -2464,32 +2610,34 @@ export class GameRuntime {
     context.restore();
   }
 
-  beginSurfacePainterStroke(event) {
+  beginSurfacePainterStrokeAt(clientX, clientY, pointerId, capturePointer = false) {
     if (!this.surfacePainterOpen || !this.surfacePainterCanvasEl) {
       return;
     }
-    const point = this.getSurfacePainterCanvasPoint(event.clientX, event.clientY);
+    const point = this.getSurfacePainterCanvasPoint(clientX, clientY);
     if (!point) {
       return;
     }
 
     this.surfacePainterDrawing = true;
-    this.surfacePainterPointerId = event.pointerId;
+    this.surfacePainterPointerId = pointerId;
     this.surfacePainterLastX = point.x;
     this.surfacePainterLastY = point.y;
-    this.surfacePainterCanvasEl.setPointerCapture?.(event.pointerId);
+    if (capturePointer) {
+      this.surfacePainterCanvasEl.setPointerCapture?.(pointerId);
+    }
     this.drawSurfacePainterSegment(point.x, point.y, point.x, point.y);
   }
 
-  continueSurfacePainterStroke(event) {
+  continueSurfacePainterStrokeAt(clientX, clientY, pointerId) {
     if (!this.surfacePainterDrawing) {
       return;
     }
-    if (event.pointerId !== this.surfacePainterPointerId) {
+    if (pointerId !== this.surfacePainterPointerId) {
       return;
     }
 
-    const point = this.getSurfacePainterCanvasPoint(event.clientX, event.clientY);
+    const point = this.getSurfacePainterCanvasPoint(clientX, clientY);
     if (!point) {
       return;
     }
@@ -2503,15 +2651,17 @@ export class GameRuntime {
     this.surfacePainterLastY = point.y;
   }
 
-  endSurfacePainterStroke(event) {
+  endSurfacePainterStroke(pointerId, releasePointer = false) {
     if (!this.surfacePainterDrawing) {
       return;
     }
-    if (event.pointerId !== this.surfacePainterPointerId) {
+    if (pointerId !== this.surfacePainterPointerId) {
       return;
     }
 
-    this.surfacePainterCanvasEl?.releasePointerCapture?.(event.pointerId);
+    if (releasePointer) {
+      this.surfacePainterCanvasEl?.releasePointerCapture?.(pointerId);
+    }
     this.surfacePainterDrawing = false;
     this.surfacePainterPointerId = null;
   }
@@ -2580,7 +2730,19 @@ export class GameRuntime {
     }
   }
 
-  saveSurfacePainter() {
+  sendSurfacePaintUpdate(surfaceId, imageDataUrl) {
+    return new Promise((resolve) => {
+      if (!this.socket || !this.networkConnected) {
+        resolve({ ok: false, error: "offline" });
+        return;
+      }
+      this.socket.emit("paint:surface:set", { surfaceId, imageDataUrl }, (response = {}) => {
+        resolve(response);
+      });
+    });
+  }
+
+  async saveSurfacePainter() {
     if (!this.surfacePainterOpen || this.surfacePainterSaveInFlight || !this.surfacePainterCanvasEl) {
       return;
     }
@@ -2589,28 +2751,45 @@ export class GameRuntime {
     if (!surfaceId) {
       return;
     }
+    const targetIds = this.getSurfacePainterTargetIds(surfaceId);
+    if (!targetIds.length) {
+      return;
+    }
 
     const imageDataUrl = this.surfacePainterCanvasEl.toDataURL("image/jpeg", 0.84);
-    this.applySurfacePaintUpdate({ surfaceId, imageDataUrl });
+    for (const targetId of targetIds) {
+      this.applySurfacePaintUpdate({ surfaceId: targetId, imageDataUrl });
+    }
     this.closeSurfacePainter();
 
     if (!this.socket || !this.networkConnected) {
-      this.appendChatLine("", "로컬 반영 완료 (오프라인)", "system");
+      const suffix = targetIds.length > 1 ? ` (${targetIds.length}면)` : "";
+      this.appendChatLine("", `로컬 반영 완료 (오프라인)${suffix}`, "system");
       return;
     }
 
     this.surfacePainterSaveInFlight = true;
     this.surfacePaintSendInFlight = true;
-    this.socket.emit("paint:surface:set", { surfaceId, imageDataUrl }, (response = {}) => {
-      this.surfacePainterSaveInFlight = false;
-      this.surfacePaintSendInFlight = false;
+    let failedCount = 0;
+    let lastReason = "";
+    for (const targetId of targetIds) {
+      const response = await this.sendSurfacePaintUpdate(targetId, imageDataUrl);
       if (!response?.ok) {
-        const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
-        this.appendChatLine("", `그림 반영 실패: ${reason}`, "system");
-        return;
+        failedCount += 1;
+        lastReason = String(response?.error ?? "").trim() || "알 수 없는 오류";
+        continue;
       }
       this.applySurfacePaintUpdate(response);
-    });
+    }
+    this.surfacePainterSaveInFlight = false;
+    this.surfacePaintSendInFlight = false;
+    if (failedCount > 0) {
+      this.appendChatLine("", `그림 반영 실패(${failedCount}면): ${lastReason}`, "system");
+      return;
+    }
+    if (targetIds.length > 1) {
+      this.appendChatLine("", `오브젝트 전체면(${targetIds.length}) 반영 완료`, "system");
+    }
   }
 
   createPortalTimeBillboard() {
@@ -2693,6 +2872,7 @@ export class GameRuntime {
       this.parseQueryFlag("city_live");
     if (allowFastCityRejoin && savedNickname.length >= 2) {
       this.pendingPlayerNameSync = true;
+      this.pendingAuthoritativeStateSync = true;
       this.flowStage = "city_live";
       this.playerPosition.copy(this.citySpawn);
       this.yaw = this.getLookYaw(this.citySpawn, this.portalFloorPosition);
@@ -3421,6 +3601,8 @@ export class GameRuntime {
         this.lastSafePosition.copy(this.playerPosition);
         this.yaw = this.getLookYaw(this.citySpawn, this.portalFloorPosition);
         this.pitch = -0.02;
+        this.pendingAuthoritativeStateSync = true;
+        this.requestAuthoritativeStateSync();
         this.hud.setStatus(this.getStatusText());
         this.syncGameplayUiForFlow();
       }
@@ -3855,6 +4037,42 @@ export class GameRuntime {
 
     this.socket.emit("room:quick-join", { name: nextName });
     this.pendingPlayerNameSync = false;
+  }
+
+  requestAuthoritativeStateSync() {
+    if (!this.socket || !this.networkConnected || !this.localPlayerId) {
+      return false;
+    }
+    if (this.authoritativeStateSyncInFlight) {
+      return false;
+    }
+    const now = performance.now();
+    if (now - this.lastAuthoritativeStateSyncAt < 800) {
+      return false;
+    }
+    this.lastAuthoritativeStateSyncAt = now;
+    this.authoritativeStateSyncInFlight = true;
+
+    const payload = {
+      x: this.playerPosition.x,
+      y: this.playerPosition.y,
+      z: this.playerPosition.z,
+      yaw: this.yaw,
+      pitch: this.pitch
+    };
+
+    this.socket.emit("player:state:sync", payload, (response = {}) => {
+      this.authoritativeStateSyncInFlight = false;
+      if (!response?.ok) {
+        return;
+      }
+      this.pendingAuthoritativeStateSync = false;
+      const state = this.parsePackedSnapshotState(response?.state);
+      if (state) {
+        this.applyAuthoritativeSelfState(state, 0);
+      }
+    });
+    return true;
   }
 
   setPlayerRosterVisible(visible) {
@@ -4772,9 +4990,7 @@ export class GameRuntime {
 
     this.chalkRaycaster.setFromCamera(this.chalkPointer, this.camera);
     if (!this.chalkRaycaster.ray.intersectPlane(this.chalkGroundPlane, this.chalkHitPoint)) {
-      // Fallback: draw at fixed distance along ray, projected onto ground
-      this.chalkRaycaster.ray.at(5, this.chalkHitPoint);
-      this.chalkHitPoint.y = 0;
+      return false;
     }
 
     const limit = this.playerBoundsHalfExtent;
@@ -4824,7 +5040,7 @@ export class GameRuntime {
       this.chalkHitPoint.z
     );
     mark.scale.set(size, size, 1);
-    mark.frustumCulled = false;
+    mark.frustumCulled = true;
     mark.renderOrder = 6;
 
     this.chalkLayer.add(mark);
@@ -5793,19 +6009,82 @@ export class GameRuntime {
 
     if (this.surfacePainterCanvasEl) {
       this.surfacePainterCanvasEl.addEventListener("pointerdown", (event) => {
-        this.beginSurfacePainterStroke(event);
+        this.beginSurfacePainterStrokeAt(event.clientX, event.clientY, event.pointerId, true);
       });
       this.surfacePainterCanvasEl.addEventListener("pointermove", (event) => {
-        this.continueSurfacePainterStroke(event);
+        this.continueSurfacePainterStrokeAt(event.clientX, event.clientY, event.pointerId);
       });
       this.surfacePainterCanvasEl.addEventListener("pointerup", (event) => {
-        this.endSurfacePainterStroke(event);
+        this.endSurfacePainterStroke(event.pointerId, true);
       });
       this.surfacePainterCanvasEl.addEventListener("pointercancel", (event) => {
-        this.endSurfacePainterStroke(event);
+        this.endSurfacePainterStroke(event.pointerId, true);
       });
       this.surfacePainterCanvasEl.addEventListener("pointerleave", (event) => {
-        this.endSurfacePainterStroke(event);
+        this.endSurfacePainterStroke(event.pointerId, true);
+      });
+      this.surfacePainterCanvasEl.addEventListener(
+        "touchstart",
+        (event) => {
+          if (!this.surfacePainterOpen) {
+            return;
+          }
+          const touch = event.changedTouches?.[0] ?? event.touches?.[0];
+          if (!touch) {
+            return;
+          }
+          event.preventDefault();
+          this.surfacePainterTouchId = touch.identifier;
+          const syntheticPointerId = 10000 + touch.identifier;
+          this.beginSurfacePainterStrokeAt(
+            touch.clientX,
+            touch.clientY,
+            syntheticPointerId,
+            false
+          );
+        },
+        { passive: false }
+      );
+      this.surfacePainterCanvasEl.addEventListener(
+        "touchmove",
+        (event) => {
+          if (!this.surfacePainterOpen || this.surfacePainterTouchId === null) {
+            return;
+          }
+          const touch = Array.from(event.touches ?? []).find(
+            (candidate) => candidate.identifier === this.surfacePainterTouchId
+          );
+          if (!touch) {
+            return;
+          }
+          event.preventDefault();
+          this.continueSurfacePainterStrokeAt(
+            touch.clientX,
+            touch.clientY,
+            10000 + this.surfacePainterTouchId
+          );
+        },
+        { passive: false }
+      );
+      const endTouchStroke = (event) => {
+        if (this.surfacePainterTouchId === null) {
+          return;
+        }
+        const ended = Array.from(event.changedTouches ?? []).some(
+          (touch) => touch.identifier === this.surfacePainterTouchId
+        );
+        if (!ended) {
+          return;
+        }
+        event.preventDefault();
+        this.endSurfacePainterStroke(10000 + this.surfacePainterTouchId, false);
+        this.surfacePainterTouchId = null;
+      };
+      this.surfacePainterCanvasEl.addEventListener("touchend", endTouchStroke, {
+        passive: false
+      });
+      this.surfacePainterCanvasEl.addEventListener("touchcancel", endTouchStroke, {
+        passive: false
       });
     }
 
@@ -5816,7 +6095,10 @@ export class GameRuntime {
       this.closeSurfacePainter();
     });
     this.surfacePainterSaveBtnEl?.addEventListener("click", () => {
-      this.saveSurfacePainter();
+      void this.saveSurfacePainter();
+    });
+    this.surfacePainterEraserBtnEl?.addEventListener("click", () => {
+      this.setSurfacePainterEraserEnabled(!this.surfacePainterEraserEnabled);
     });
   }
 
@@ -5895,6 +6177,12 @@ export class GameRuntime {
     }
     if (!this.surfacePainterSaveBtnEl) {
       this.surfacePainterSaveBtnEl = document.getElementById("surface-painter-save");
+    }
+    if (!this.surfacePainterEraserBtnEl) {
+      this.surfacePainterEraserBtnEl = document.getElementById("surface-painter-eraser");
+    }
+    if (!this.surfacePainterApplyAllEl) {
+      this.surfacePainterApplyAllEl = document.getElementById("surface-painter-apply-all");
     }
     if (!this.chatLogEl) {
       this.chatLogEl = document.getElementById("chat-log");
@@ -6220,6 +6508,9 @@ export class GameRuntime {
       this.syncPlayerNameIfConnected();
       this.startNetworkPing();
       this.requestHostClaim();
+      if (this.pendingAuthoritativeStateSync) {
+        this.requestAuthoritativeStateSync();
+      }
     });
 
     socket.on("disconnect", () => {
@@ -6235,6 +6526,7 @@ export class GameRuntime {
       this.leftBillboardSetInFlight = false;
       this.rightBillboardResetInFlight = false;
       this.hostMusicSetInFlight = false;
+      this.authoritativeStateSyncInFlight = false;
       this.remoteSyncClock = 0;
       this.lastSentInput = null;
       this.pendingJumpInput = false;
@@ -6260,6 +6552,7 @@ export class GameRuntime {
       this.leftBillboardSetInFlight = false;
       this.rightBillboardResetInFlight = false;
       this.hostMusicSetInFlight = false;
+      this.authoritativeStateSyncInFlight = false;
       this.remoteSyncClock = 0;
       this.lastSentInput = null;
       this.pendingJumpInput = false;
@@ -6490,6 +6783,9 @@ export class GameRuntime {
 
     if (!this.isRoomHost && this.autoHostClaimEnabled) {
       this.requestHostClaim();
+    }
+    if (this.pendingAuthoritativeStateSync) {
+      this.requestAuthoritativeStateSync();
     }
     if (this.isRoomHost) {
       this.syncHostPortalTargetCandidate();

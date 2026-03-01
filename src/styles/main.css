@@ -636,6 +636,39 @@ canvas {
   width: 100%;
 }
 
+#surface-painter-eraser {
+  grid-column: 1 / span 2;
+  min-height: 30px;
+  border: 1px solid rgba(164, 204, 236, 0.64);
+  border-radius: 6px;
+  background: rgba(9, 20, 33, 0.84);
+  color: #e2f3ff;
+  font: 700 0.62rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+
+#surface-painter-eraser.active {
+  border-color: rgba(255, 214, 150, 0.92);
+  background: rgba(67, 43, 13, 0.86);
+  color: #ffe3b8;
+}
+
+.surface-painter-check {
+  grid-column: 3 / span 2;
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #bde1ff;
+  font: 700 0.64rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.04em;
+}
+
+.surface-painter-check input {
+  accent-color: #79cfff;
+}
+
 #surface-painter-actions {
   display: flex;
   justify-content: flex-end;
@@ -1188,6 +1221,12 @@ body.is-mobile-ui .player-roster-hint {
   #surface-painter-toolbar {
     grid-template-columns: auto 1fr;
     gap: 6px;
+  }
+
+  #surface-painter-eraser,
+  .surface-painter-check {
+    grid-column: 1 / -1;
+    justify-self: stretch;
   }
 
   #surface-painter-actions {
