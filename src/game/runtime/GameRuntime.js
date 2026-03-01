@@ -2105,6 +2105,24 @@ export class GameRuntime {
       return;
     }
 
+    // Auto-skip intro if returning player has a saved nickname
+    let savedNickname = "";
+    try { savedNickname = String(localStorage.getItem("emptines_nickname") ?? "").trim(); } catch (_) {}
+    if (savedNickname.length >= 2) {
+      this.localPlayerName = this.formatPlayerName(savedNickname);
+      this.pendingPlayerNameSync = true;
+      this.flowStage = "city_live";
+      this.playerPosition.copy(this.citySpawn);
+      this.yaw = this.getLookYaw(this.citySpawn, this.portalFloorPosition);
+      this.pitch = -0.02;
+      this.hubFlowUiEl?.classList.add("hidden");
+      this.hideNicknameGate();
+      this.setMirrorGateVisible(false);
+      this.lastSafePosition.copy(this.playerPosition);
+      this.ensureEntryMusicPlayback();
+      return;
+    }
+
     this.flowStage = "boot_intro";
     this.bootIntroPending = true;
     this.bootIntroVideoPlaying = false;
@@ -2358,6 +2376,7 @@ export class GameRuntime {
     this.localPlayerName = nextName;
     this.pendingPlayerNameSync = true;
     this.syncPlayerNameIfConnected();
+    try { localStorage.setItem("emptines_nickname", nextName); } catch (_) {}
 
     this.hideNicknameGate();
     this.flowStage = "bridge_mirror";
@@ -2718,7 +2737,6 @@ export class GameRuntime {
 
   updatePortalPhase(delta) {
     const now = Date.now();
-    const serverAuthoritativePortal = Boolean(this.socketEndpoint);
     const previousScheduleMode = String(this.portalSchedule?.mode ?? "idle");
     const schedule = this.getPortalScheduleComputed(now);
     const scheduleChanged =
@@ -2769,54 +2787,11 @@ export class GameRuntime {
       return;
     }
 
-    if (serverAuthoritativePortal) {
-      this.portalPhase = "cooldown";
-      this.portalPhaseClock = 0;
-      this.setFlowHeadline("도시 라이브", "방장 시작 대기 중");
-      return;
-    }
-
-    if (previousScheduleMode !== "idle") {
-      this.portalPhase = "cooldown";
-      this.portalPhaseClock = this.portalCooldownSeconds;
-    }
-
-    this.portalPhaseClock = Math.max(0, this.portalPhaseClock - delta);
-    if (this.portalPhase === "cooldown") {
-      this.setFlowHeadline("도시 라이브", `다음 포탈까지 ${Math.ceil(this.portalPhaseClock)}초`);
-      if (this.portalPhaseClock <= 0) {
-        this.portalPhase = "warning";
-        this.portalPhaseClock = this.portalWarningSeconds;
-      }
-      return;
-    }
-
-    if (this.portalPhase === "warning") {
-      this.setFlowHeadline("이상 감지", `${Math.ceil(this.portalPhaseClock)}초 후 포탈 개방`);
-      if (this.portalPhaseClock <= 0) {
-        this.portalPhase = "open";
-        this.portalPhaseClock = this.portalOpenSeconds;
-      }
-      return;
-    }
-
-    if (this.portalPhase === "open") {
-      if (this.portalTargetUrl) {
-        this.setFlowHeadline(
-          "포탈 개방",
-          `지금 입장하세요 (${Math.ceil(this.portalPhaseClock)}초 남음)`
-        );
-      } else {
-        this.setFlowHeadline(
-          "포탈 개방 / 목적지 없음",
-          "?portal=https://... 로 목적지를 설정하세요"
-        );
-      }
-      if (this.portalPhaseClock <= 0) {
-        this.portalPhase = "cooldown";
-        this.portalPhaseClock = this.portalCooldownSeconds;
-      }
-    }
+    const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
+    const hasHostPrivilege = this.isRoomHost || localHostMode;
+    this.portalPhase = "cooldown";
+    this.portalPhaseClock = 0;
+    this.setFlowHeadline("도시 라이브", hasHostPrivilege ? "호스팅" : "");
   }
 
   updatePortalVisual() {
@@ -3359,6 +3334,10 @@ export class GameRuntime {
       const byOpenUntil = state.openUntilMs > 0 ? Math.max(0, Math.ceil((state.openUntilMs - now) / 1000)) : 0;
       if (byOpenUntil > 0 || state.openUntilMs > 0) {
         remainingSec = byOpenUntil;
+      }
+      // Guarantee at least 8 seconds visible when transitioning into open
+      if (remainingSec <= 0 && state.openUntilMs > 0 && now - state.openUntilMs < 8000) {
+        remainingSec = 1;
       }
       if (remainingSec <= 0) {
         mode = "idle";
@@ -4073,7 +4052,9 @@ export class GameRuntime {
 
     this.chalkRaycaster.setFromCamera(this.chalkPointer, this.camera);
     if (!this.chalkRaycaster.ray.intersectPlane(this.chalkGroundPlane, this.chalkHitPoint)) {
-      return false;
+      // Fallback: draw at fixed distance along ray, projected onto ground
+      this.chalkRaycaster.ray.at(5, this.chalkHitPoint);
+      this.chalkHitPoint.y = 0;
     }
 
     const limit = this.playerBoundsHalfExtent;
@@ -4711,6 +4692,16 @@ export class GameRuntime {
     this.renderer.domElement.addEventListener("click", () => {
       if (this.canDrawChalk()) return;
       this.tryPointerLock();
+    });
+    // Catch clicks on HUD elements that sit above the canvas
+    document.addEventListener("click", (event) => {
+      if (event.target === this.renderer.domElement) return;
+      if (this.canDrawChalk()) return;
+      if (this.chatOpen || this.nicknameGateEl?.classList.contains("hidden") === false) return;
+      this.tryPointerLock();
+    });
+    document.addEventListener("pointerlockerror", () => {
+      this.hud.setStatus(this.getStatusText());
     });
     this.renderer.domElement.addEventListener("mousedown", (event) => {
       if (!this.pointerLocked) {

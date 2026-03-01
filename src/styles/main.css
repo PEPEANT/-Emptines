@@ -761,6 +761,18 @@ canvas {
   pointer-events: none;
 }
 
+#mobile-left-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  pointer-events: none;
+}
+
+#mobile-left-col > * {
+  pointer-events: auto;
+}
+
 #mobile-move-pad {
   position: relative;
   width: 132px;
@@ -937,12 +949,36 @@ canvas {
 }
 
 @media (max-width: 640px) {
+  /* Mobile HUD: show only player count, no panel background */
   #hud-ui {
     top: 8px;
     left: 8px;
-    min-width: 150px;
-    padding: 8px 9px;
+    min-width: 0;
+    padding: 0;
+    gap: 0;
+    background: transparent;
+    border: none;
+    backdrop-filter: none;
+    box-shadow: none;
+  }
+
+  /* Hide status, position, fps rows on mobile */
+  #hud-ui .hud-row:has(#hud-status),
+  #hud-ui .hud-row:has(#hud-position),
+  #hud-ui .hud-row:has(#hud-fps) {
+    display: none !important;
+  }
+
+  /* Player count: plain white text, no label */
+  #hud-ui .hud-row:has(#hud-players) {
     gap: 4px;
+    font-size: 0.78rem;
+    letter-spacing: 0.04em;
+    color: rgba(220, 240, 255, 0.92);
+  }
+
+  #hud-ui .hud-row:has(#hud-players) .hud-key {
+    display: none;
   }
 
   #player-roster {
