@@ -194,6 +194,7 @@ export class GameRuntime {
     this.surfacePainterSaveInFlight = false;
     this.surfacePaintSendInFlight = false;
     this.plazaBillboardAdTexture = null;
+    this.plazaBillboardLeftCustomTexture = null;
     this.plazaBillboardLeftScreenMaterial = null;
     this.plazaBillboardRightScreenMaterial = null;
     this.plazaBillboardRightVideoEl = null;
@@ -312,6 +313,9 @@ export class GameRuntime {
     this.hostDelayButtons = Array.from(document.querySelectorAll(".host-delay-btn[data-delay-min]"));
     this.hostDelayMinutesInputEl = document.getElementById("host-delay-minutes");
     this.hostApplyDelayBtnEl = document.getElementById("host-apply-delay");
+    this.hostLeftImageUrlInputEl = document.getElementById("host-left-image-url");
+    this.hostSetLeftImageBtnEl = document.getElementById("host-left-image-set");
+    this.hostResetLeftImageBtnEl = document.getElementById("host-left-image-reset");
     this.hostRightVideoSelectEl = document.getElementById("host-right-video");
     this.hostPlayRightVideoBtnEl = document.getElementById("host-right-play");
     this.hostResetRightVideoBtnEl = document.getElementById("host-right-reset");
@@ -931,6 +935,60 @@ export class GameRuntime {
       towerCap.receiveShadow = true;
       cityGroup.add(towerCap);
     }
+
+    const plazaPaintMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 0.64,
+      metalness: 0.08,
+      emissive: 0x20262d,
+      emissiveIntensity: 0.09
+    });
+    const plazaPaintableCount = 8;
+    const plazaPaintableRadius = 17.8;
+    for (let index = 0; index < plazaPaintableCount; index += 1) {
+      const angle = (index / plazaPaintableCount) * Math.PI * 2 + Math.PI * 0.125;
+      const footprint = index % 3 === 0 ? 2.4 : 1.9;
+      const height = index % 2 === 0 ? 3.4 : 2.9;
+      const kiosk = this.createPaintableBoxMesh(
+        new THREE.BoxGeometry(footprint, height, footprint),
+        plazaPaintMat,
+        `city_kiosk_${index}`
+      );
+      kiosk.position.set(
+        Math.cos(angle) * plazaPaintableRadius,
+        height * 0.5,
+        Math.sin(angle) * plazaPaintableRadius
+      );
+      kiosk.castShadow = !this.mobileEnabled;
+      kiosk.receiveShadow = true;
+      cityGroup.add(kiosk);
+    }
+
+    const bridgePaintMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 0.66,
+      metalness: 0.06,
+      emissive: 0x1c2128,
+      emissiveIntensity: 0.08
+    });
+    const bridgePanelOffsets = [-36, -24, -12, 0, 12, 24, 36];
+    let bridgePanelIndex = 0;
+    for (const offsetZ of bridgePanelOffsets) {
+      for (const side of [-1, 1]) {
+        const panelHeight = bridgePanelIndex % 2 === 0 ? 2.6 : 3.0;
+        const panel = this.createPaintableBoxMesh(
+          new THREE.BoxGeometry(1.7, panelHeight, 0.24),
+          bridgePaintMat,
+          `bridge_panel_${bridgePanelIndex}`
+        );
+        panel.position.set(side * this.bridgeWidth * 0.62, panelHeight * 0.5 + 0.28, offsetZ);
+        panel.castShadow = !this.mobileEnabled;
+        panel.receiveShadow = true;
+        bridgeGroup.add(panel);
+        bridgePanelIndex += 1;
+      }
+    }
+
     this.addPlazaBillboards(cityGroup);
     this.addChalkTable(cityGroup);
 
@@ -1372,6 +1430,48 @@ export class GameRuntime {
 
     this.plazaBillboardRightScreenMaterial.map = this.plazaBillboardAdTexture;
     this.plazaBillboardRightScreenMaterial.needsUpdate = true;
+  }
+
+  setLeftBillboardImage(rawUrl) {
+    if (!this.plazaBillboardLeftScreenMaterial) return;
+    const url = String(rawUrl ?? "").trim();
+    if (!url) {
+      this.resetLeftBillboardImage();
+      return;
+    }
+    // Dispose previous custom texture
+    this.plazaBillboardLeftCustomTexture?.dispose();
+    this.plazaBillboardLeftCustomTexture = null;
+
+    const texture = this.textureLoader.load(
+      url,
+      () => {
+        // success — texture applied in onLoad
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.needsUpdate = true;
+      },
+      undefined,
+      () => {
+        // error — revert to ad
+        texture.dispose();
+        if (this.plazaBillboardLeftCustomTexture === texture) {
+          this.plazaBillboardLeftCustomTexture = null;
+          this.resetLeftBillboardImage();
+        }
+      }
+    );
+    texture.colorSpace = THREE.SRGBColorSpace;
+    this.plazaBillboardLeftCustomTexture = texture;
+    this.plazaBillboardLeftScreenMaterial.map = texture;
+    this.plazaBillboardLeftScreenMaterial.needsUpdate = true;
+  }
+
+  resetLeftBillboardImage() {
+    this.plazaBillboardLeftCustomTexture?.dispose();
+    this.plazaBillboardLeftCustomTexture = null;
+    if (!this.plazaBillboardLeftScreenMaterial) return;
+    this.plazaBillboardLeftScreenMaterial.map = this.plazaBillboardAdTexture ?? null;
+    this.plazaBillboardLeftScreenMaterial.needsUpdate = true;
   }
 
   startRightBillboardVideoPlayback(rawVideoId) {
@@ -3275,6 +3375,15 @@ export class GameRuntime {
     if (this.hostResetRightVideoBtnEl) {
       this.hostResetRightVideoBtnEl.disabled = !canControlPortal || controlsBusy;
     }
+    if (this.hostLeftImageUrlInputEl) {
+      this.hostLeftImageUrlInputEl.disabled = !canControlPortal;
+    }
+    if (this.hostSetLeftImageBtnEl) {
+      this.hostSetLeftImageBtnEl.disabled = !canControlPortal;
+    }
+    if (this.hostResetLeftImageBtnEl) {
+      this.hostResetLeftImageBtnEl.disabled = !canControlPortal;
+    }
   }
 
   normalizePortalSchedule(raw = {}) {
@@ -5014,6 +5123,18 @@ export class GameRuntime {
         this.requestRightBillboardReset({ announceErrors: true });
       });
     }
+    if (this.hostSetLeftImageBtnEl) {
+      this.hostSetLeftImageBtnEl.addEventListener("click", () => {
+        const url = String(this.hostLeftImageUrlInputEl?.value ?? "").trim();
+        this.setLeftBillboardImage(url);
+      });
+    }
+    if (this.hostResetLeftImageBtnEl) {
+      this.hostResetLeftImageBtnEl.addEventListener("click", () => {
+        this.resetLeftBillboardImage();
+        if (this.hostLeftImageUrlInputEl) this.hostLeftImageUrlInputEl.value = "";
+      });
+    }
 
     if (this.surfacePainterCanvasEl) {
       this.surfacePainterCanvasEl.addEventListener("pointerdown", (event) => {
@@ -5182,6 +5303,15 @@ export class GameRuntime {
     }
     if (!this.hostResetRightVideoBtnEl) {
       this.hostResetRightVideoBtnEl = document.getElementById("host-right-reset");
+    }
+    if (!this.hostLeftImageUrlInputEl) {
+      this.hostLeftImageUrlInputEl = document.getElementById("host-left-image-url");
+    }
+    if (!this.hostSetLeftImageBtnEl) {
+      this.hostSetLeftImageBtnEl = document.getElementById("host-left-image-set");
+    }
+    if (!this.hostResetLeftImageBtnEl) {
+      this.hostResetLeftImageBtnEl = document.getElementById("host-left-image-reset");
     }
     if (!this.playerRosterEl) {
       this.playerRosterEl = document.getElementById("player-roster");
