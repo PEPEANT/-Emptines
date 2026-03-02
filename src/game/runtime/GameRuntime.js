@@ -293,6 +293,7 @@ export class GameRuntime {
     this.promoDrawDrawing = false;
     this.promoDrawLastX = 0;
     this.promoDrawLastY = 0;
+    this.promoDrawBackgroundColor = "#707782";
     this.nearestPromoLinkObject = null;
     this.surfacePaintRaycaster = new THREE.Raycaster();
     this.surfacePaintAimPoint = new THREE.Vector2(0, 0);
@@ -568,6 +569,8 @@ export class GameRuntime {
     this.promoAllowOthersDrawEl = document.getElementById("promo-allow-others-draw");
     this.promoDrawCanvasEl = document.getElementById("promo-draw-canvas");
     this.promoDrawColorInputEl = document.getElementById("promo-draw-color");
+    this.promoDrawBgInputEl = document.getElementById("promo-draw-bg");
+    this.promoDrawBgLabelEl = document.getElementById("promo-draw-bg-label");
     this.promoDrawSizeInputEl = document.getElementById("promo-draw-size");
     this.promoDrawClearBtnEl = document.getElementById("promo-draw-clear-btn");
     this.promoDrawApplyBtnEl = document.getElementById("promo-draw-apply-btn");
@@ -575,6 +578,9 @@ export class GameRuntime {
     this.promoMediaPickBtnEl = document.getElementById("promo-media-pick-btn");
     this.promoMediaFolderBtnEl = document.getElementById("promo-media-folder-btn");
     this.promoMediaClearBtnEl = document.getElementById("promo-media-clear-btn");
+    this.promoMediaPreviewEl = document.getElementById("promo-media-preview");
+    this.promoMediaPreviewImageEl = document.getElementById("promo-media-preview-image");
+    this.promoMediaPreviewVideoEl = document.getElementById("promo-media-preview-video");
     this.promoMediaFileInputEl = document.getElementById("promo-media-file");
     this.promoMediaFolderInputEl = document.getElementById("promo-media-folder");
     this.promoMediaNameEl = document.getElementById("promo-media-name");
@@ -2561,36 +2567,46 @@ export class GameRuntime {
     const portalScale = Math.max(0.4, Number(options?.portalScale) || 1.44);
     const gateGroup = new THREE.Group();
     const gateWoodMat = new THREE.MeshStandardMaterial({
-      color: 0x6a3f24,
+      color: 0xa0622e,
       roughness: 0.54,
-      metalness: 0.08
+      metalness: 0.08,
+      emissive: 0x6a3f24,
+      emissiveIntensity: 0.28
     });
     const gateStoneMat = new THREE.MeshStandardMaterial({
-      color: 0x5f6772,
-      roughness: 0.86,
-      metalness: 0.03
+      color: 0x8fa2b2,
+      roughness: 0.82,
+      metalness: 0.04,
+      emissive: 0x5f7080,
+      emissiveIntensity: 0.22
     });
     const gateRoofMat = new THREE.MeshStandardMaterial({
-      color: 0x2f3b46,
+      color: 0x556e82,
       roughness: 0.5,
-      metalness: 0.16
+      metalness: 0.16,
+      emissive: 0x2f4858,
+      emissiveIntensity: 0.28
     });
     const gateTrimMat = new THREE.MeshStandardMaterial({
-      color: 0x8d2531,
+      color: 0xbf3545,
       roughness: 0.42,
-      metalness: 0.12
+      metalness: 0.12,
+      emissive: 0x8d2531,
+      emissiveIntensity: 0.32
     });
     const gateAccentMat = new THREE.MeshStandardMaterial({
-      color: 0x1f5c47,
+      color: 0x2e8060,
       roughness: 0.42,
-      metalness: 0.14
+      metalness: 0.14,
+      emissive: 0x1f5c47,
+      emissiveIntensity: 0.28
     });
     const gatePlaqueMat = new THREE.MeshStandardMaterial({
-      color: 0x1e2f44,
+      color: 0x2e4a6a,
       roughness: 0.4,
       metalness: 0.18,
-      emissive: 0x15263a,
-      emissiveIntensity: 0.16
+      emissive: 0x1e3050,
+      emissiveIntensity: 0.30
     });
 
     for (const side of [-1, 1]) {
@@ -5671,7 +5687,7 @@ export class GameRuntime {
         toneMapped: false
       })
     );
-    glowBack.position.set(0, 5.3, 0.02);
+    glowBack.position.set(0, 4.4, 0.02);
     glowBack.renderOrder = 13;
 
     const canvas = document.createElement("canvas");
@@ -5693,10 +5709,10 @@ export class GameRuntime {
         side: THREE.DoubleSide
       })
     );
-    screen.position.set(0, 5.3, 0.08);
+    screen.position.set(0, 4.4, 0.08);
     screen.renderOrder = 14;
 
-    const portalTopAdBaseWidth = 10.0;
+    const portalTopAdBaseWidth = 12.5;
     const portalTopAdDefaultAspect = 16 / 9;
     const portalTopAdDefaultHeight = portalTopAdBaseWidth / portalTopAdDefaultAspect;
     let topAdGlow = null;
@@ -8073,6 +8089,27 @@ export class GameRuntime {
     }
   }
 
+  normalizePromoYaw(rawValue, fallback = 0) {
+    const parsed = Number(rawValue);
+    const safe = Number.isFinite(parsed) ? parsed : Number(fallback) || 0;
+    const twoPi = Math.PI * 2;
+    let wrapped = ((safe + Math.PI) % twoPi + twoPi) % twoPi - Math.PI;
+    if (Math.abs(wrapped) < 0.00001) {
+      wrapped = 0;
+    }
+    return wrapped;
+  }
+
+  normalizePromoDrawBackgroundColor(rawValue, fallback = "#707782") {
+    const text = String(rawValue ?? "").trim();
+    if (/^#[0-9a-fA-F]{6}$/.test(text)) {
+      return text.toLowerCase();
+    }
+    return /^#[0-9a-fA-F]{6}$/.test(String(fallback ?? "").trim())
+      ? String(fallback).trim().toLowerCase()
+      : "#707782";
+  }
+
   normalizePromoObjectEntry(rawValue) {
     if (!rawValue || typeof rawValue !== "object") {
       return null;
@@ -8090,7 +8127,8 @@ export class GameRuntime {
       x: THREE.MathUtils.clamp(Number(rawValue.x) || 0, -2000, 2000),
       y: THREE.MathUtils.clamp(Number(rawValue.y) || 0, -100, 400),
       z: THREE.MathUtils.clamp(Number(rawValue.z) || 0, -2000, 2000),
-      scale: THREE.MathUtils.clamp(Number(rawValue.scale) || 1, 0.35, 8),
+      yaw: this.normalizePromoYaw(rawValue.yaw, 0),
+      scale: THREE.MathUtils.clamp(Number(rawValue.scale) || 1, 0.35, 24),
       linkUrl: this.normalizePromoLinkUrl(rawValue.linkUrl ?? ""),
       mediaDataUrl: hasMediaData ? mediaDataUrl : "",
       mediaKind,
@@ -8109,6 +8147,7 @@ export class GameRuntime {
       entry.x.toFixed(3),
       entry.y.toFixed(3),
       entry.z.toFixed(3),
+      this.normalizePromoYaw(entry.yaw, 0).toFixed(4),
       entry.scale.toFixed(3),
       entry.linkUrl,
       entry.mediaKind,
@@ -8180,20 +8219,110 @@ export class GameRuntime {
     if (!this.promoDrawCanvasEl) {
       return;
     }
+    const nextBackground = this.normalizePromoDrawBackgroundColor(
+      this.promoDrawBgInputEl?.value,
+      this.promoDrawBackgroundColor
+    );
+    this.promoDrawBackgroundColor = nextBackground;
+    if (this.promoDrawBgInputEl && document.activeElement !== this.promoDrawBgInputEl) {
+      this.promoDrawBgInputEl.value = nextBackground;
+    }
     if (!this.promoDrawContext) {
       this.promoDrawContext = this.promoDrawCanvasEl.getContext("2d");
     }
     if (!this.promoDrawContext || this.promoDrawCanvasInitialized) {
       return;
     }
+    this.paintPromoDrawCanvasBase(this.promoDrawBackgroundColor);
+    this.promoDrawCanvasInitialized = true;
+  }
+
+  paintPromoDrawCanvasBase(backgroundColor = this.promoDrawBackgroundColor) {
+    if (!this.promoDrawContext || !this.promoDrawCanvasEl) {
+      return;
+    }
+    const safeBackground = this.normalizePromoDrawBackgroundColor(
+      backgroundColor,
+      this.promoDrawBackgroundColor
+    );
+    this.promoDrawBackgroundColor = safeBackground;
     const context = this.promoDrawContext;
     const canvas = this.promoDrawCanvasEl;
-    context.fillStyle = "#707782";
+    context.fillStyle = safeBackground;
     context.fillRect(0, 0, canvas.width, canvas.height);
     context.strokeStyle = "rgba(20, 28, 36, 0.72)";
     context.lineWidth = 6;
     context.strokeRect(0, 0, canvas.width, canvas.height);
-    this.promoDrawCanvasInitialized = true;
+  }
+
+  getPromoDrawBackgroundRgb(colorValue) {
+    const safeColor = this.normalizePromoDrawBackgroundColor(colorValue, this.promoDrawBackgroundColor);
+    const r = Number.parseInt(safeColor.slice(1, 3), 16);
+    const g = Number.parseInt(safeColor.slice(3, 5), 16);
+    const b = Number.parseInt(safeColor.slice(5, 7), 16);
+    return {
+      r: Number.isFinite(r) ? r : 112,
+      g: Number.isFinite(g) ? g : 119,
+      b: Number.isFinite(b) ? b : 130
+    };
+  }
+
+  applyPromoDrawBackgroundColor({ announce = false, applyToMedia = true } = {}) {
+    this.initPromoDrawCanvasIfNeeded();
+    if (!this.promoDrawContext || !this.promoDrawCanvasEl) {
+      return;
+    }
+    const nextBackground = this.normalizePromoDrawBackgroundColor(
+      this.promoDrawBgInputEl?.value,
+      this.promoDrawBackgroundColor
+    );
+    const previousBackground = this.normalizePromoDrawBackgroundColor(this.promoDrawBackgroundColor, "#707782");
+    if (this.promoDrawBgInputEl) {
+      this.promoDrawBgInputEl.value = nextBackground;
+    }
+    this.promoDrawBackgroundColor = nextBackground;
+
+    if (previousBackground !== nextBackground) {
+      const context = this.promoDrawContext;
+      const canvas = this.promoDrawCanvasEl;
+      const from = this.getPromoDrawBackgroundRgb(previousBackground);
+      const to = this.getPromoDrawBackgroundRgb(nextBackground);
+      let replaced = false;
+      try {
+        const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+        const pixels = imageData.data;
+        for (let index = 0; index < pixels.length; index += 4) {
+          if (
+            pixels[index + 3] === 255 &&
+            pixels[index] === from.r &&
+            pixels[index + 1] === from.g &&
+            pixels[index + 2] === from.b
+          ) {
+            pixels[index] = to.r;
+            pixels[index + 1] = to.g;
+            pixels[index + 2] = to.b;
+            replaced = true;
+          }
+        }
+        if (replaced) {
+          context.putImageData(imageData, 0, 0);
+          context.strokeStyle = "rgba(20, 28, 36, 0.72)";
+          context.lineWidth = 6;
+          context.strokeRect(0, 0, canvas.width, canvas.height);
+        } else {
+          this.paintPromoDrawCanvasBase(nextBackground);
+        }
+      } catch {
+        this.paintPromoDrawCanvasBase(nextBackground);
+      }
+    }
+
+    if (applyToMedia) {
+      this.applyPromoDrawCanvasToMedia({ announce: false });
+    }
+    if (announce) {
+      this.appendChatLine("", "캔버스 배경색을 변경했습니다.", "system");
+    }
   }
 
   clearPromoDrawCanvas({ announce = false } = {}) {
@@ -8201,13 +8330,7 @@ export class GameRuntime {
     if (!this.promoDrawContext || !this.promoDrawCanvasEl) {
       return;
     }
-    const context = this.promoDrawContext;
-    const canvas = this.promoDrawCanvasEl;
-    context.fillStyle = "#707782";
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.strokeStyle = "rgba(20, 28, 36, 0.72)";
-    context.lineWidth = 6;
-    context.strokeRect(0, 0, canvas.width, canvas.height);
+    this.paintPromoDrawCanvasBase(this.promoDrawBackgroundColor);
     this.applyPromoDrawCanvasToMedia({ announce: false });
     if (announce) {
       this.appendChatLine("", "캔버스를 초기화했습니다.", "system");
@@ -8351,6 +8474,8 @@ export class GameRuntime {
     const scaleValue = own?.scale ?? 1;
     const linkValue = own?.linkUrl ?? "";
     const allowOthersDraw = own?.allowOthersDraw ?? false;
+    const placeBtnLabel = own ? "수정" : "앞에 배치+저장";
+    const mobilePromoLabel = own ? "수정" : "배치";
     const prefersTouchUi =
       typeof window !== "undefined" &&
       typeof window.matchMedia === "function" &&
@@ -8381,6 +8506,12 @@ export class GameRuntime {
     if (this.promoDrawHelpEl) {
       this.promoDrawHelpEl.textContent = "네모 캔버스에 그리면 오브젝트 화면으로 저장됩니다";
     }
+    if (this.promoPlaceBtnEl) {
+      this.promoPlaceBtnEl.textContent = placeBtnLabel;
+    }
+    if (this.mobilePromoPlaceBtnEl) {
+      this.mobilePromoPlaceBtnEl.textContent = mobilePromoLabel;
+    }
     if (panelVisible) {
       this.initPromoDrawCanvasIfNeeded();
     }
@@ -8399,6 +8530,12 @@ export class GameRuntime {
     if (this.promoAllowOthersDrawEl) {
       this.promoAllowOthersDrawEl.checked = allowOthersDraw;
     }
+    if (this.promoDrawBgInputEl && document.activeElement !== this.promoDrawBgInputEl) {
+      this.promoDrawBgInputEl.value = this.normalizePromoDrawBackgroundColor(
+        this.promoDrawBackgroundColor,
+        "#707782"
+      );
+    }
     if (this.promoMediaNameEl) {
       if (this.promoPendingMedia?.dataUrl) {
         this.promoMediaNameEl.textContent = `선택됨: ${this.promoPendingMedia.name || "미디어"}`;
@@ -8411,12 +8548,53 @@ export class GameRuntime {
         this.promoMediaNameEl.textContent = "선택된 미디어 없음";
       }
     }
+    const previewDataUrl = this.promoPendingMedia?.dataUrl
+      ? this.promoPendingMedia.dataUrl
+      : this.promoMediaRemoved
+        ? ""
+        : own?.mediaDataUrl ?? "";
+    const previewKind = previewDataUrl
+      ? (/^data:image\//i.test(previewDataUrl) ? "image" : /^data:video\//i.test(previewDataUrl) ? "video" : "")
+      : "";
+    if (this.promoMediaPreviewEl) {
+      this.promoMediaPreviewEl.classList.toggle("hidden", !previewKind);
+    }
+    if (this.promoMediaPreviewImageEl) {
+      const showImage = previewKind === "image";
+      this.promoMediaPreviewImageEl.classList.toggle("hidden", !showImage);
+      if (showImage) {
+        if (this.promoMediaPreviewImageEl.src !== previewDataUrl) {
+          this.promoMediaPreviewImageEl.src = previewDataUrl;
+        }
+      } else {
+        this.promoMediaPreviewImageEl.removeAttribute("src");
+      }
+    }
+    if (this.promoMediaPreviewVideoEl) {
+      const showVideo = previewKind === "video";
+      this.promoMediaPreviewVideoEl.classList.toggle("hidden", !showVideo);
+      if (showVideo) {
+        if (this.promoMediaPreviewVideoEl.src !== previewDataUrl) {
+          this.promoMediaPreviewVideoEl.src = previewDataUrl;
+          this.promoMediaPreviewVideoEl.currentTime = 0;
+        }
+        this.promoMediaPreviewVideoEl.play().catch(() => {});
+      } else {
+        try {
+          this.promoMediaPreviewVideoEl.pause();
+        } catch {
+          // ignore pause errors
+        }
+        this.promoMediaPreviewVideoEl.removeAttribute("src");
+      }
+    }
 
     const disabled = !connected || busy;
     this.promoScaleInputEl && (this.promoScaleInputEl.disabled = disabled);
     this.promoLinkInputEl && (this.promoLinkInputEl.disabled = disabled);
     this.promoAllowOthersDrawEl && (this.promoAllowOthersDrawEl.disabled = disabled);
     this.promoDrawColorInputEl && (this.promoDrawColorInputEl.disabled = disabled);
+    this.promoDrawBgInputEl && (this.promoDrawBgInputEl.disabled = disabled);
     this.promoDrawSizeInputEl && (this.promoDrawSizeInputEl.disabled = disabled);
     this.promoDrawClearBtnEl && (this.promoDrawClearBtnEl.disabled = disabled);
     this.promoDrawApplyBtnEl && (this.promoDrawApplyBtnEl.disabled = disabled);
@@ -8484,7 +8662,7 @@ export class GameRuntime {
     this.syncPromoPanelUi();
   }
 
-  getPromoPlacementPosition() {
+  getPromoPlacementTransform() {
     const dir = new THREE.Vector3();
     this.camera.getWorldDirection(dir);
     dir.y = 0;
@@ -8493,10 +8671,12 @@ export class GameRuntime {
     }
     dir.normalize();
     const pos = this.playerPosition.clone().addScaledVector(dir, 4.8);
+    const yaw = this.normalizePromoYaw(Math.atan2(-dir.x, -dir.z), 0);
     return {
       x: Math.round(pos.x * 2) / 2,
       y: Math.round((this.playerPosition.y - GAME_CONSTANTS.PLAYER_HEIGHT) * 2) / 2,
-      z: Math.round(pos.z * 2) / 2
+      z: Math.round(pos.z * 2) / 2,
+      yaw: Math.round(yaw * 10000) / 10000
     };
   }
 
@@ -8517,15 +8697,16 @@ export class GameRuntime {
     }
 
     const own = this.getOwnPromoObject();
-    const position = placeInFront || !own
-      ? this.getPromoPlacementPosition()
+    const transform = placeInFront || !own
+      ? this.getPromoPlacementTransform()
       : {
           x: own.x,
           y: own.y,
-          z: own.z
+          z: own.z,
+          yaw: this.normalizePromoYaw(own.yaw, 0)
         };
     const scaleRaw = Number(this.promoScaleInputEl?.value);
-    const scale = THREE.MathUtils.clamp(Number.isFinite(scaleRaw) ? scaleRaw : own?.scale ?? 1, 0.35, 8);
+    const scale = THREE.MathUtils.clamp(Number.isFinite(scaleRaw) ? scaleRaw : own?.scale ?? 1, 0.35, 24);
     const linkUrl = this.normalizePromoLinkUrl(this.promoLinkInputEl?.value ?? own?.linkUrl ?? "");
     const allowOthersDraw = Boolean(this.promoAllowOthersDrawEl?.checked ?? own?.allowOthersDraw ?? false);
 
@@ -8543,9 +8724,10 @@ export class GameRuntime {
     this.socket.emit(
       "promo:upsert",
       {
-        x: position.x,
-        y: position.y,
-        z: position.z,
+        x: transform.x,
+        y: transform.y,
+        z: transform.z,
+        yaw: this.normalizePromoYaw(transform.yaw, 0),
         scale,
         linkUrl,
         mediaDataUrl,
@@ -8634,14 +8816,15 @@ export class GameRuntime {
   }
 
   createPromoObjectVisual(entry) {
-    const safeScale = THREE.MathUtils.clamp(Number(entry.scale) || 1, 0.35, 8);
+    const safeScale = THREE.MathUtils.clamp(Number(entry.scale) || 1, 0.35, 24);
     const boardWidth = 2.6 * safeScale;
     const boardHeight = 1.5 * safeScale;
     const boardDepth = 0.12 * safeScale;
     const poleHeight = 1.7 * safeScale;
 
     const group = new THREE.Group();
-    group.position.set(entry.x, entry.y, entry.z);
+    group.position.set(entry.x, entry.y - 0.7 * safeScale, entry.z);
+    group.rotation.y = this.normalizePromoYaw(entry.yaw, 0);
 
     const pole = new THREE.Mesh(
       new THREE.CylinderGeometry(0.1 * safeScale, 0.14 * safeScale, poleHeight, 12),
@@ -10853,6 +11036,11 @@ export class GameRuntime {
         }
       });
     }
+    if (this.promoDrawBgInputEl) {
+      this.promoDrawBgInputEl.addEventListener("input", () => {
+        this.applyPromoDrawBackgroundColor({ announce: false, applyToMedia: true });
+      });
+    }
     if (this.promoMediaPickBtnEl && this.promoMediaFileInputEl) {
       this.promoMediaPickBtnEl.addEventListener("click", () => {
         this.promoMediaFileInputEl.click();
@@ -11541,6 +11729,12 @@ export class GameRuntime {
     if (!this.promoDrawColorInputEl) {
       this.promoDrawColorInputEl = document.getElementById("promo-draw-color");
     }
+    if (!this.promoDrawBgInputEl) {
+      this.promoDrawBgInputEl = document.getElementById("promo-draw-bg");
+    }
+    if (!this.promoDrawBgLabelEl) {
+      this.promoDrawBgLabelEl = document.getElementById("promo-draw-bg-label");
+    }
     if (!this.promoDrawSizeInputEl) {
       this.promoDrawSizeInputEl = document.getElementById("promo-draw-size");
     }
@@ -11561,6 +11755,15 @@ export class GameRuntime {
     }
     if (!this.promoMediaClearBtnEl) {
       this.promoMediaClearBtnEl = document.getElementById("promo-media-clear-btn");
+    }
+    if (!this.promoMediaPreviewEl) {
+      this.promoMediaPreviewEl = document.getElementById("promo-media-preview");
+    }
+    if (!this.promoMediaPreviewImageEl) {
+      this.promoMediaPreviewImageEl = document.getElementById("promo-media-preview-image");
+    }
+    if (!this.promoMediaPreviewVideoEl) {
+      this.promoMediaPreviewVideoEl = document.getElementById("promo-media-preview-video");
     }
     if (!this.promoMediaFileInputEl) {
       this.promoMediaFileInputEl = document.getElementById("promo-media-file");

@@ -259,7 +259,7 @@
       </div>
       <div class="promo-panel-row">
         <label for="promo-scale">크기</label>
-        <input id="promo-scale" type="range" min="0.35" max="8" step="0.05" value="1" />
+        <input id="promo-scale" type="range" min="0.35" max="24" step="0.05" value="1" />
         <span id="promo-scale-value">1.00x</span>
       </div>
       <label class="promo-panel-label" for="promo-link-url">사이트 링크(선택)</label>
@@ -283,6 +283,11 @@
         <input id="promo-draw-color" type="color" value="#1a1a1a" />
         <input id="promo-draw-size" type="range" min="2" max="40" step="1" value="10" />
       </div>
+      <div class="promo-panel-row">
+        <label for="promo-draw-bg">배경</label>
+        <input id="promo-draw-bg" type="color" value="#707782" />
+        <span id="promo-draw-bg-label">즉시 반영</span>
+      </div>
       <div class="promo-panel-actions">
         <button id="promo-draw-clear-btn" type="button">캔버스 초기화</button>
         <button id="promo-draw-apply-btn" type="button">캔버스 적용</button>
@@ -296,6 +301,10 @@
       <p id="promo-media-help">모바일은 갤러리 선택 권장 · PC는 폴더 선택 가능</p>
       <div class="promo-panel-actions">
         <button id="promo-media-clear-btn" type="button">미디어 제거</button>
+      </div>
+      <div id="promo-media-preview" class="hidden" aria-live="polite">
+        <img id="promo-media-preview-image" class="hidden" alt="미디어 미리보기" />
+        <video id="promo-media-preview-video" class="hidden" muted loop playsinline controls></video>
       </div>
       <input id="promo-media-file" class="hidden" type="file" accept="image/*,video/*" />
       <input id="promo-media-folder" class="hidden" type="file" accept="image/*,video/*" webkitdirectory directory multiple />

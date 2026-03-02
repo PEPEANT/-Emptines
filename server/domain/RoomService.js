@@ -257,7 +257,18 @@ function normalizePromoMediaDataUrl(rawValue) {
 function normalizePromoScale(rawValue, fallback = 1) {
   const parsed = Number(rawValue);
   const safe = Number.isFinite(parsed) ? parsed : Number(fallback) || 1;
-  return Math.max(0.35, Math.min(8, safe));
+  return Math.max(0.35, Math.min(24, safe));
+}
+
+function normalizePromoYaw(rawValue, fallback = 0) {
+  const parsed = Number(rawValue);
+  const safe = Number.isFinite(parsed) ? parsed : Number(fallback) || 0;
+  const twoPi = Math.PI * 2;
+  let wrapped = ((safe + Math.PI) % twoPi + twoPi) % twoPi - Math.PI;
+  if (Math.abs(wrapped) < 0.00001) {
+    wrapped = 0;
+  }
+  return wrapped;
 }
 
 function normalizePromoAxis(rawValue, fallback = 0, min = -2000, max = 2000) {
@@ -616,6 +627,7 @@ export class RoomService {
       x: normalizePromoAxis(source.x, fallback?.x ?? 0),
       y: normalizePromoAxis(source.y, fallback?.y ?? 0, -100, 400),
       z: normalizePromoAxis(source.z, fallback?.z ?? 0),
+      yaw: normalizePromoYaw(source.yaw, fallback?.yaw ?? 0),
       scale: normalizePromoScale(source.scale, fallback?.scale ?? 1),
       linkUrl: normalizePromoUrl(source.linkUrl ?? fallback?.linkUrl ?? ""),
       mediaDataUrl,
@@ -704,6 +716,7 @@ export class RoomService {
           x: 0,
           y: 0,
           z: 0,
+          yaw: 0,
           scale: 1,
           linkUrl: "",
           mediaDataUrl: "",
