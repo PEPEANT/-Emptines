@@ -11471,6 +11471,7 @@ export class GameRuntime {
     this.spawnPlatformMesh(p);
     this.jumpPlatforms.push(p);
     this.updatePlatformEditorCount();
+    this.savePlatforms();
   }
 
   undoLastPlatform() {
@@ -11483,6 +11484,7 @@ export class GameRuntime {
       mesh.material.dispose();
     }
     this.updatePlatformEditorCount();
+    this.savePlatforms();
   }
 
   spawnPlatformMesh(p) {
@@ -11617,6 +11619,7 @@ export class GameRuntime {
     this.spawnRopeMesh(r);
     this.jumpRopes.push(r);
     this.updateRopeEditorCount();
+    this.saveRopes();
   }
 
   undoLastRope() {
@@ -11632,6 +11635,7 @@ export class GameRuntime {
       this.climbingRope = null;
     }
     this.updateRopeEditorCount();
+    this.saveRopes();
   }
 
   spawnRopeMesh(r) {
@@ -11711,9 +11715,12 @@ export class GameRuntime {
     const ropeTop = r.y + r.height + GAME_CONSTANTS.PLAYER_HEIGHT;
     if (this.playerPosition.y <= ropeBottom) {
       this.playerPosition.y = ropeBottom;
-      this.climbingRope = null;
-      this.onGround = true;
-      this.verticalVelocity = 0;
+      if (upInput < 0) {
+        // S키로 바닥까지 내려오면 줄에서 내림
+        this.climbingRope = null;
+        this.onGround = true;
+        this.verticalVelocity = 0;
+      }
     } else if (this.playerPosition.y >= ropeTop) {
       this.playerPosition.y = ropeTop;
       this.climbingRope = null;
