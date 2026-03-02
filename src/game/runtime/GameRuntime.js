@@ -588,6 +588,8 @@ export class GameRuntime {
     this.portalReplicaCore = null;
     this.portalReplicaCoreGlow = null;
     this.portalBillboardGroup = null;
+    this.spawnPortalVeilGroup = null;
+    this.spawnPortalVeilWorldZ = this.bridgeNpcPosition.z;
     this.aZonePortalGroup = null;
     this.aZonePortalRing = null;
     this.aZonePortalCore = null;
@@ -872,6 +874,8 @@ export class GameRuntime {
     this.portalBillboardCanvas = null;
     this.portalBillboardContext = null;
     this.portalBillboardGroup = null;
+    this.spawnPortalVeilGroup = null;
+    this.spawnPortalVeilWorldZ = this.bridgeNpcPosition.z;
     this.aZonePortalGroup = null;
     this.aZonePortalRing = null;
     this.aZonePortalCore = null;
@@ -903,6 +907,8 @@ export class GameRuntime {
     this.portalReplicaCore = null;
     this.portalReplicaCoreGlow = null;
     this.portalBillboardGroup = null;
+    this.spawnPortalVeilGroup = null;
+    this.spawnPortalVeilWorldZ = this.bridgeNpcPosition.z;
     this.aZonePortalGroup = null;
     this.aZonePortalRing = null;
     this.aZonePortalCore = null;
@@ -1096,10 +1102,9 @@ export class GameRuntime {
     sideFloorRight.receiveShadow = true;
     cityGroup.add(sideFloorRight);
 
-    // Keep both side districts clear until explicitly repopulated.
     const cityZoneConfig = {
-      A: { centerX: -60, objectEnabled: false },
-      B: { centerX: 60, objectEnabled: false }
+      A: { centerX: -60, objectEnabled: true },
+      B: { centerX: 60, objectEnabled: true }
     };
 
     const zoneABorder = new THREE.Mesh(
@@ -1812,6 +1817,56 @@ export class GameRuntime {
       trackPortalRefs: true
     });
     npcTempleGate.position.set(0, 0, 0.34);
+    const spawnPortalVeil = new THREE.Group();
+    spawnPortalVeil.position.set(0, 3.15, npcTempleGate.position.z - 0.02);
+    const veilWidth = this.mobileEnabled ? 18 : 24;
+    const veilHeight = this.mobileEnabled ? 10 : 13.8;
+    const veilCore = new THREE.Mesh(
+      new THREE.PlaneGeometry(veilWidth, veilHeight),
+      new THREE.MeshStandardMaterial({
+        color: 0x78dcff,
+        roughness: 0.08,
+        metalness: 0.78,
+        emissive: 0x4bcfff,
+        emissiveIntensity: 0.56,
+        transparent: true,
+        opacity: 0.96,
+        depthWrite: true,
+        side: THREE.DoubleSide
+      })
+    );
+    veilCore.renderOrder = 18;
+    const veilGlow = new THREE.Mesh(
+      new THREE.PlaneGeometry(veilWidth * 1.08, veilHeight * 1.06),
+      new THREE.MeshBasicMaterial({
+        color: 0x79f2ff,
+        transparent: true,
+        opacity: 0.24,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        fog: false,
+        toneMapped: false
+      })
+    );
+    veilGlow.position.z = -0.02;
+    veilGlow.renderOrder = 17;
+    const veilMist = new THREE.Mesh(
+      new THREE.PlaneGeometry(veilWidth * 0.92, veilHeight * 0.88),
+      new THREE.MeshBasicMaterial({
+        color: 0xadf7ff,
+        transparent: true,
+        opacity: 0.3,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        fog: false,
+        toneMapped: false
+      })
+    );
+    veilMist.position.z = 0.015;
+    veilMist.renderOrder = 19;
+    spawnPortalVeil.add(veilGlow, veilCore, veilMist);
 
     const npcBody = new THREE.Mesh(
       new THREE.CapsuleGeometry(0.32, 0.86, 4, 8),
@@ -1909,7 +1964,17 @@ export class GameRuntime {
     npcHoloFrame.renderOrder = 13;
     npcHoloFrame.frustumCulled = false;
 
-    npcGuide.add(npcTempleGate, npcHoloFloor, npcHoloRing, npcHoloBeam, npcBody, npcHead, npcPad, npcHoloFrame);
+    npcGuide.add(
+      npcTempleGate,
+      spawnPortalVeil,
+      npcHoloFloor,
+      npcHoloRing,
+      npcHoloBeam,
+      npcBody,
+      npcHead,
+      npcPad,
+      npcHoloFrame
+    );
     const npcGreetingScreen = this.createNpcGreetingScreen();
     npcGuide.add(npcGreetingScreen);
     this.npcWelcomeBubbleLabel = null;
@@ -1922,10 +1987,11 @@ export class GameRuntime {
     mirrorGate.add(bridgeTempleGate);
 
     const bridgeFarEndTempleGate = this.createKoreanTempleGateMesh();
+    const farEndGateBackOffset = this.mobileEnabled ? 7.2 : 9.6;
     bridgeFarEndTempleGate.position.set(
-      this.bridgeApproachSpawn.x + bridgeDirection.x * 4.8,
+      this.bridgeApproachSpawn.x - bridgeDirection.x * farEndGateBackOffset,
       0,
-      this.bridgeApproachSpawn.z + bridgeDirection.z * 4.8
+      this.bridgeApproachSpawn.z - bridgeDirection.z * farEndGateBackOffset
     );
     bridgeFarEndTempleGate.rotation.y = bridgeYaw;
 
@@ -2127,6 +2193,8 @@ export class GameRuntime {
     this.portalReplicaCore = null;
     this.portalReplicaCoreGlow = null;
     this.portalBillboardGroup = portalBillboard;
+    this.spawnPortalVeilGroup = spawnPortalVeil;
+    this.spawnPortalVeilWorldZ = npcGuide.position.z + npcTempleGate.position.z;
     this.aZonePortalGroup = aZonePortalGroup;
     this.aZonePortalRing = aZonePortalRing;
     this.aZonePortalCore = aZonePortalCore;
@@ -2154,6 +2222,7 @@ export class GameRuntime {
     this.updateBridgeBoundaryMarker(0);
     this.updatePortalVisual();
     this.updateNpcTemplePortalVisual();
+    this.updateSpawnPortalVeilVisibility();
   }
 
   createKoreanTempleGateMesh(options = {}) {
@@ -6183,6 +6252,7 @@ export class GameRuntime {
     this.portalPulseClock += delta;
     this.updateNpcTemplePortalVisual();
     this.updateBridgeBoundaryMarker(delta);
+    this.updateSpawnPortalVeilVisibility();
 
     if (this.flowStage === "boot_intro") {
       this.updatePortalVisual();
@@ -6337,6 +6407,19 @@ export class GameRuntime {
     const pulse = 0.5 + 0.5 * Math.sin(this.portalPulseClock * 7.2);
     coreMaterial.emissiveIntensity = 0.9 + pulse * 1.15;
     glowMaterial.opacity = 0.65 + pulse * 0.28;
+  }
+
+  updateSpawnPortalVeilVisibility() {
+    if (!this.spawnPortalVeilGroup) {
+      return;
+    }
+
+    const veilZ = Number(this.spawnPortalVeilWorldZ) || this.bridgeNpcPosition.z;
+    const passedPortal = this.playerPosition.z >= veilZ + 0.6;
+    const forceHideByFlow =
+      this.flowStage === "city_live" ||
+      this.flowStage === "portal_transfer";
+    this.spawnPortalVeilGroup.visible = !forceHideByFlow && !passedPortal;
   }
 
   updatePortalVisual() {
