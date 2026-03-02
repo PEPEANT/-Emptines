@@ -39,6 +39,7 @@ const NPC_GREETING_FOLLOWUP_VIDEO_URL = new URL("../../../mp4/grok-video.webm", 
 const SPAWN_PORTAL_VEIL_REVEAL_VIDEO_URL = new URL("../../../mp4/grok-video00.mp4", import.meta.url).href;
 const ENTRY_BGM_URL = new URL("../../../mp3/TSUKUYOMI.mp3", import.meta.url).href;
 const AD_BILLBOARD_IMAGE_URL = new URL("../../../png/AD.41415786.1.png", import.meta.url).href;
+const PORTAL_TOP_AD_IMAGE_URL = new URL("../../../png/03,03.png", import.meta.url).href;
 const FUTURE_CITY_FIXED_BILLBOARD_IMAGE_URLS = Object.freeze([
   new URL("../../../png/claude.jpg", import.meta.url).href,
   new URL("../../../png/DC.png", import.meta.url).href,
@@ -5695,7 +5696,89 @@ export class GameRuntime {
     screen.position.set(0, 5.3, 0.08);
     screen.renderOrder = 14;
 
-    board.add(glowBack, screen);
+    const portalTopAdBaseWidth = 10.0;
+    const portalTopAdDefaultAspect = 16 / 9;
+    const portalTopAdDefaultHeight = portalTopAdBaseWidth / portalTopAdDefaultAspect;
+    let topAdGlow = null;
+    let topAdBorder = null;
+    let topAdScreen = null;
+    const updateTopAdGeometry = (rawAspect) => {
+      if (!topAdGlow || !topAdBorder || !topAdScreen) {
+        return;
+      }
+      const safeAspect =
+        Number.isFinite(rawAspect) && rawAspect > 0.2 ? rawAspect : portalTopAdDefaultAspect;
+      const nextHeight = portalTopAdBaseWidth / safeAspect;
+      topAdGlow.geometry.dispose();
+      topAdGlow.geometry = new THREE.PlaneGeometry(portalTopAdBaseWidth + 0.82, nextHeight + 0.74);
+      topAdBorder.geometry.dispose();
+      topAdBorder.geometry = new THREE.PlaneGeometry(portalTopAdBaseWidth + 0.24, nextHeight + 0.24);
+      topAdScreen.geometry.dispose();
+      topAdScreen.geometry = new THREE.PlaneGeometry(portalTopAdBaseWidth, nextHeight);
+    };
+    const topAdTexture = this.textureLoader.load(PORTAL_TOP_AD_IMAGE_URL, (loadedTexture) => {
+      const image = loadedTexture?.image;
+      if (!image) {
+        return;
+      }
+      const width = Number(image.width) || 0;
+      const height = Number(image.height) || 0;
+      if (width <= 0 || height <= 0) {
+        return;
+      }
+      updateTopAdGeometry(width / height);
+    });
+    topAdTexture.colorSpace = THREE.SRGBColorSpace;
+    topAdTexture.minFilter = THREE.LinearFilter;
+    topAdTexture.magFilter = THREE.LinearFilter;
+    topAdTexture.generateMipmaps = false;
+
+    topAdGlow = new THREE.Mesh(
+      new THREE.PlaneGeometry(portalTopAdBaseWidth + 0.82, portalTopAdDefaultHeight + 0.74),
+      new THREE.MeshBasicMaterial({
+        color: 0x4fc8ff,
+        transparent: true,
+        opacity: 0.12,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        toneMapped: false
+      })
+    );
+    topAdGlow.position.set(0, 8.35, 0.02);
+    topAdGlow.renderOrder = 15;
+
+    topAdBorder = new THREE.Mesh(
+      new THREE.PlaneGeometry(portalTopAdBaseWidth + 0.24, portalTopAdDefaultHeight + 0.24),
+      new THREE.MeshBasicMaterial({
+        color: 0x0c1825,
+        transparent: true,
+        opacity: 0.94,
+        toneMapped: false,
+        side: THREE.DoubleSide
+      })
+    );
+    topAdBorder.position.set(0, 8.35, 0.07);
+    topAdBorder.renderOrder = 16;
+
+    topAdScreen = new THREE.Mesh(
+      new THREE.PlaneGeometry(portalTopAdBaseWidth, portalTopAdDefaultHeight),
+      new THREE.MeshBasicMaterial({
+        map: topAdTexture,
+        transparent: true,
+        toneMapped: false,
+        side: THREE.DoubleSide
+      })
+    );
+    topAdScreen.position.set(0, 8.35, 0.09);
+    topAdScreen.renderOrder = 17;
+
+    const topAdImage = topAdTexture?.image;
+    if (topAdImage?.width && topAdImage?.height) {
+      updateTopAdGeometry(Number(topAdImage.width) / Number(topAdImage.height));
+    }
+
+    board.add(glowBack, screen, topAdGlow, topAdBorder, topAdScreen);
 
     this.portalBillboardCanvas = canvas;
     this.portalBillboardContext = context;
