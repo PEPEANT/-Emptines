@@ -11,6 +11,8 @@
   <body>
     <div id="app"></div>
     <button id="fullscreen-toggle" type="button" aria-pressed="false">전체화면</button>
+    <button id="host-chat-toggle" class="hidden" type="button" aria-pressed="false">채팅</button>
+    <button id="host-controls-toggle" class="hidden" type="button" aria-pressed="true">조작 패널</button>
     <div id="mobile-rotate-overlay" class="hidden" aria-live="assertive" role="dialog" aria-modal="true">
       <div id="mobile-rotate-card">
         <strong>가로로 돌려주세요</strong>
@@ -47,66 +49,90 @@
     </aside>
 
     <div id="host-controls" class="hidden" aria-label="호스팅 컨트롤">
-      <button id="host-open-portal" type="button">포탈 열기</button>
-      <div id="host-schedule-controls">
-        <div class="host-delay-row">
-          <button class="host-delay-btn" type="button" data-delay-min="10">10분 후 시작</button>
-          <button class="host-delay-btn" type="button" data-delay-min="20">20분 후 시작</button>
-          <button class="host-delay-btn" type="button" data-delay-min="30">30분 후 시작</button>
+
+      <details class="host-section" open>
+        <summary class="host-section-head">포탈</summary>
+        <div class="host-section-body">
+          <button id="host-open-portal" type="button">포탈 열기</button>
+          <div id="host-schedule-controls">
+            <div class="host-delay-row">
+              <button class="host-delay-btn" type="button" data-delay-min="10">10분</button>
+              <button class="host-delay-btn" type="button" data-delay-min="20">20분</button>
+              <button class="host-delay-btn" type="button" data-delay-min="30">30분</button>
+            </div>
+            <div class="host-custom-row">
+              <input id="host-delay-minutes" type="number" min="1" max="180" step="1" value="10" />
+              <button id="host-apply-delay" type="button">N분 후 시작</button>
+            </div>
+            <div class="host-control-label">포탈 링크</div>
+            <div class="host-custom-row">
+              <input
+                id="host-portal-target"
+                type="url"
+                inputmode="url"
+                placeholder="https://example.com"
+                autocomplete="off"
+              />
+              <button id="host-portal-target-apply" type="button">적용</button>
+            </div>
+          </div>
         </div>
-        <div class="host-custom-row">
-          <input id="host-delay-minutes" type="number" min="1" max="180" step="1" value="10" />
-          <button id="host-apply-delay" type="button">N분 후 시작</button>
+      </details>
+
+      <details class="host-section">
+        <summary class="host-section-head">전광판 · 음악</summary>
+        <div id="host-billboard-controls" class="host-section-body">
+          <div class="host-control-label">왼쪽 전광판</div>
+          <input id="host-left-image-file" type="file" accept="image/*" />
+          <button id="host-left-image-reset" type="button">기본 이미지로 초기화</button>
+          <div class="host-control-label">배경음악 (MP3)</div>
+          <input id="host-music-file" type="file" accept=".mp3,audio/mpeg,audio/*" />
+          <div class="host-custom-row">
+            <button id="host-music-play" type="button">재생</button>
+            <button id="host-music-stop" type="button">정지</button>
+          </div>
+          <div class="host-control-label">오른쪽 전광판</div>
+          <div id="host-right-video-quick" aria-label="오른쪽 전광판 빠른 선택">
+            <button class="host-video-quick-btn" type="button" data-video-id="GROK01">GROK 01</button>
+            <button class="host-video-quick-btn" type="button" data-video-id="GROK02">GROK 02</button>
+            <button class="host-video-quick-btn" type="button" data-video-id="GROK03">GROK 03</button>
+            <button class="host-video-quick-btn" type="button" data-video-id="GROK04">GROK 04</button>
+            <button class="host-video-quick-btn" type="button" data-video-id="YTDown2">YT 02</button>
+            <button class="host-video-quick-btn" type="button" data-video-id="YTDown4">YT 04</button>
+          </div>
+          <div class="host-custom-row">
+            <select id="host-right-video" aria-label="오른쪽 전광판 영상">
+              <option value="GROK01">grok-video_01.mp4</option>
+              <option value="GROK02">grok-video_02.mp4</option>
+              <option value="GROK03">grok-video_03.mp4</option>
+              <option value="GROK04">grok-video_04.mp4</option>
+              <option value="YTDown1">YTDown1.mp4</option>
+              <option value="YTDown2">YTDown2.mp4</option>
+              <option value="YTDown3">YTDown3.mp4</option>
+              <option value="YTDown4">YTDown4.mp4</option>
+              <option value="YTDown6">YTDown6.mp4</option>
+              <option value="YTDown7">YTDown7.mp4</option>
+              <option value="YTDown8">YTDown8.mp4</option>
+            </select>
+            <button id="host-right-play" type="button">재생</button>
+          </div>
+          <button id="host-right-reset" type="button">광고 초기화</button>
         </div>
-        <div class="host-control-label">포탈 링크</div>
-        <div class="host-custom-row">
-          <input
-            id="host-portal-target"
-            type="url"
-            inputmode="url"
-            placeholder="https://example.com"
-            autocomplete="off"
-          />
-          <button id="host-portal-target-apply" type="button">링크 적용</button>
+      </details>
+
+      <details class="host-section">
+        <summary class="host-section-head">발판 에디터</summary>
+        <div class="host-section-body">
+          <div class="host-control-label">G: 플라이 토글 &nbsp;·&nbsp; 클릭: 배치 &nbsp;·&nbsp; Z: 되돌리기</div>
+          <div class="host-control-label">스크롤: 배치 거리 조절</div>
+          <span id="platform-editor-count" class="host-editor-count">발판: 0개</span>
+          <div class="host-custom-row">
+            <button id="platform-editor-save" type="button">저장</button>
+            <button id="platform-editor-clear" type="button">전체 삭제</button>
+          </div>
         </div>
-      </div>
-      <div id="host-billboard-controls">
-        <div class="host-control-label">왼쪽 전광판</div>
-        <input id="host-left-image-file" type="file" accept="image/*" />
-        <button id="host-left-image-reset" type="button">기본으로 초기화</button>
-        <div class="host-control-label" style="margin-top:8px">배경음악 (MP3)</div>
-        <input id="host-music-file" type="file" accept=".mp3,audio/mpeg,audio/*" />
-        <div class="host-custom-row">
-          <button id="host-music-play" type="button">MP3 재생</button>
-          <button id="host-music-stop" type="button">MP3 정지</button>
-        </div>
-        <div class="host-control-label" style="margin-top:8px">오른쪽 전광판</div>
-        <div id="host-right-video-quick" aria-label="오른쪽 전광판 빠른 선택">
-          <button class="host-video-quick-btn" type="button" data-video-id="GROK01">GROK 01</button>
-          <button class="host-video-quick-btn" type="button" data-video-id="GROK02">GROK 02</button>
-          <button class="host-video-quick-btn" type="button" data-video-id="GROK03">GROK 03</button>
-          <button class="host-video-quick-btn" type="button" data-video-id="GROK04">GROK 04</button>
-          <button class="host-video-quick-btn" type="button" data-video-id="YTDown2">YT 02</button>
-          <button class="host-video-quick-btn" type="button" data-video-id="YTDown4">YT 04</button>
-        </div>
-        <div class="host-custom-row">
-          <select id="host-right-video" aria-label="오른쪽 전광판 영상">
-            <option value="GROK01">grok-video_01.mp4</option>
-            <option value="GROK02">grok-video_02.mp4</option>
-            <option value="GROK03">grok-video_03.mp4</option>
-            <option value="GROK04">grok-video_04.mp4</option>
-            <option value="YTDown1">YTDown1.mp4</option>
-            <option value="YTDown2">YTDown2.mp4</option>
-            <option value="YTDown3">YTDown3.mp4</option>
-            <option value="YTDown4">YTDown4.mp4</option>
-            <option value="YTDown6">YTDown6.mp4</option>
-            <option value="YTDown7">YTDown7.mp4</option>
-            <option value="YTDown8">YTDown8.mp4</option>
-          </select>
-          <button id="host-right-play" type="button">영상 재생</button>
-        </div>
-        <button id="host-right-reset" type="button">광고 초기화</button>
-      </div>
+      </details>
+
     </div>
 
     <div id="hub-flow-ui" aria-live="polite">
@@ -193,6 +219,10 @@
       맵 경계를 벗어나셨습니다.
     </div>
 
+    <div id="platform-editor" class="hidden" aria-label="발판 에디터 활성">
+      ✈ 플라이 모드 ON &nbsp;·&nbsp; 클릭: 배치 &nbsp;·&nbsp; Z: 되돌리기 &nbsp;·&nbsp; 스크롤: 거리
+    </div>
+
     <div id="chalk-pickup-prompt" class="hidden" aria-live="polite">
       <kbd>F</kbd> 분필 줍기
     </div>
@@ -219,6 +249,9 @@
           </label>
         </div>
         <div id="surface-painter-actions">
+          <button id="surface-painter-export" type="button">PNG 내보내기</button>
+          <button id="surface-painter-import" type="button">PNG 불러오기</button>
+          <input id="surface-painter-import-file" class="hidden" type="file" accept=".png,image/png" />
           <button id="surface-painter-clear" type="button">지우기</button>
           <button id="surface-painter-cancel" type="button">닫기</button>
           <button id="surface-painter-save" type="button">저장</button>
@@ -229,4 +262,3 @@
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
-

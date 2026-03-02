@@ -184,6 +184,7 @@ function createPersistentRoom(code, defaultPortalTargetUrl) {
     rightBillboard: createRightBillboardState(),
     sharedMusic: createSharedMusicState(),
     surfacePaint: new Map(),
+    platforms: [],
     players: new Map(),
     persistent: true,
     createdAt: Date.now()
@@ -401,6 +402,33 @@ export class RoomService {
     this.io.to(room.code).emit("portal:target:update", {
       targetUrl: String(room?.portalTarget ?? "").trim()
     });
+  }
+
+  serializePlatforms(room) {
+    return Array.isArray(room?.platforms) ? room.platforms : [];
+  }
+
+  emitPlatformUpdate(room) {
+    this.io.to(room.code).emit("platform:state", { platforms: this.serializePlatforms(room) });
+  }
+
+  setPlatforms(room, rawPlatforms) {
+    if (!room) return { ok: false, error: "room not found" };
+    const MAX_PLATFORMS = 400;
+    const MAX_NUM = 2000;
+    const sanitized = (Array.isArray(rawPlatforms) ? rawPlatforms : [])
+      .slice(0, MAX_PLATFORMS)
+      .filter(p => p && typeof p === "object")
+      .map(p => ({
+        x: Math.max(-MAX_NUM, Math.min(MAX_NUM, Number(p.x) || 0)),
+        y: Math.max(-MAX_NUM, Math.min(MAX_NUM, Number(p.y) || 0)),
+        z: Math.max(-MAX_NUM, Math.min(MAX_NUM, Number(p.z) || 0)),
+        w: Math.max(0.1, Math.min(50, Number(p.w) || 3)),
+        h: Math.max(0.05, Math.min(20, Number(p.h) || 0.3)),
+        d: Math.max(0.1, Math.min(50, Number(p.d) || 3)),
+      }));
+    room.platforms = sanitized;
+    return { ok: true };
   }
 
   serializePortalSchedule(room) {

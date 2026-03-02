@@ -188,6 +188,14 @@ export class GameRuntime {
     this.paintableSurfaceMap = new Map();
     this.surfacePaintState = new Map();
     this.surfacePaintUpdatedAt = new Map();
+    this.cityWindowTextureCache = new Map();
+
+    this.jumpPlatforms = [];
+    this.jumpPlatformMeshes = [];
+    this.flyModeActive = false;
+    this.platformEditorPreviewMesh = null;
+    this.platformEditorSize = { w: 3, h: 0.3, d: 3 };
+    this.platformEditorDist = 4;
     this.surfacePaintRaycaster = new THREE.Raycaster();
     this.surfacePaintAimPoint = new THREE.Vector2(0, 0);
     this.surfacePaintTarget = null;
@@ -202,6 +210,9 @@ export class GameRuntime {
     this.surfacePainterColorInputEl = null;
     this.surfacePainterBgColorInputEl = null;
     this.surfacePainterSizeInputEl = null;
+    this.surfacePainterExportBtnEl = null;
+    this.surfacePainterImportBtnEl = null;
+    this.surfacePainterImportInputEl = null;
     this.surfacePainterClearBtnEl = null;
     this.surfacePainterCancelBtnEl = null;
     this.surfacePainterSaveBtnEl = null;
@@ -346,6 +357,8 @@ export class GameRuntime {
     this.chatLogEl = document.getElementById("chat-log");
     this.chatControlsEl = document.getElementById("chat-controls");
     this.chatToggleBtnEl = document.getElementById("chat-toggle");
+    this.hostChatToggleBtnEl = document.getElementById("host-chat-toggle");
+    this.hostControlsToggleBtnEl = document.getElementById("host-controls-toggle");
     this.chatInputEl = document.getElementById("chat-input");
     this.chatSendBtnEl = document.getElementById("chat-send");
     this.toolHotbarEl = document.getElementById("tool-hotbar");
@@ -386,6 +399,7 @@ export class GameRuntime {
     this.hostMusicSetInFlight = false;
     this.playerRosterVisible = false;
     this.roomPlayerSnapshot = [];
+    this.hostControlsOpen = true;
     this.portalForceOpenInFlight = false;
     this.portalCloseInFlight = false;
     this.portalScheduleSetInFlight = false;
@@ -422,12 +436,20 @@ export class GameRuntime {
     this.surfacePainterColorInputEl = document.getElementById("surface-painter-color");
     this.surfacePainterBgColorInputEl = document.getElementById("surface-painter-bg");
     this.surfacePainterSizeInputEl = document.getElementById("surface-painter-size");
+    this.surfacePainterExportBtnEl = document.getElementById("surface-painter-export");
+    this.surfacePainterImportBtnEl = document.getElementById("surface-painter-import");
+    this.surfacePainterImportInputEl = document.getElementById("surface-painter-import-file");
     this.surfacePainterClearBtnEl = document.getElementById("surface-painter-clear");
     this.surfacePainterCancelBtnEl = document.getElementById("surface-painter-cancel");
     this.surfacePainterSaveBtnEl = document.getElementById("surface-painter-save");
     this.surfacePainterEraserBtnEl = document.getElementById("surface-painter-eraser");
     this.surfacePainterApplyAllEl = document.getElementById("surface-painter-apply-all");
     this.surfacePainterContext = this.surfacePainterCanvasEl?.getContext?.("2d") ?? null;
+
+    this.platformEditorEl = document.getElementById("platform-editor");
+    this.platformEditorSaveBtnEl = document.getElementById("platform-editor-save");
+    this.platformEditorClearBtnEl = document.getElementById("platform-editor-clear");
+    this.platformEditorCountEl = document.getElementById("platform-editor-count");
 
     const hubFlowConfig = this.worldContent?.hubFlow ?? {};
     const bridgeConfig = hubFlowConfig?.bridge ?? {};
@@ -516,9 +538,11 @@ export class GameRuntime {
     this.portalGroup = null;
     this.portalRing = null;
     this.portalCore = null;
+    this.portalCoreGlow = null;
     this.portalReplicaGroup = null;
     this.portalReplicaRing = null;
     this.portalReplicaCore = null;
+    this.portalReplicaCoreGlow = null;
     this.portalBillboardGroup = null;
     this.portalBillboardCanvas = null;
     this.portalBillboardContext = null;
@@ -529,6 +553,8 @@ export class GameRuntime {
       line3: ""
     };
     this.npcGuideGroup = null;
+    this.npcTemplePortalCore = null;
+    this.npcTemplePortalGlow = null;
     this.npcGreetingScreen = null;
     this.npcGreetingVideoEl = null;
     this.npcGreetingVideoTexture = null;
@@ -604,6 +630,7 @@ export class GameRuntime {
       fps: 0
     });
     this.updateRoomPlayerSnapshot([]);
+    this.loadSavedPlatforms();
 
     this.loop();
   }
@@ -782,6 +809,10 @@ export class GameRuntime {
     this.portalBillboardCanvas = null;
     this.portalBillboardContext = null;
     this.portalBillboardGroup = null;
+    this.portalCoreGlow = null;
+    this.portalReplicaCoreGlow = null;
+    this.npcTemplePortalCore = null;
+    this.npcTemplePortalGlow = null;
     this.portalBillboardUpdateClock = 0;
     this.portalBillboardCache = {
       line1: "",
@@ -798,11 +829,15 @@ export class GameRuntime {
     this.portalGroup = null;
     this.portalRing = null;
     this.portalCore = null;
+    this.portalCoreGlow = null;
     this.portalReplicaGroup = null;
     this.portalReplicaRing = null;
     this.portalReplicaCore = null;
+    this.portalReplicaCoreGlow = null;
     this.portalBillboardGroup = null;
     this.npcGuideGroup = null;
+    this.npcTemplePortalCore = null;
+    this.npcTemplePortalGlow = null;
     this.npcGreetingScreen = null;
     this.npcWelcomeBubbleLabel = null;
     this.mirrorGateGroup = null;
@@ -925,6 +960,50 @@ export class GameRuntime {
     ring.position.y = 0.24;
     cityGroup.add(ring);
 
+    // Side district expansion: extend a long left-side road from the city center.
+    const sideRoadMaterial = new THREE.MeshStandardMaterial({
+      color: 0x333d48,
+      roughness: 0.8,
+      metalness: 0.08,
+      emissive: 0x1a2430,
+      emissiveIntensity: 0.1
+    });
+    const sideRoad = new THREE.Mesh(
+      new THREE.BoxGeometry(58, 0.2, 7.4),
+      sideRoadMaterial
+    );
+    sideRoad.position.set(-29, 0.1, 0);
+    sideRoad.receiveShadow = true;
+    cityGroup.add(sideRoad);
+
+    const sideRoadStripe = new THREE.Mesh(
+      new THREE.BoxGeometry(54, 0.03, 0.34),
+      new THREE.MeshStandardMaterial({
+        color: 0x6b8eae,
+        roughness: 0.34,
+        metalness: 0.24,
+        emissive: 0x2a445e,
+        emissiveIntensity: 0.18
+      })
+    );
+    sideRoadStripe.position.set(-29, 0.215, 0);
+    sideRoadStripe.receiveShadow = true;
+    cityGroup.add(sideRoadStripe);
+
+    const sideFloor = new THREE.Mesh(
+      new THREE.BoxGeometry(30, 0.24, 24),
+      new THREE.MeshStandardMaterial({
+        color: 0x3a4551,
+        roughness: 0.78,
+        metalness: 0.08,
+        emissive: 0x1e2a38,
+        emissiveIntensity: 0.12
+      })
+    );
+    sideFloor.position.set(-60, 0.12, 0);
+    sideFloor.receiveShadow = true;
+    cityGroup.add(sideFloor);
+
     const towerPositions = [
       [-22, 6.4, -10],
       [22, 7.8, -8],
@@ -933,21 +1012,44 @@ export class GameRuntime {
       // Keep the portal sightline clear by avoiding a center-axis tower.
       [14, 11.6, -24],
       [-25, 6.8, 2],
-      [25, 7.1, 3]
+      [25, 7.1, 3],
+      [-30, 7.4, -14],
+      [30, 8.1, -13],
+      [-28, 9.8, -30],
+      [28, 10.2, -29],
+      [-31, 7.2, 10],
+      [31, 7.6, 11],
+      [-12, 8.4, 9],
+      [12, 8.2, 8]
     ];
     const towerMats = [
-      new THREE.MeshStandardMaterial({
-        color: 0xffffff, roughness: 0.58, metalness: 0.10,
-        emissive: 0x202020, emissiveIntensity: 0.08
+      this.createCityWindowMaterial({
+        style: "slate",
+        repeatX: 1.1,
+        repeatY: 3.2,
+        roughness: 0.58,
+        metalness: 0.1,
+        emissive: 0x1b2128,
+        emissiveIntensity: 0.1
       }),
-      new THREE.MeshStandardMaterial({
-        color: 0xffffff, roughness: 0.58, metalness: 0.10,
-        emissive: 0x202020, emissiveIntensity: 0.08
+      this.createCityWindowMaterial({
+        style: "cyan",
+        repeatX: 1.2,
+        repeatY: 3.6,
+        roughness: 0.52,
+        metalness: 0.16,
+        emissive: 0x1a2f40,
+        emissiveIntensity: 0.16
       }),
-      new THREE.MeshStandardMaterial({
-        color: 0xffffff, roughness: 0.58, metalness: 0.10,
-        emissive: 0x202020, emissiveIntensity: 0.08
-      }),
+      this.createCityWindowMaterial({
+        style: "amber",
+        repeatX: 1.15,
+        repeatY: 3.4,
+        roughness: 0.6,
+        metalness: 0.12,
+        emissive: 0x2b1f16,
+        emissiveIntensity: 0.14
+      })
     ];
     for (let ti = 0; ti < towerPositions.length; ti++) {
       const [x, h, z] = towerPositions[ti];
@@ -963,18 +1065,33 @@ export class GameRuntime {
     }
 
     const skylineMats = [
-      new THREE.MeshStandardMaterial({
-        color: 0xffffff, roughness: 0.62, metalness: 0.08,
-        emissive: 0x1a1a1a, emissiveIntensity: 0.07
+      this.createCityWindowMaterial({
+        style: "slate",
+        repeatX: 2.2,
+        repeatY: 8.8,
+        roughness: 0.6,
+        metalness: 0.1,
+        emissive: 0x182028,
+        emissiveIntensity: 0.12
       }),
-      new THREE.MeshStandardMaterial({
-        color: 0xffffff, roughness: 0.62, metalness: 0.08,
-        emissive: 0x1a1a1a, emissiveIntensity: 0.07
+      this.createCityWindowMaterial({
+        style: "cyan",
+        repeatX: 2.3,
+        repeatY: 9.4,
+        roughness: 0.52,
+        metalness: 0.18,
+        emissive: 0x1a3244,
+        emissiveIntensity: 0.18
       }),
-      new THREE.MeshStandardMaterial({
-        color: 0xffffff, roughness: 0.62, metalness: 0.08,
-        emissive: 0x1a1a1a, emissiveIntensity: 0.07
-      }),
+      this.createCityWindowMaterial({
+        style: "amber",
+        repeatX: 2.1,
+        repeatY: 8.9,
+        roughness: 0.62,
+        metalness: 0.12,
+        emissive: 0x322115,
+        emissiveIntensity: 0.16
+      })
     ];
     const skylineCapMats = [
       new THREE.MeshStandardMaterial({
@@ -1025,7 +1142,7 @@ export class GameRuntime {
       emissive: 0x20262d,
       emissiveIntensity: 0.09
     });
-    const plazaPaintableCount = this.mobileEnabled ? 5 : 8;
+    const plazaPaintableCount = this.mobileEnabled ? 10 : 18;
     const plazaPaintableRadius = 17.8;
     for (let index = 0; index < plazaPaintableCount; index += 1) {
       const angle = (index / plazaPaintableCount) * Math.PI * 2 + Math.PI * 0.125;
@@ -1044,6 +1161,64 @@ export class GameRuntime {
       kiosk.castShadow = false;
       kiosk.receiveShadow = true;
       cityGroup.add(kiosk);
+    }
+
+    const districtPaintMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 0.66,
+      metalness: 0.08,
+      emissive: 0x1e252c,
+      emissiveIntensity: 0.1
+    });
+    const districtPaintableCount = this.mobileEnabled ? 6 : 14;
+    const districtPaintableRadius = 29.5;
+    for (let index = 0; index < districtPaintableCount; index += 1) {
+      const angle = (index / districtPaintableCount) * Math.PI * 2 + Math.PI * 0.18;
+      const footprint = index % 2 === 0 ? 3.3 : 2.7;
+      const depth = index % 3 === 0 ? 3.6 : 2.9;
+      const height = 4.2 + (index % 4) * 0.9;
+      const block = this.createPaintableBoxMesh(
+        new THREE.BoxGeometry(footprint, height, depth),
+        districtPaintMat,
+        `city_block_${index}`
+      );
+      block.position.set(
+        Math.cos(angle) * districtPaintableRadius,
+        height * 0.5,
+        Math.sin(angle) * districtPaintableRadius
+      );
+      block.castShadow = false;
+      block.receiveShadow = true;
+      cityGroup.add(block);
+    }
+
+    const outerDistrictPaintMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 0.68,
+      metalness: 0.06,
+      emissive: 0x1b232b,
+      emissiveIntensity: 0.1
+    });
+    const outerDistrictCount = this.mobileEnabled ? 4 : 12;
+    const outerDistrictRadius = 41;
+    for (let index = 0; index < outerDistrictCount; index += 1) {
+      const angle = (index / outerDistrictCount) * Math.PI * 2 + Math.PI * 0.07;
+      const width = index % 2 === 0 ? 4.8 : 3.8;
+      const depth = index % 3 === 0 ? 5.2 : 4.1;
+      const height = 6.2 + (index % 5) * 1.1;
+      const block = this.createPaintableBoxMesh(
+        new THREE.BoxGeometry(width, height, depth),
+        outerDistrictPaintMat,
+        `city_outer_block_${index}`
+      );
+      block.position.set(
+        Math.cos(angle) * outerDistrictRadius,
+        height * 0.5,
+        Math.sin(angle) * outerDistrictRadius
+      );
+      block.castShadow = false;
+      block.receiveShadow = true;
+      cityGroup.add(block);
     }
 
     const bridgePaintMat = new THREE.MeshStandardMaterial({
@@ -1084,6 +1259,11 @@ export class GameRuntime {
 
     const npcGuide = new THREE.Group();
     npcGuide.position.set(this.bridgeNpcPosition.x, 0, this.bridgeNpcPosition.z);
+    const npcTempleGate = this.createKoreanTempleGateMesh({
+      includePortal: true,
+      trackPortalRefs: true
+    });
+    npcTempleGate.position.set(0, 0, 0.34);
 
     const npcBody = new THREE.Mesh(
       new THREE.CapsuleGeometry(0.32, 0.86, 4, 8),
@@ -1181,7 +1361,7 @@ export class GameRuntime {
     npcHoloFrame.renderOrder = 13;
     npcHoloFrame.frustumCulled = false;
 
-    npcGuide.add(npcHoloFloor, npcHoloRing, npcHoloBeam, npcBody, npcHead, npcPad, npcHoloFrame);
+    npcGuide.add(npcTempleGate, npcHoloFloor, npcHoloRing, npcHoloBeam, npcBody, npcHead, npcPad, npcHoloFrame);
     const npcGreetingScreen = this.createNpcGreetingScreen();
     npcGuide.add(npcGreetingScreen);
     const npcWelcomeBubble = this.createTextLabel("어서와~ 여기는 대기장소야", "chat");
@@ -1193,37 +1373,9 @@ export class GameRuntime {
     const mirrorGate = new THREE.Group();
     mirrorGate.position.set(this.bridgeMirrorPosition.x, 0, this.bridgeMirrorPosition.z);
     mirrorGate.visible = false;
-
-    const shrineAura = new THREE.Mesh(
-      new THREE.RingGeometry(1.34, 1.95, this.mobileEnabled ? 28 : 44),
-      new THREE.MeshBasicMaterial({
-        color: 0xb6f0ff,
-        transparent: true,
-        opacity: 0.2,
-        side: THREE.DoubleSide,
-        depthWrite: false
-      })
-    );
-    shrineAura.rotation.x = -Math.PI / 2;
-    shrineAura.position.y = 0.06;
-
-    const mirrorPad = new THREE.Mesh(
-      new THREE.RingGeometry(1.52, 2.18, this.mobileEnabled ? 24 : 36),
-      new THREE.MeshBasicMaterial({
-        color: 0x7df0ff,
-        transparent: true,
-        opacity: 0.42,
-        side: THREE.DoubleSide,
-        depthWrite: false
-      })
-    );
-    mirrorPad.rotation.x = -Math.PI / 2;
-    mirrorPad.position.y = 0.04;
-
-    mirrorGate.add(
-      shrineAura,
-      mirrorPad
-    );
+    const bridgeTempleGate = this.createKoreanTempleGateMesh();
+    bridgeTempleGate.position.set(0, 0, 0.12);
+    mirrorGate.add(bridgeTempleGate);
 
     const boundaryMarker = new THREE.Group();
     boundaryMarker.position.set(this.bridgeCityEntry.x, 0, this.bridgeCityEntry.z);
@@ -1289,10 +1441,10 @@ export class GameRuntime {
     const portalRing = new THREE.Mesh(
       new THREE.TorusGeometry(this.portalRadius, 0.34, 26, this.mobileEnabled ? 44 : 72),
       new THREE.MeshStandardMaterial({
-        color: 0x77dcff,
+        color: 0x2eea72,
         roughness: 0.14,
         metalness: 0.4,
-        emissive: 0x4ac8ff,
+        emissive: 0x00ee55,
         emissiveIntensity: 0.18,
         transparent: true,
         opacity: 0.64
@@ -1304,34 +1456,40 @@ export class GameRuntime {
     const portalCore = new THREE.Mesh(
       new THREE.CircleGeometry(this.portalRadius * 0.84, this.mobileEnabled ? 28 : 50),
       new THREE.MeshBasicMaterial({
-        color: 0x9cf4ff,
+        color: 0x00ee55,
         transparent: true,
-        opacity: 0.12,
+        opacity: 0.2,
         side: THREE.DoubleSide,
         depthWrite: false
       })
     );
     portalCore.position.y = 2.45;
-    portalGroup.add(portalCore);
+    const portalCoreGlow = new THREE.Mesh(
+      new THREE.CircleGeometry(this.portalRadius * 0.72, this.mobileEnabled ? 24 : 44),
+      new THREE.MeshBasicMaterial({
+        color: 0x00ee55,
+        transparent: true,
+        opacity: 0.34,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+      })
+    );
+    portalCoreGlow.position.y = 2.45;
+    portalCoreGlow.renderOrder = 12;
+    portalGroup.add(portalCore, portalCoreGlow);
     const portalBillboard = this.createPortalTimeBillboard();
     portalGroup.add(portalBillboard);
-
-    const portalReplicaGroup = new THREE.Group();
-    portalReplicaGroup.position.copy(this.shrinePortalPosition);
-    portalReplicaGroup.position.y = 0;
-
-    const portalReplicaBase = portalBase.clone();
-    const portalReplicaRing = portalRing.clone();
-    const portalReplicaCore = portalCore.clone();
-    portalReplicaGroup.add(portalReplicaBase, portalReplicaRing, portalReplicaCore);
 
     this.hubFlowGroup = group;
     this.portalGroup = portalGroup;
     this.portalRing = portalRing;
     this.portalCore = portalCore;
-    this.portalReplicaGroup = portalReplicaGroup;
-    this.portalReplicaRing = portalReplicaRing;
-    this.portalReplicaCore = portalReplicaCore;
+    this.portalCoreGlow = portalCoreGlow;
+    this.portalReplicaGroup = null;
+    this.portalReplicaRing = null;
+    this.portalReplicaCore = null;
+    this.portalReplicaCoreGlow = null;
     this.portalBillboardGroup = portalBillboard;
     this.npcGuideGroup = npcGuide;
     this.mirrorGateGroup = mirrorGate;
@@ -1342,11 +1500,183 @@ export class GameRuntime {
     this.bridgeBoundaryBeam = boundaryBeam;
 
     boundaryMarker.add(boundaryRing, boundaryHalo, boundaryBeam);
-    group.add(bridgeGroup, cityGroup, npcGuide, mirrorGate, boundaryMarker, portalGroup, portalReplicaGroup);
+    group.add(bridgeGroup, cityGroup, npcGuide, mirrorGate, boundaryMarker, portalGroup);
     this.scene.add(group);
     this.setMirrorGateVisible(this.flowStage === "bridge_mirror");
     this.updateBridgeBoundaryMarker(0);
     this.updatePortalVisual();
+    this.updateNpcTemplePortalVisual();
+  }
+
+  createKoreanTempleGateMesh(options = {}) {
+    const includePortal = Boolean(options?.includePortal);
+    const trackPortalRefs = Boolean(options?.trackPortalRefs);
+    const gateGroup = new THREE.Group();
+    const gateWoodMat = new THREE.MeshStandardMaterial({
+      color: 0x6a3f24,
+      roughness: 0.54,
+      metalness: 0.08
+    });
+    const gateStoneMat = new THREE.MeshStandardMaterial({
+      color: 0x5f6772,
+      roughness: 0.86,
+      metalness: 0.03
+    });
+    const gateRoofMat = new THREE.MeshStandardMaterial({
+      color: 0x2f3b46,
+      roughness: 0.5,
+      metalness: 0.16
+    });
+    const gateTrimMat = new THREE.MeshStandardMaterial({
+      color: 0x8d2531,
+      roughness: 0.42,
+      metalness: 0.12
+    });
+    const gateAccentMat = new THREE.MeshStandardMaterial({
+      color: 0x1f5c47,
+      roughness: 0.42,
+      metalness: 0.14
+    });
+    const gatePlaqueMat = new THREE.MeshStandardMaterial({
+      color: 0x1e2f44,
+      roughness: 0.4,
+      metalness: 0.18,
+      emissive: 0x15263a,
+      emissiveIntensity: 0.16
+    });
+
+    for (const side of [-1, 1]) {
+      const pillarBase = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.34, 0.4, 0.24, this.mobileEnabled ? 12 : 18),
+        gateStoneMat
+      );
+      pillarBase.position.set(side * 1.6, 0.12, 0);
+      pillarBase.receiveShadow = true;
+      gateGroup.add(pillarBase);
+
+      const pillar = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.19, 0.22, 3.56, this.mobileEnabled ? 10 : 14),
+        gateWoodMat
+      );
+      pillar.position.set(side * 1.6, 1.9, 0);
+      pillar.castShadow = !this.mobileEnabled;
+      pillar.receiveShadow = true;
+      gateGroup.add(pillar);
+
+      const bracket = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.24, 0.54), gateTrimMat);
+      bracket.position.set(side * 1.18, 3.24, 0);
+      bracket.castShadow = !this.mobileEnabled;
+      bracket.receiveShadow = true;
+      gateGroup.add(bracket);
+    }
+
+    const lowerBeam = new THREE.Mesh(new THREE.BoxGeometry(4.12, 0.24, 0.34), gateAccentMat);
+    lowerBeam.position.set(0, 3.32, 0);
+    lowerBeam.castShadow = !this.mobileEnabled;
+    lowerBeam.receiveShadow = true;
+
+    const mainBeam = new THREE.Mesh(new THREE.BoxGeometry(4.48, 0.3, 0.44), gateWoodMat);
+    mainBeam.position.set(0, 3.66, 0);
+    mainBeam.castShadow = !this.mobileEnabled;
+    mainBeam.receiveShadow = true;
+
+    const roofCore = new THREE.Mesh(new THREE.BoxGeometry(5.1, 0.2, 1.5), gateRoofMat);
+    roofCore.position.set(0, 4.2, 0);
+    roofCore.castShadow = !this.mobileEnabled;
+    roofCore.receiveShadow = true;
+
+    const roofFront = new THREE.Mesh(new THREE.BoxGeometry(5.26, 0.16, 0.76), gateRoofMat);
+    roofFront.position.set(0, 4.03, -0.72);
+    roofFront.rotation.x = 0.24;
+    roofFront.castShadow = !this.mobileEnabled;
+    roofFront.receiveShadow = true;
+
+    const roofBack = new THREE.Mesh(new THREE.BoxGeometry(5.26, 0.16, 0.76), gateRoofMat);
+    roofBack.position.set(0, 4.03, 0.72);
+    roofBack.rotation.x = -0.24;
+    roofBack.castShadow = !this.mobileEnabled;
+    roofBack.receiveShadow = true;
+
+    const eaveTrimFront = new THREE.Mesh(new THREE.BoxGeometry(5.18, 0.08, 0.18), gateTrimMat);
+    eaveTrimFront.position.set(0, 3.92, -1.04);
+    eaveTrimFront.castShadow = !this.mobileEnabled;
+    eaveTrimFront.receiveShadow = true;
+
+    const eaveTrimBack = new THREE.Mesh(new THREE.BoxGeometry(5.18, 0.08, 0.18), gateTrimMat);
+    eaveTrimBack.position.set(0, 3.92, 1.04);
+    eaveTrimBack.castShadow = !this.mobileEnabled;
+    eaveTrimBack.receiveShadow = true;
+
+    const gatePlaque = new THREE.Mesh(new THREE.BoxGeometry(0.96, 0.56, 0.08), gatePlaqueMat);
+    gatePlaque.position.set(0, 3.24, -0.26);
+    gatePlaque.castShadow = !this.mobileEnabled;
+    gatePlaque.receiveShadow = true;
+
+    gateGroup.add(
+      lowerBeam,
+      mainBeam,
+      roofCore,
+      roofFront,
+      roofBack,
+      eaveTrimFront,
+      eaveTrimBack,
+      gatePlaque
+    );
+
+    if (includePortal) {
+      const portalRing = new THREE.Mesh(
+        new THREE.TorusGeometry(1.06, 0.1, 20, this.mobileEnabled ? 28 : 44),
+        new THREE.MeshStandardMaterial({
+          color: 0x0abf4d,
+          roughness: 0.22,
+          metalness: 0.32,
+          emissive: 0x00ee55,
+          emissiveIntensity: 0.58,
+          transparent: true,
+          opacity: 0.88
+        })
+      );
+      portalRing.position.set(0, 1.92, -0.04);
+      portalRing.castShadow = !this.mobileEnabled;
+      portalRing.receiveShadow = true;
+
+      const portalCore = new THREE.Mesh(
+        new THREE.CircleGeometry(0.98, this.mobileEnabled ? 24 : 40),
+        new THREE.MeshStandardMaterial({
+          color: 0x00ee55,
+          roughness: 0.16,
+          metalness: 0.08,
+          emissive: 0x00ee55,
+          emissiveIntensity: 0.95,
+          side: THREE.DoubleSide
+        })
+      );
+      portalCore.position.set(0, 1.92, -0.04);
+      portalCore.castShadow = false;
+      portalCore.receiveShadow = true;
+
+      const portalGlow = new THREE.Mesh(
+        new THREE.CircleGeometry(0.78, this.mobileEnabled ? 22 : 36),
+        new THREE.MeshBasicMaterial({
+          color: 0x00ee55,
+          transparent: true,
+          opacity: 0.65,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending
+        })
+      );
+      portalGlow.position.set(0, 1.92, -0.036);
+      portalGlow.renderOrder = 14;
+
+      gateGroup.add(portalRing, portalCore, portalGlow);
+      if (trackPortalRefs) {
+        this.npcTemplePortalCore = portalCore;
+        this.npcTemplePortalGlow = portalGlow;
+      }
+    }
+
+    return gateGroup;
   }
 
   addPlazaBillboards(cityGroup) {
@@ -2235,6 +2565,119 @@ export class GameRuntime {
     cityGroup.add(tableGroup);
   }
 
+  getCityWindowPalette(style = "slate") {
+    const key = String(style ?? "").trim().toLowerCase();
+    if (key === "cyan") {
+      return {
+        wall: "#2d3947",
+        mullion: "#41556a",
+        glassDark: "#1f3446",
+        glassLight: "#5cc9f1",
+        reflection: "rgba(201, 245, 255, 0.42)"
+      };
+    }
+    if (key === "amber") {
+      return {
+        wall: "#403833",
+        mullion: "#5e5148",
+        glassDark: "#34261e",
+        glassLight: "#f1b56a",
+        reflection: "rgba(255, 232, 201, 0.38)"
+      };
+    }
+    return {
+      wall: "#343b44",
+      mullion: "#4a5562",
+      glassDark: "#263341",
+      glassLight: "#8db3d5",
+      reflection: "rgba(220, 236, 255, 0.34)"
+    };
+  }
+
+  getCityWindowTexture(style = "slate", repeatX = 1, repeatY = 1) {
+    const safeRepeatX = THREE.MathUtils.clamp(Number(repeatX) || 1, 0.5, 14);
+    const safeRepeatY = THREE.MathUtils.clamp(Number(repeatY) || 1, 0.5, 18);
+    const cacheKey = `${String(style ?? "slate").toLowerCase()}|${safeRepeatX.toFixed(2)}|${safeRepeatY.toFixed(2)}`;
+    const cached = this.cityWindowTextureCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const palette = this.getCityWindowPalette(style);
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 256;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return null;
+    }
+
+    context.fillStyle = palette.wall;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    const cols = 6;
+    const rows = 10;
+    const marginX = 16;
+    const marginY = 14;
+    const gapX = 8;
+    const gapY = 9;
+    const innerWidth = canvas.width - marginX * 2;
+    const innerHeight = canvas.height - marginY * 2;
+    const windowWidth = Math.max(7, Math.floor((innerWidth - gapX * (cols - 1)) / cols));
+    const windowHeight = Math.max(8, Math.floor((innerHeight - gapY * (rows - 1)) / rows));
+
+    context.fillStyle = palette.mullion;
+    context.fillRect(marginX - 6, marginY - 6, innerWidth + 12, innerHeight + 12);
+
+    for (let row = 0; row < rows; row += 1) {
+      for (let col = 0; col < cols; col += 1) {
+        const x = marginX + col * (windowWidth + gapX);
+        const y = marginY + row * (windowHeight + gapY);
+        const lit = ((row * 11 + col * 7 + col) % 5) <= 1;
+
+        context.fillStyle = lit ? palette.glassLight : palette.glassDark;
+        context.fillRect(x, y, windowWidth, windowHeight);
+
+        context.fillStyle = palette.reflection;
+        context.fillRect(
+          x + 1,
+          y + 1,
+          Math.max(2, Math.floor(windowWidth * 0.32)),
+          Math.max(2, Math.floor(windowHeight * 0.18))
+        );
+      }
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(safeRepeatX, safeRepeatY);
+    texture.anisotropy = Math.min(8, this.renderer?.capabilities?.getMaxAnisotropy?.() || 1);
+    texture.needsUpdate = true;
+    this.cityWindowTextureCache.set(cacheKey, texture);
+    return texture;
+  }
+
+  createCityWindowMaterial({
+    style = "slate",
+    repeatX = 1,
+    repeatY = 1,
+    roughness = 0.56,
+    metalness = 0.14,
+    emissive = 0x1a212a,
+    emissiveIntensity = 0.12
+  } = {}) {
+    return new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness,
+      metalness,
+      emissive,
+      emissiveIntensity,
+      map: this.getCityWindowTexture(style, repeatX, repeatY)
+    });
+  }
+
   tryPickupChalk() {
     if (!this.isChalkFeatureEnabled()) return;
     if (this.hasChalk || !this.chalkTableWorldPos) return;
@@ -2276,6 +2719,81 @@ export class GameRuntime {
     return mesh;
   }
 
+  getBoxSurfaceDimensions(geometry, faceKey) {
+    const params = geometry?.parameters ?? {};
+    const width = Math.max(0.25, Number(params.width) || 1);
+    const height = Math.max(0.25, Number(params.height) || 1);
+    const depth = Math.max(0.25, Number(params.depth) || 1);
+    const key = String(faceKey ?? "").trim().toLowerCase();
+    if (key === "px" || key === "nx") {
+      return { width: depth, height };
+    }
+    if (key === "py" || key === "ny") {
+      return { width, height: depth };
+    }
+    return { width, height };
+  }
+
+  getSurfacePainterCanvasProfile(surfaceId) {
+    const normalizedId = String(surfaceId ?? "").trim();
+    const entry = this.paintableSurfaceMap.get(normalizedId);
+    if (!entry) {
+      return { width: 1, height: 1 };
+    }
+    const stored = entry.surfaceSize;
+    const storedWidth = Math.max(0.25, Number(stored?.width) || 0);
+    const storedHeight = Math.max(0.25, Number(stored?.height) || 0);
+    if (storedWidth > 0 && storedHeight > 0) {
+      return { width: storedWidth, height: storedHeight };
+    }
+    const faceKey = normalizedId.split(":").pop() || "";
+    return this.getBoxSurfaceDimensions(entry.mesh?.geometry, faceKey);
+  }
+
+  configureSurfacePainterCanvas(surfaceId) {
+    const canvas = this.surfacePainterCanvasEl;
+    if (!canvas) {
+      return;
+    }
+    const profile = this.getSurfacePainterCanvasProfile(surfaceId);
+    const logicalWidth = Math.max(0.25, Number(profile.width) || 1);
+    const logicalHeight = Math.max(0.25, Number(profile.height) || 1);
+    const aspectRatio = THREE.MathUtils.clamp(logicalWidth / logicalHeight, 0.28, 3.6);
+    const area = Math.max(0.25, logicalWidth * logicalHeight);
+    const detailScale = THREE.MathUtils.clamp(Math.sqrt(area) / 3, 0.75, 1.8);
+    const baseMaxDimension = this.mobileEnabled ? 768 : 1024;
+    const maxDimension = Math.round(baseMaxDimension * detailScale);
+    const minDimension = this.mobileEnabled ? 256 : 320;
+    let pixelWidth = aspectRatio >= 1 ? maxDimension : Math.round(maxDimension * aspectRatio);
+    let pixelHeight = aspectRatio >= 1 ? Math.round(maxDimension / aspectRatio) : maxDimension;
+    pixelWidth = THREE.MathUtils.clamp(pixelWidth, minDimension, maxDimension);
+    pixelHeight = THREE.MathUtils.clamp(pixelHeight, minDimension, maxDimension);
+    if (canvas.width !== pixelWidth) {
+      canvas.width = pixelWidth;
+    }
+    if (canvas.height !== pixelHeight) {
+      canvas.height = pixelHeight;
+    }
+    if (this.mobileEnabled) {
+      canvas.style.width = "100%";
+      canvas.style.maxWidth = "none";
+      canvas.style.justifySelf = "stretch";
+      canvas.style.alignSelf = "stretch";
+      canvas.style.aspectRatio = "auto";
+      return;
+    }
+
+    const longestEdge = Math.max(logicalWidth, logicalHeight);
+    const displayScale = THREE.MathUtils.clamp(Math.pow(longestEdge / 5.5, 0.4), 0.64, 1);
+    canvas.style.width = `${Math.round(displayScale * 100)}%`;
+    canvas.style.maxWidth = `${Math.round(620 * displayScale)}px`;
+    canvas.style.justifySelf = "center";
+    canvas.style.alignSelf = "center";
+    const ratioWidth = Math.max(1, Math.round(logicalWidth * 100));
+    const ratioHeight = Math.max(1, Math.round(logicalHeight * 100));
+    canvas.style.aspectRatio = `${ratioWidth} / ${ratioHeight}`;
+  }
+
   registerPaintableBoxMesh(mesh, surfaceBaseId) {
     if (!mesh || !surfaceBaseId) {
       return;
@@ -2291,6 +2809,7 @@ export class GameRuntime {
         mesh,
         materialIndex,
         baseMap,
+        surfaceSize: this.getBoxSurfaceDimensions(mesh?.geometry, BOX_FACE_KEYS[materialIndex]),
         revision: 0
       });
       const existing = this.surfacePaintState.get(surfaceId);
@@ -2543,6 +3062,106 @@ export class GameRuntime {
     image.src = imageDataUrl;
   }
 
+  getSurfacePainterPngFilename(surfaceId = "") {
+    const raw = String(surfaceId ?? "").trim().toLowerCase();
+    const normalized = raw.replace(/[^a-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:t]/gi, "-");
+    return `surface-${normalized || "paint"}-${stamp}.png`;
+  }
+
+  exportSurfacePainterAsPng() {
+    this.resolveUiElements();
+    if (!this.surfacePainterOpen || !this.surfacePainterCanvasEl) {
+      return;
+    }
+
+    const canvas = this.surfacePainterCanvasEl;
+    const filename = this.getSurfacePainterPngFilename(this.surfacePainterTargetId);
+    const triggerDownload = (href, revokeAfter = false) => {
+      const link = document.createElement("a");
+      link.href = href;
+      link.download = filename;
+      link.rel = "noopener";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      if (revokeAfter) {
+        window.setTimeout(() => URL.revokeObjectURL(href), 0);
+      }
+    };
+
+    if (typeof canvas.toBlob === "function") {
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            this.appendChatLine("", "PNG 내보내기에 실패했습니다.", "system");
+            return;
+          }
+          const url = URL.createObjectURL(blob);
+          triggerDownload(url, true);
+          this.appendChatLine("", `PNG 저장 완료: ${filename}`, "system");
+        },
+        "image/png",
+        1
+      );
+      return;
+    }
+
+    try {
+      const dataUrl = canvas.toDataURL("image/png");
+      triggerDownload(dataUrl, false);
+      this.appendChatLine("", `PNG 저장 완료: ${filename}`, "system");
+    } catch {
+      this.appendChatLine("", "PNG 내보내기에 실패했습니다.", "system");
+    }
+  }
+
+  triggerSurfacePainterPngImport() {
+    this.resolveUiElements();
+    if (!this.surfacePainterOpen || !this.surfacePainterImportInputEl) {
+      return;
+    }
+    this.surfacePainterImportInputEl.value = "";
+    this.surfacePainterImportInputEl.click();
+  }
+
+  handleSurfacePainterImportInputChange(event) {
+    if (!this.surfacePainterOpen) {
+      return;
+    }
+    const input = event?.target;
+    const file = input?.files?.[0];
+    if (input) {
+      input.value = "";
+    }
+    if (!file) {
+      return;
+    }
+
+    const filename = String(file.name ?? "").trim();
+    const fileType = String(file.type ?? "").trim().toLowerCase();
+    const isPngFile = fileType === "image/png" || filename.toLowerCase().endsWith(".png");
+    if (!isPngFile) {
+      this.appendChatLine("", "PNG 파일만 불러올 수 있습니다.", "system");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result ?? "").trim();
+      if (!dataUrl.startsWith("data:image/")) {
+        this.appendChatLine("", "PNG 파일을 읽지 못했습니다.", "system");
+        return;
+      }
+      this.clearSurfacePainterCanvas(dataUrl);
+      this.appendChatLine("", `PNG 불러오기 완료: ${filename || "image.png"}`, "system");
+    };
+    reader.onerror = () => {
+      this.appendChatLine("", "PNG 파일을 읽지 못했습니다.", "system");
+    };
+    reader.readAsDataURL(file);
+  }
+
   openSurfacePainter(surfaceId) {
     this.resolveUiElements();
     const normalizedId = String(surfaceId ?? "").trim();
@@ -2556,6 +3175,8 @@ export class GameRuntime {
       this.surfacePainterContext = this.surfacePainterCanvasEl.getContext("2d");
     }
 
+    this.configureSurfacePainterCanvas(normalizedId);
+    this.surfacePainterContext = this.surfacePainterCanvasEl.getContext("2d");
     this.surfacePainterOpen = true;
     this.surfacePainterDrawing = false;
     this.surfacePainterPointerId = null;
@@ -3501,13 +4122,18 @@ export class GameRuntime {
 
   syncGameplayUiForFlow() {
     const gameplayEnabled = !this.hubFlowEnabled || this.flowStage === "city_live";
+    const chatEnabled = this.canUseChatControls();
     this.toolUiEl?.classList.toggle(
       "hidden",
       !gameplayEnabled || !this.isDrawingInteractionEnabled()
     );
-    this.chatUiEl?.classList.toggle("hidden", !gameplayEnabled);
-    if (!gameplayEnabled) {
+    this.chatUiEl?.classList.toggle("hidden", !chatEnabled);
+    if (!chatEnabled) {
       this.setChatOpen(false);
+    } else if (!gameplayEnabled && this.canMovePlayer() && !this.chatOpen) {
+      this.setChatOpen(true);
+    }
+    if (!gameplayEnabled) {
       this.closeSurfacePainter();
     }
     this.syncMobileUiState();
@@ -3912,6 +4538,26 @@ export class GameRuntime {
     return !this.hubFlowEnabled || this.flowStage === "city_live";
   }
 
+  canUseHostChatShortcut() {
+    if (this.isMobilePortraitBlocked()) {
+      return false;
+    }
+    if (this.surfacePainterOpen) {
+      return false;
+    }
+    const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
+    return this.isRoomHost || localHostMode;
+  }
+
+  canUseChatControls() {
+    return this.canMovePlayer() || this.canUseHostChatShortcut();
+  }
+
+  shouldKeepChatOpenAfterSend() {
+    // Keep chat expanded after sending so the user can see the latest line immediately.
+    return true;
+  }
+
   canUsePointerLock() {
     return this.canMovePlayer() && !this.portalTransitioning;
   }
@@ -4048,6 +4694,7 @@ export class GameRuntime {
     }
 
     this.portalPulseClock += delta;
+    this.updateNpcTemplePortalVisual();
     this.updateBridgeBoundaryMarker(delta);
 
     if (this.flowStage === "boot_intro") {
@@ -4189,6 +4836,18 @@ export class GameRuntime {
     this.setFlowHeadline("도시 라이브", hasHostPrivilege ? "호스팅" : "");
   }
 
+  updateNpcTemplePortalVisual() {
+    const coreMaterial = this.npcTemplePortalCore?.material;
+    const glowMaterial = this.npcTemplePortalGlow?.material;
+    if (!coreMaterial || !glowMaterial) {
+      return;
+    }
+
+    const pulse = 0.5 + 0.5 * Math.sin(this.portalPulseClock * 7.2);
+    coreMaterial.emissiveIntensity = 0.9 + pulse * 1.15;
+    glowMaterial.opacity = 0.65 + pulse * 0.28;
+  }
+
   updatePortalVisual() {
     if (!this.portalRing || !this.portalCore || !this.portalGroup) {
       return;
@@ -4196,6 +4855,7 @@ export class GameRuntime {
 
     const ringMaterial = this.portalRing.material;
     const coreMaterial = this.portalCore.material;
+    const coreGlowMaterial = this.portalCoreGlow?.material ?? null;
     if (!ringMaterial || !coreMaterial) {
       return;
     }
@@ -4204,7 +4864,10 @@ export class GameRuntime {
     if (this.portalPhase === "open") {
       ringMaterial.emissiveIntensity = 0.9 + pulse * 0.85;
       ringMaterial.opacity = 0.9;
-      coreMaterial.opacity = 0.3 + pulse * 0.34;
+      coreMaterial.opacity = 0.65 + pulse * 0.28;
+      if (coreGlowMaterial) {
+        coreGlowMaterial.opacity = 0.68 + pulse * 0.24;
+      }
       this.portalGroup.scale.set(1 + pulse * 0.05, 1 + pulse * 0.05, 1 + pulse * 0.05);
       this.portalReplicaGroup?.scale.set(1 + pulse * 0.05, 1 + pulse * 0.05, 1 + pulse * 0.05);
       return;
@@ -4214,6 +4877,9 @@ export class GameRuntime {
       ringMaterial.emissiveIntensity = 0.42 + pulse * 0.48;
       ringMaterial.opacity = 0.78;
       coreMaterial.opacity = 0.12 + pulse * 0.16;
+      if (coreGlowMaterial) {
+        coreGlowMaterial.opacity = 0.22 + pulse * 0.18;
+      }
       this.portalGroup.scale.set(1, 1, 1);
       this.portalReplicaGroup?.scale.set(1, 1, 1);
       return;
@@ -4221,7 +4887,10 @@ export class GameRuntime {
 
     ringMaterial.emissiveIntensity = 0.14;
     ringMaterial.opacity = 0.62;
-    coreMaterial.opacity = 0.05;
+    coreMaterial.opacity = 0.08;
+    if (coreGlowMaterial) {
+      coreGlowMaterial.opacity = 0.12;
+    }
     this.portalGroup.scale.set(1, 1, 1);
     this.portalReplicaGroup?.scale.set(1, 1, 1);
   }
@@ -4662,13 +5331,37 @@ export class GameRuntime {
   }
 
   syncHostControls() {
+    const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
+    const hasHostPrivilege = this.isRoomHost || localHostMode;
+    const visible = this.hubFlowEnabled && hasHostPrivilege;
+    const canHostUseChat = this.canUseHostChatShortcut();
+    const chatEnabled = this.canUseChatControls();
+    this.chatUiEl?.classList.toggle("hidden", !chatEnabled);
+    if (!chatEnabled && this.chatOpen) {
+      this.setChatOpen(false);
+    }
+    if (this.hostChatToggleBtnEl) {
+      const showHostChatToggle = canHostUseChat && !this.mobileEnabled && !this.chatOpen;
+      this.hostChatToggleBtnEl.classList.toggle("hidden", !showHostChatToggle);
+      const hostLabel = this.chatOpen ? "채팅 닫기" : "채팅";
+      if (this.hostChatToggleBtnEl.textContent !== hostLabel) {
+        this.hostChatToggleBtnEl.textContent = hostLabel;
+      }
+      this.hostChatToggleBtnEl.setAttribute("aria-pressed", this.chatOpen ? "true" : "false");
+    }
+    if (this.hostControlsToggleBtnEl) {
+      this.hostControlsToggleBtnEl.classList.toggle("hidden", !visible);
+      const toggleLabel = this.hostControlsOpen ? "조작 패널 닫기" : "조작 패널 열기";
+      if (this.hostControlsToggleBtnEl.textContent !== toggleLabel) {
+        this.hostControlsToggleBtnEl.textContent = toggleLabel;
+      }
+      this.hostControlsToggleBtnEl.setAttribute("aria-pressed", this.hostControlsOpen ? "true" : "false");
+    }
+
     if (!this.hostControlsEl) {
       return;
     }
 
-    const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
-    const hasHostPrivilege = this.isRoomHost || localHostMode;
-    const visible = this.hubFlowEnabled && hasHostPrivilege;
     const canControlPortal = visible && this.flowStage === "city_live";
     const schedule = this.getPortalScheduleComputed();
     const portalOpenNow = schedule.mode === "open" || schedule.mode === "open_manual";
@@ -4682,7 +5375,7 @@ export class GameRuntime {
       this.rightBillboardResetInFlight ||
       this.hostMusicSetInFlight;
 
-    this.hostControlsEl.classList.toggle("hidden", !visible);
+    this.hostControlsEl.classList.toggle("hidden", !visible || !this.hostControlsOpen);
     if (this.hostOpenPortalBtnEl) {
       const nextLabel = portalOpenNow ? "포탈 닫기" : "포탈 열기";
       if (this.hostOpenPortalBtnEl.textContent !== nextLabel) {
@@ -6183,7 +6876,7 @@ export class GameRuntime {
       if (
         event.code === RUNTIME_TUNING.CHAT_OPEN_KEY &&
         this.chatInputEl &&
-        this.canUseGameplayControls()
+        this.canUseChatControls()
       ) {
         event.preventDefault();
         this.focusChatInput();
@@ -6204,6 +6897,18 @@ export class GameRuntime {
       if (event.code === "KeyB" && this.canUseGameplayControls() && this.hasChalk) {
         event.preventDefault();
         this.setActiveTool(this.activeTool === "chalk" ? "move" : "chalk");
+        return;
+      }
+
+      if (event.code === "KeyG" && this.canUseGameplayControls() && (this.isRoomHost || !this.socketEndpoint)) {
+        event.preventDefault();
+        this.toggleFlyMode();
+        return;
+      }
+
+      if (event.code === "KeyZ" && this.flyModeActive) {
+        event.preventDefault();
+        this.undoLastPlatform();
         return;
       }
 
@@ -6267,6 +6972,10 @@ export class GameRuntime {
       this.hud.setStatus(this.getStatusText());
     });
     this.renderer.domElement.addEventListener("mousedown", (event) => {
+      if (event.button === 0 && this.flyModeActive && this.pointerLocked) {
+        this.placePlatformAtPreview();
+        return;
+      }
       if (!this.pointerLocked) {
         this.updateChalkPointerFromClient(event.clientX, event.clientY);
       } else {
@@ -6286,6 +6995,11 @@ export class GameRuntime {
       this.chalkDrawingActive = false;
       this.chalkLastStamp = null;
     });
+    this.renderer.domElement.addEventListener("wheel", (event) => {
+      if (!this.flyModeActive || !this.pointerLocked) return;
+      event.preventDefault();
+      this.platformEditorDist = Math.max(2, Math.min(12, this.platformEditorDist - event.deltaY * 0.005));
+    }, { passive: false });
     this.renderer.domElement.addEventListener(
       "touchstart",
       (event) => {
@@ -6412,7 +7126,7 @@ export class GameRuntime {
     }
     if (this.chatToggleBtnEl) {
       this.chatToggleBtnEl.addEventListener("click", () => {
-        if (!this.canUseGameplayControls()) {
+        if (!this.canUseChatControls()) {
           return;
         }
         if (this.chatOpen) {
@@ -6430,10 +7144,35 @@ export class GameRuntime {
     }
     if (this.chatLogEl) {
       this.chatLogEl.addEventListener("pointerdown", () => {
-        if (!this.mobileEnabled || this.chatOpen || !this.canUseGameplayControls()) {
+        if (!this.mobileEnabled || this.chatOpen || !this.canUseChatControls()) {
           return;
         }
         this.focusChatInput();
+      });
+    }
+
+    if (this.hostChatToggleBtnEl) {
+      this.hostChatToggleBtnEl.addEventListener("click", () => {
+        if (!this.canUseHostChatShortcut()) {
+          return;
+        }
+        if (this.chatOpen) {
+          this.setChatOpen(false);
+          this.chatInputEl?.blur();
+          return;
+        }
+        this.focusChatInput();
+      });
+    }
+    if (this.hostControlsToggleBtnEl) {
+      this.hostControlsToggleBtnEl.addEventListener("click", () => {
+        const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
+        const hasHostPrivilege = this.isRoomHost || localHostMode;
+        if (!this.hubFlowEnabled || !hasHostPrivilege) {
+          return;
+        }
+        this.hostControlsOpen = !this.hostControlsOpen;
+        this.syncHostControls();
       });
     }
 
@@ -6512,7 +7251,7 @@ export class GameRuntime {
 
     if (this.mobileChatBtnEl) {
       this.mobileChatBtnEl.addEventListener("pointerdown", () => {
-        if (!this.mobileEnabled || !this.canUseGameplayControls()) {
+        if (!this.mobileEnabled || !this.canUseChatControls()) {
           return;
         }
         if (this.chatOpen) {
@@ -6767,8 +7506,32 @@ export class GameRuntime {
     this.surfacePainterSaveBtnEl?.addEventListener("click", () => {
       void this.saveSurfacePainter();
     });
+    this.surfacePainterExportBtnEl?.addEventListener("click", () => {
+      this.exportSurfacePainterAsPng();
+    });
+    this.surfacePainterImportBtnEl?.addEventListener("click", () => {
+      this.triggerSurfacePainterPngImport();
+    });
+    this.surfacePainterImportInputEl?.addEventListener("change", (event) => {
+      this.handleSurfacePainterImportInputChange(event);
+    });
     this.surfacePainterEraserBtnEl?.addEventListener("click", () => {
       this.setSurfacePainterEraserEnabled(!this.surfacePainterEraserEnabled);
+    });
+
+    this.platformEditorSaveBtnEl?.addEventListener("click", () => {
+      this.savePlatforms();
+    });
+    this.platformEditorClearBtnEl?.addEventListener("click", () => {
+      for (const mesh of this.jumpPlatformMeshes) {
+        this.scene.remove(mesh);
+        mesh.geometry.dispose();
+        mesh.material.dispose();
+      }
+      this.jumpPlatforms = [];
+      this.jumpPlatformMeshes = [];
+      this.savePlatforms();
+      this.updatePlatformEditorCount();
     });
   }
 
@@ -6839,6 +7602,15 @@ export class GameRuntime {
     if (!this.surfacePainterSizeInputEl) {
       this.surfacePainterSizeInputEl = document.getElementById("surface-painter-size");
     }
+    if (!this.surfacePainterExportBtnEl) {
+      this.surfacePainterExportBtnEl = document.getElementById("surface-painter-export");
+    }
+    if (!this.surfacePainterImportBtnEl) {
+      this.surfacePainterImportBtnEl = document.getElementById("surface-painter-import");
+    }
+    if (!this.surfacePainterImportInputEl) {
+      this.surfacePainterImportInputEl = document.getElementById("surface-painter-import-file");
+    }
     if (!this.surfacePainterClearBtnEl) {
       this.surfacePainterClearBtnEl = document.getElementById("surface-painter-clear");
     }
@@ -6865,6 +7637,12 @@ export class GameRuntime {
     }
     if (!this.chatToggleBtnEl) {
       this.chatToggleBtnEl = document.getElementById("chat-toggle");
+    }
+    if (!this.hostChatToggleBtnEl) {
+      this.hostChatToggleBtnEl = document.getElementById("host-chat-toggle");
+    }
+    if (!this.hostControlsToggleBtnEl) {
+      this.hostControlsToggleBtnEl = document.getElementById("host-controls-toggle");
     }
     if (!this.chatInputEl) {
       this.chatInputEl = document.getElementById("chat-input");
@@ -7033,7 +7811,7 @@ export class GameRuntime {
   }
 
   setChatOpen(open) {
-    if (open && !this.canUseGameplayControls()) {
+    if (open && !this.canUseChatControls()) {
       return;
     }
 
@@ -7060,6 +7838,13 @@ export class GameRuntime {
       }
       this.chatToggleBtnEl.setAttribute("aria-pressed", this.chatOpen ? "true" : "false");
       this.chatToggleBtnEl.classList.toggle("hidden", this.mobileEnabled && !this.chatOpen);
+    }
+    if (this.hostChatToggleBtnEl) {
+      const hostLabel = this.chatOpen ? "채팅 닫기" : "채팅";
+      if (this.hostChatToggleBtnEl.textContent !== hostLabel) {
+        this.hostChatToggleBtnEl.textContent = hostLabel;
+      }
+      this.hostChatToggleBtnEl.setAttribute("aria-pressed", this.chatOpen ? "true" : "false");
     }
     if (this.mobileChatBtnEl) {
       this.mobileChatBtnEl.setAttribute("aria-pressed", this.chatOpen ? "true" : "false");
@@ -7373,6 +8158,10 @@ export class GameRuntime {
 
     socket.on("chat:message", (payload) => {
       this.handleChatMessage(payload);
+    });
+
+    socket.on("platform:state", (payload = {}) => {
+      this.applyPlatformState(payload?.platforms ?? []);
     });
   }
 
@@ -7876,6 +8665,7 @@ export class GameRuntime {
     }
     this.updateDynamicResolution(delta);
     this.updateHud(delta);
+    this.updatePlatformEditor();
   }
 
   getMovementIntent() {
@@ -7918,7 +8708,8 @@ export class GameRuntime {
     if (movementEnabled && (Math.abs(keyForward) > 0.001 || Math.abs(keyStrafe) > 0.001)) {
       this.lastActiveMoveInputAt = performance.now();
     }
-    const speed = sprinting ? GAME_CONSTANTS.PLAYER_SPRINT : GAME_CONSTANTS.PLAYER_SPEED;
+    const baseSpeed = sprinting ? GAME_CONSTANTS.PLAYER_SPRINT : GAME_CONSTANTS.PLAYER_SPEED;
+    const speed = this.onGround ? baseSpeed : baseSpeed * 1.35;
 
     if (keyForward !== 0 || keyStrafe !== 0) {
       const sinYaw = Math.sin(this.yaw);
@@ -7950,21 +8741,56 @@ export class GameRuntime {
       );
     }
 
-    this.verticalVelocity += GAME_CONSTANTS.PLAYER_GRAVITY * delta;
-    this.playerPosition.y += this.verticalVelocity * delta;
-
-    if (this.playerPosition.y <= GAME_CONSTANTS.PLAYER_HEIGHT) {
-      this.playerPosition.y = GAME_CONSTANTS.PLAYER_HEIGHT;
+    if (this.flyModeActive) {
+      const flySpeed = GAME_CONSTANTS.PLAYER_SPEED;
+      if (this.keys.has("KeyE")) this.playerPosition.y += flySpeed * delta;
+      if (this.keys.has("KeyQ")) this.playerPosition.y -= flySpeed * delta;
+      this.playerPosition.y = Math.max(GAME_CONSTANTS.PLAYER_HEIGHT, this.playerPosition.y);
       this.verticalVelocity = 0;
-      this.onGround = true;
-      if (movementEnabled && this.mobileJumpQueued) {
-        this.verticalVelocity = GAME_CONSTANTS.JUMP_FORCE;
+      this.onGround = false;
+      this.mobileJumpQueued = false;
+    } else {
+      const prevFeetY = this.playerPosition.y - GAME_CONSTANTS.PLAYER_HEIGHT;
+      this.verticalVelocity += GAME_CONSTANTS.PLAYER_GRAVITY * delta;
+      this.playerPosition.y += this.verticalVelocity * delta;
+
+      let platformTopY = null;
+      for (const p of this.jumpPlatforms) {
+        const topY = p.y + p.h / 2;
+        const feetY = this.playerPosition.y - GAME_CONSTANTS.PLAYER_HEIGHT;
+        const swept = prevFeetY >= topY && feetY <= topY; // swept through from above
+        const nearTop = feetY >= topY - 0.6 && feetY <= topY + 0.1;
+        if (
+          Math.abs(this.playerPosition.x - p.x) < p.w / 2 + 0.28 &&
+          Math.abs(this.playerPosition.z - p.z) < p.d / 2 + 0.28 &&
+          (swept || nearTop) &&
+          this.verticalVelocity <= 0.1
+        ) {
+          if (platformTopY === null || topY > platformTopY) platformTopY = topY;
+        }
+      }
+
+      if (platformTopY !== null) {
+        this.playerPosition.y = platformTopY + GAME_CONSTANTS.PLAYER_HEIGHT;
+        this.verticalVelocity = 0;
+        this.onGround = true;
+        if (movementEnabled && this.mobileJumpQueued) {
+          this.verticalVelocity = GAME_CONSTANTS.JUMP_FORCE;
+          this.onGround = false;
+        }
+      } else if (this.playerPosition.y <= GAME_CONSTANTS.PLAYER_HEIGHT) {
+        this.playerPosition.y = GAME_CONSTANTS.PLAYER_HEIGHT;
+        this.verticalVelocity = 0;
+        this.onGround = true;
+        if (movementEnabled && this.mobileJumpQueued) {
+          this.verticalVelocity = GAME_CONSTANTS.JUMP_FORCE;
+          this.onGround = false;
+        }
+      } else {
         this.onGround = false;
       }
-    } else {
-      this.onGround = false;
+      this.mobileJumpQueued = false;
     }
-    this.mobileJumpQueued = false;
 
     this.updateBoundaryGuard(delta);
     this.camera.position.copy(this.playerPosition);
@@ -8132,7 +8958,7 @@ export class GameRuntime {
     }
     if (this.handleChatCommand(rawInput)) {
       this.chatInputEl.value = "";
-      if (this.mobileEnabled) {
+      if (this.shouldKeepChatOpenAfterSend()) {
         this.setChatOpen(true);
         this.chatInputEl.focus();
       } else {
@@ -8161,7 +8987,7 @@ export class GameRuntime {
     }
 
     this.chatInputEl.value = "";
-    if (this.mobileEnabled) {
+    if (this.shouldKeepChatOpenAfterSend()) {
       this.setChatOpen(true);
       this.chatInputEl.focus();
     } else {
@@ -8205,7 +9031,7 @@ export class GameRuntime {
     if (!this.chatInputEl) {
       return;
     }
-    if (!this.canUseGameplayControls()) {
+    if (!this.canUseChatControls()) {
       return;
     }
     this.setChatOpen(true);
@@ -8799,5 +9625,158 @@ export class GameRuntime {
     }
     this.updateFullscreenToggleState();
     this.syncMobileUiState();
+  }
+
+  // ── Platform Editor ──────────────────────────────────────────────────────
+
+  toggleFlyMode() {
+    this.flyModeActive = !this.flyModeActive;
+    if (this.flyModeActive) {
+      if (!this.platformEditorPreviewMesh) {
+        const geo = new THREE.BoxGeometry(
+          this.platformEditorSize.w,
+          this.platformEditorSize.h,
+          this.platformEditorSize.d
+        );
+        const mat = new THREE.MeshStandardMaterial({
+          color: 0x00e5cc,
+          emissive: 0x00e5cc,
+          emissiveIntensity: 0.7,
+          opacity: 0.42,
+          transparent: true,
+        });
+        this.platformEditorPreviewMesh = new THREE.Mesh(geo, mat);
+        this.scene.add(this.platformEditorPreviewMesh);
+      }
+      this.platformEditorPreviewMesh.visible = true;
+      this.platformEditorEl?.classList.remove("hidden");
+    } else {
+      if (this.platformEditorPreviewMesh) {
+        this.platformEditorPreviewMesh.visible = false;
+      }
+      this.platformEditorEl?.classList.add("hidden");
+    }
+  }
+
+  updatePlatformEditor() {
+    if (!this.flyModeActive || !this.platformEditorPreviewMesh) return;
+    // Use horizontal-only direction so platform doesn't float to ceiling when looking up
+    const dir = new THREE.Vector3();
+    this.camera.getWorldDirection(dir);
+    dir.y = 0;
+    if (dir.lengthSq() < 0.001) dir.set(0, 0, -1);
+    dir.normalize();
+    const pos = this.playerPosition.clone().addScaledVector(dir, this.platformEditorDist);
+    // Snap to 0.5 grid; Y stays at player foot level by default
+    pos.x = Math.round(pos.x * 2) / 2;
+    pos.y = Math.round((this.playerPosition.y - GAME_CONSTANTS.PLAYER_HEIGHT) * 2) / 2;
+    pos.z = Math.round(pos.z * 2) / 2;
+    this.platformEditorPreviewMesh.position.copy(pos);
+  }
+
+  placePlatformAtPreview() {
+    if (!this.platformEditorPreviewMesh) return;
+    const pos = this.platformEditorPreviewMesh.position;
+    const p = {
+      x: pos.x, y: pos.y, z: pos.z,
+      w: this.platformEditorSize.w,
+      h: this.platformEditorSize.h,
+      d: this.platformEditorSize.d,
+    };
+    this.spawnPlatformMesh(p);
+    this.jumpPlatforms.push(p);
+    this.updatePlatformEditorCount();
+  }
+
+  undoLastPlatform() {
+    if (this.jumpPlatforms.length === 0) return;
+    this.jumpPlatforms.pop();
+    const mesh = this.jumpPlatformMeshes.pop();
+    if (mesh) {
+      this.scene.remove(mesh);
+      mesh.geometry.dispose();
+      mesh.material.dispose();
+    }
+    this.updatePlatformEditorCount();
+  }
+
+  spawnPlatformMesh(p) {
+    const geo = new THREE.BoxGeometry(p.w, p.h, p.d);
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0x00e5cc,
+      emissive: 0x00e5cc,
+      emissiveIntensity: 0.32,
+      roughness: 0.3,
+      metalness: 0.1,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(p.x, p.y, p.z);
+    mesh.receiveShadow = true;
+    this.scene.add(mesh);
+    this.jumpPlatformMeshes.push(mesh);
+  }
+
+  loadSavedPlatforms() {
+    // If connected to server, server will push platform:state on join — skip localStorage load.
+    // Offline / local host: load from localStorage as fallback.
+    if (this.socket && this.networkConnected) return;
+    try {
+      const saved = localStorage.getItem("jumpPlatforms_v1");
+      if (!saved) return;
+      const platforms = JSON.parse(saved);
+      if (!Array.isArray(platforms)) return;
+      for (const p of platforms) {
+        if (typeof p.x !== "number" || typeof p.y !== "number" || typeof p.z !== "number") continue;
+        this.spawnPlatformMesh(p);
+        this.jumpPlatforms.push(p);
+      }
+      this.updatePlatformEditorCount();
+    } catch {
+      // ignore
+    }
+  }
+
+  applyPlatformState(rawPlatforms) {
+    // Clear existing platform meshes
+    for (const mesh of this.jumpPlatformMeshes) {
+      this.scene.remove(mesh);
+      mesh.geometry.dispose();
+      mesh.material.dispose();
+    }
+    this.jumpPlatforms = [];
+    this.jumpPlatformMeshes = [];
+
+    const platforms = Array.isArray(rawPlatforms) ? rawPlatforms : [];
+    for (const p of platforms) {
+      if (typeof p.x !== "number") continue;
+      this.spawnPlatformMesh(p);
+      this.jumpPlatforms.push(p);
+    }
+    this.updatePlatformEditorCount();
+
+    // Also persist locally as backup
+    try {
+      localStorage.setItem("jumpPlatforms_v1", JSON.stringify(this.jumpPlatforms));
+    } catch {
+      // ignore
+    }
+  }
+
+  savePlatforms() {
+    try {
+      localStorage.setItem("jumpPlatforms_v1", JSON.stringify(this.jumpPlatforms));
+    } catch {
+      // ignore
+    }
+    // Sync to server so all players see the platforms
+    if (this.socket && this.networkConnected) {
+      this.socket.emit("platform:state:set", { platforms: this.jumpPlatforms });
+    }
+  }
+
+  updatePlatformEditorCount() {
+    if (this.platformEditorCountEl) {
+      this.platformEditorCountEl.textContent = `발판: ${this.jumpPlatforms.length}개`;
+    }
   }
 }
