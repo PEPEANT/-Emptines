@@ -252,8 +252,11 @@
       </div>
     </div>
 
-    <div id="promo-panel" aria-label="내 홍보 오브젝트">
-      <div id="promo-panel-title">내 홍보 오브젝트 (1인 1개)</div>
+    <div id="promo-panel" class="hidden" aria-label="내 홍보 오브젝트">
+      <div class="promo-panel-head">
+        <div id="promo-panel-title">내 홍보 오브젝트 (1인 1개)</div>
+        <button id="promo-panel-close" class="hidden" type="button">닫기</button>
+      </div>
       <div class="promo-panel-row">
         <label for="promo-scale">크기</label>
         <input id="promo-scale" type="range" min="0.35" max="8" step="0.05" value="1" />
@@ -271,6 +274,20 @@
         <input id="promo-allow-others-draw" type="checkbox" />
         다른 플레이어 내 오브젝트 수정(그리기) 허용
       </label>
+      <label class="promo-panel-label" for="promo-draw-canvas">캔버스(네모 오브젝트 확장판)</label>
+      <div id="promo-draw-wrap">
+        <canvas id="promo-draw-canvas" width="1024" height="576" aria-label="홍보 오브젝트 캔버스"></canvas>
+      </div>
+      <div class="promo-panel-row">
+        <label for="promo-draw-color">색상</label>
+        <input id="promo-draw-color" type="color" value="#1a1a1a" />
+        <input id="promo-draw-size" type="range" min="2" max="40" step="1" value="10" />
+      </div>
+      <div class="promo-panel-actions">
+        <button id="promo-draw-clear-btn" type="button">캔버스 초기화</button>
+        <button id="promo-draw-apply-btn" type="button">캔버스 적용</button>
+      </div>
+      <p id="promo-draw-help">캔버스에 그리면 네모 오브젝트 화면으로 저장됩니다</p>
       <label class="promo-panel-label">미디어(이미지/영상)</label>
       <div class="promo-panel-actions">
         <button id="promo-media-pick-btn" type="button">파일/갤러리 선택</button>

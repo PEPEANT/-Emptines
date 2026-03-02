@@ -285,6 +285,13 @@ export class GameRuntime {
       name: ""
     };
     this.promoMediaRemoved = false;
+    this.promoPanelMobileOpen = false;
+    this.promoDrawContext = null;
+    this.promoDrawCanvasInitialized = false;
+    this.promoDrawPointerId = null;
+    this.promoDrawDrawing = false;
+    this.promoDrawLastX = 0;
+    this.promoDrawLastY = 0;
     this.nearestPromoLinkObject = null;
     this.surfacePaintRaycaster = new THREE.Raycaster();
     this.surfacePaintAimPoint = new THREE.Vector2(0, 0);
@@ -553,10 +560,17 @@ export class GameRuntime {
     this.surfacePainterApplyAllEl = document.getElementById("surface-painter-apply-all");
     this.surfacePainterContext = this.surfacePainterCanvasEl?.getContext?.("2d") ?? null;
     this.promoPanelEl = document.getElementById("promo-panel");
+    this.promoPanelCloseBtnEl = document.getElementById("promo-panel-close");
     this.promoScaleInputEl = document.getElementById("promo-scale");
     this.promoScaleValueEl = document.getElementById("promo-scale-value");
     this.promoLinkInputEl = document.getElementById("promo-link-url");
     this.promoAllowOthersDrawEl = document.getElementById("promo-allow-others-draw");
+    this.promoDrawCanvasEl = document.getElementById("promo-draw-canvas");
+    this.promoDrawColorInputEl = document.getElementById("promo-draw-color");
+    this.promoDrawSizeInputEl = document.getElementById("promo-draw-size");
+    this.promoDrawClearBtnEl = document.getElementById("promo-draw-clear-btn");
+    this.promoDrawApplyBtnEl = document.getElementById("promo-draw-apply-btn");
+    this.promoDrawHelpEl = document.getElementById("promo-draw-help");
     this.promoMediaPickBtnEl = document.getElementById("promo-media-pick-btn");
     this.promoMediaFolderBtnEl = document.getElementById("promo-media-folder-btn");
     this.promoMediaClearBtnEl = document.getElementById("promo-media-clear-btn");
@@ -6180,6 +6194,10 @@ export class GameRuntime {
     if (typeof document !== "undefined" && document.body) {
       document.body.classList.toggle("mobile-portrait-lock", portraitBlocked);
     }
+    if (portraitBlocked && this.promoPanelMobileOpen) {
+      this.promoPanelMobileOpen = false;
+      this.syncPromoPanelUi();
+    }
     if (portraitBlocked && this.chatOpen) {
       this.setChatOpen(false);
       return;
@@ -6188,6 +6206,7 @@ export class GameRuntime {
       this.mobileEnabled &&
       !portraitBlocked &&
       !this.chatOpen &&
+      !this.promoPanelMobileOpen &&
       this.canMovePlayer() &&
       !this.surfacePainterOpen &&
       !this.bootIntroVideoPlaying &&
@@ -6207,6 +6226,7 @@ export class GameRuntime {
     if (!visible) {
       this.resetMobileControlInputState();
     }
+    this.syncPromoPanelUi();
     this.syncChatLiveUi();
   }
 
@@ -8045,8 +8065,203 @@ export class GameRuntime {
     return nearest;
   }
 
+  setPromoPanelMobileOpen(nextOpen, { syncMobileUi = true } = {}) {
+    const shouldOpen =
+      Boolean(nextOpen) &&
+      this.mobileEnabled &&
+      !this.isMobilePortraitBlocked() &&
+      !this.surfacePainterOpen &&
+      !this.chatOpen;
+    if (this.promoPanelMobileOpen === shouldOpen) {
+      this.syncPromoPanelUi();
+      if (syncMobileUi) {
+        this.syncMobileUiState();
+      }
+      return;
+    }
+    this.promoPanelMobileOpen = shouldOpen;
+    if (shouldOpen) {
+      this.chatInputEl?.blur?.();
+      this.resetMobileControlInputState();
+      if (typeof document !== "undefined" && document.pointerLockElement === this.renderer.domElement) {
+        document.exitPointerLock?.();
+      }
+    }
+    this.syncPromoPanelUi();
+    if (syncMobileUi) {
+      this.syncMobileUiState();
+    }
+  }
+
+  initPromoDrawCanvasIfNeeded() {
+    if (!this.promoDrawCanvasEl) {
+      return;
+    }
+    if (!this.promoDrawContext) {
+      this.promoDrawContext = this.promoDrawCanvasEl.getContext("2d");
+    }
+    if (!this.promoDrawContext || this.promoDrawCanvasInitialized) {
+      return;
+    }
+    const context = this.promoDrawContext;
+    const canvas = this.promoDrawCanvasEl;
+    context.fillStyle = "#707782";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.strokeStyle = "rgba(20, 28, 36, 0.72)";
+    context.lineWidth = 6;
+    context.strokeRect(0, 0, canvas.width, canvas.height);
+    this.promoDrawCanvasInitialized = true;
+  }
+
+  clearPromoDrawCanvas({ announce = false } = {}) {
+    this.initPromoDrawCanvasIfNeeded();
+    if (!this.promoDrawContext || !this.promoDrawCanvasEl) {
+      return;
+    }
+    const context = this.promoDrawContext;
+    const canvas = this.promoDrawCanvasEl;
+    context.fillStyle = "#707782";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.strokeStyle = "rgba(20, 28, 36, 0.72)";
+    context.lineWidth = 6;
+    context.strokeRect(0, 0, canvas.width, canvas.height);
+    this.applyPromoDrawCanvasToMedia({ announce: false });
+    if (announce) {
+      this.appendChatLine("", "캔버스를 초기화했습니다.", "system");
+    }
+  }
+
+  getPromoDrawCanvasPoint(clientX, clientY) {
+    if (!this.promoDrawCanvasEl) {
+      return null;
+    }
+    const rect = this.promoDrawCanvasEl.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return null;
+    }
+    const nx = (clientX - rect.left) / rect.width;
+    const ny = (clientY - rect.top) / rect.height;
+    return {
+      x: THREE.MathUtils.clamp(nx, 0, 1) * this.promoDrawCanvasEl.width,
+      y: THREE.MathUtils.clamp(ny, 0, 1) * this.promoDrawCanvasEl.height
+    };
+  }
+
+  drawPromoCanvasSegment(fromX, fromY, toX, toY) {
+    if (!this.promoDrawContext) {
+      return;
+    }
+    const brushColor = String(this.promoDrawColorInputEl?.value ?? "#1a1a1a");
+    const brushSize = THREE.MathUtils.clamp(Number(this.promoDrawSizeInputEl?.value) || 10, 2, 40);
+    this.promoDrawContext.save();
+    this.promoDrawContext.globalCompositeOperation = "source-over";
+    this.promoDrawContext.strokeStyle = brushColor;
+    this.promoDrawContext.lineWidth = brushSize;
+    this.promoDrawContext.lineCap = "round";
+    this.promoDrawContext.lineJoin = "round";
+    this.promoDrawContext.beginPath();
+    this.promoDrawContext.moveTo(fromX, fromY);
+    this.promoDrawContext.lineTo(toX, toY);
+    this.promoDrawContext.stroke();
+    this.promoDrawContext.restore();
+  }
+
+  beginPromoDrawStrokeAt(clientX, clientY, pointerId) {
+    if (!this.promoDrawCanvasEl || !this.promoPanelEl || this.promoPanelEl.classList.contains("hidden")) {
+      return;
+    }
+    if (this.promoDrawColorInputEl?.disabled || this.promoDrawSizeInputEl?.disabled) {
+      return;
+    }
+    this.initPromoDrawCanvasIfNeeded();
+    const point = this.getPromoDrawCanvasPoint(clientX, clientY);
+    if (!point) {
+      return;
+    }
+    this.promoDrawDrawing = true;
+    this.promoDrawPointerId = pointerId;
+    this.promoDrawLastX = point.x;
+    this.promoDrawLastY = point.y;
+    this.promoDrawCanvasEl.setPointerCapture?.(pointerId);
+    this.drawPromoCanvasSegment(point.x, point.y, point.x, point.y);
+  }
+
+  continuePromoDrawStrokeAt(clientX, clientY, pointerId) {
+    if (!this.promoDrawDrawing || pointerId !== this.promoDrawPointerId) {
+      return;
+    }
+    const point = this.getPromoDrawCanvasPoint(clientX, clientY);
+    if (!point) {
+      return;
+    }
+    this.drawPromoCanvasSegment(this.promoDrawLastX, this.promoDrawLastY, point.x, point.y);
+    this.promoDrawLastX = point.x;
+    this.promoDrawLastY = point.y;
+  }
+
+  endPromoDrawStroke(pointerId) {
+    if (!this.promoDrawDrawing || pointerId !== this.promoDrawPointerId) {
+      return;
+    }
+    this.promoDrawCanvasEl?.releasePointerCapture?.(pointerId);
+    this.promoDrawDrawing = false;
+    this.promoDrawPointerId = null;
+    this.applyPromoDrawCanvasToMedia({ announce: false });
+  }
+
+  applyPromoDrawCanvasToMedia({ announce = false } = {}) {
+    if (!this.promoDrawCanvasEl) {
+      return;
+    }
+    let dataUrl = "";
+    try {
+      dataUrl = this.promoDrawCanvasEl.toDataURL("image/png");
+    } catch {
+      dataUrl = "";
+    }
+    if (!dataUrl || !dataUrl.startsWith("data:image/png;base64,")) {
+      return;
+    }
+    this.promoPendingMedia = {
+      dataUrl,
+      kind: "image",
+      name: "promo-canvas.png"
+    };
+    this.promoMediaRemoved = false;
+    if (announce) {
+      this.appendChatLine("", "캔버스 이미지를 미디어로 적용했습니다.", "system");
+    }
+    this.syncPromoPanelUi();
+  }
+
   syncPromoPanelUi() {
     this.resolveUiElements();
+    let mobilePanelVisible =
+      this.mobileEnabled &&
+      this.promoPanelMobileOpen &&
+      !this.isMobilePortraitBlocked() &&
+      !this.surfacePainterOpen &&
+      !this.chatOpen &&
+      !this.bootIntroVideoPlaying &&
+      this.flowStage !== "portal_transfer" &&
+      (this.nicknameGateEl?.classList.contains("hidden") ?? true) &&
+      (this.npcChoiceGateEl?.classList.contains("hidden") ?? true);
+    if (this.mobileEnabled && this.promoPanelMobileOpen && !mobilePanelVisible) {
+      this.promoPanelMobileOpen = false;
+      mobilePanelVisible = false;
+    }
+    const panelVisible = !this.mobileEnabled || mobilePanelVisible;
+    if (this.promoPanelEl) {
+      this.promoPanelEl.classList.toggle("hidden", !panelVisible);
+      this.promoPanelEl.classList.toggle("mobile-fullscreen", Boolean(this.mobileEnabled && panelVisible));
+    }
+    if (this.promoPanelCloseBtnEl) {
+      this.promoPanelCloseBtnEl.classList.toggle("hidden", !(this.mobileEnabled && panelVisible));
+    }
+    if (this.mobilePromoPlaceBtnEl) {
+      this.mobilePromoPlaceBtnEl.classList.toggle("active", Boolean(this.mobileEnabled && panelVisible));
+    }
+
     const connected = Boolean(this.socket && this.networkConnected);
     const busy = this.promoSetInFlight || this.promoRemoveInFlight;
     const own = this.getOwnPromoObject();
@@ -8080,6 +8295,12 @@ export class GameRuntime {
         this.promoMediaHelpEl.textContent = "파일에서 이미지/영상 선택 후 저장";
       }
     }
+    if (this.promoDrawHelpEl) {
+      this.promoDrawHelpEl.textContent = "네모 캔버스에 그리면 오브젝트 화면으로 저장됩니다";
+    }
+    if (panelVisible) {
+      this.initPromoDrawCanvasIfNeeded();
+    }
 
     if (this.promoScaleInputEl && document.activeElement !== this.promoScaleInputEl) {
       this.promoScaleInputEl.value = String(scaleValue.toFixed(2));
@@ -8112,6 +8333,10 @@ export class GameRuntime {
     this.promoScaleInputEl && (this.promoScaleInputEl.disabled = disabled);
     this.promoLinkInputEl && (this.promoLinkInputEl.disabled = disabled);
     this.promoAllowOthersDrawEl && (this.promoAllowOthersDrawEl.disabled = disabled);
+    this.promoDrawColorInputEl && (this.promoDrawColorInputEl.disabled = disabled);
+    this.promoDrawSizeInputEl && (this.promoDrawSizeInputEl.disabled = disabled);
+    this.promoDrawClearBtnEl && (this.promoDrawClearBtnEl.disabled = disabled);
+    this.promoDrawApplyBtnEl && (this.promoDrawApplyBtnEl.disabled = disabled);
     this.promoMediaPickBtnEl && (this.promoMediaPickBtnEl.disabled = disabled);
     this.promoMediaFolderBtnEl && (this.promoMediaFolderBtnEl.disabled = disabled || !showFolderPicker);
     this.promoMediaClearBtnEl && (this.promoMediaClearBtnEl.disabled = disabled);
@@ -8471,7 +8696,12 @@ export class GameRuntime {
     if (!this.promoLinkPromptEl) {
       return;
     }
-    if (this.isMobilePortraitBlocked() || this.surfacePainterOpen || !this.canMovePlayer()) {
+    if (
+      this.isMobilePortraitBlocked() ||
+      this.surfacePainterOpen ||
+      (this.mobileEnabled && this.promoPanelMobileOpen) ||
+      !this.canMovePlayer()
+    ) {
       this.nearestPromoLinkObject = null;
       this.promoLinkPromptEl.classList.add("hidden");
       return;
@@ -10148,6 +10378,21 @@ export class GameRuntime {
       if (clickedGraphicsToggle || clickedGraphicsPanel) {
         return;
       }
+      const clickedPromoPanel = Boolean(
+        target &&
+          this.promoPanelEl &&
+          typeof this.promoPanelEl.contains === "function" &&
+          this.promoPanelEl.contains(target)
+      );
+      const clickedPromoPrompt = Boolean(
+        target &&
+          this.promoLinkPromptEl &&
+          typeof this.promoLinkPromptEl.contains === "function" &&
+          this.promoLinkPromptEl.contains(target)
+      );
+      if (clickedPromoPanel || clickedPromoPrompt) {
+        return;
+      }
 
       if (this.isTextInputTarget(target)) {
         return;
@@ -10514,7 +10759,7 @@ export class GameRuntime {
         if (!this.mobileEnabled || !this.canMovePlayer()) {
           return;
         }
-        this.requestPromoUpsert({ placeInFront: true });
+        this.setPromoPanelMobileOpen(true);
       });
     }
     if (this.promoScaleInputEl) {
@@ -10572,6 +10817,32 @@ export class GameRuntime {
     }
     this.promoOpenLinkBtnEl?.addEventListener("click", () => {
       this.openNearestPromoLink();
+    });
+    this.promoPanelCloseBtnEl?.addEventListener("click", () => {
+      this.setPromoPanelMobileOpen(false);
+    });
+    if (this.promoDrawCanvasEl) {
+      this.promoDrawCanvasEl.addEventListener("pointerdown", (event) => {
+        this.beginPromoDrawStrokeAt(event.clientX, event.clientY, event.pointerId);
+      });
+      this.promoDrawCanvasEl.addEventListener("pointermove", (event) => {
+        this.continuePromoDrawStrokeAt(event.clientX, event.clientY, event.pointerId);
+      });
+      this.promoDrawCanvasEl.addEventListener("pointerup", (event) => {
+        this.endPromoDrawStroke(event.pointerId);
+      });
+      this.promoDrawCanvasEl.addEventListener("pointercancel", (event) => {
+        this.endPromoDrawStroke(event.pointerId);
+      });
+      this.promoDrawCanvasEl.addEventListener("pointerleave", (event) => {
+        this.endPromoDrawStroke(event.pointerId);
+      });
+    }
+    this.promoDrawClearBtnEl?.addEventListener("click", () => {
+      this.clearPromoDrawCanvas({ announce: true });
+    });
+    this.promoDrawApplyBtnEl?.addEventListener("click", () => {
+      this.applyPromoDrawCanvasToMedia({ announce: true });
     });
 
     if (this.hostOpenPortalBtnEl) {
@@ -11166,6 +11437,9 @@ export class GameRuntime {
     if (!this.promoPanelEl) {
       this.promoPanelEl = document.getElementById("promo-panel");
     }
+    if (!this.promoPanelCloseBtnEl) {
+      this.promoPanelCloseBtnEl = document.getElementById("promo-panel-close");
+    }
     if (!this.promoScaleInputEl) {
       this.promoScaleInputEl = document.getElementById("promo-scale");
     }
@@ -11177,6 +11451,24 @@ export class GameRuntime {
     }
     if (!this.promoAllowOthersDrawEl) {
       this.promoAllowOthersDrawEl = document.getElementById("promo-allow-others-draw");
+    }
+    if (!this.promoDrawCanvasEl) {
+      this.promoDrawCanvasEl = document.getElementById("promo-draw-canvas");
+    }
+    if (!this.promoDrawColorInputEl) {
+      this.promoDrawColorInputEl = document.getElementById("promo-draw-color");
+    }
+    if (!this.promoDrawSizeInputEl) {
+      this.promoDrawSizeInputEl = document.getElementById("promo-draw-size");
+    }
+    if (!this.promoDrawClearBtnEl) {
+      this.promoDrawClearBtnEl = document.getElementById("promo-draw-clear-btn");
+    }
+    if (!this.promoDrawApplyBtnEl) {
+      this.promoDrawApplyBtnEl = document.getElementById("promo-draw-apply-btn");
+    }
+    if (!this.promoDrawHelpEl) {
+      this.promoDrawHelpEl = document.getElementById("promo-draw-help");
     }
     if (!this.promoMediaPickBtnEl) {
       this.promoMediaPickBtnEl = document.getElementById("promo-media-pick-btn");
