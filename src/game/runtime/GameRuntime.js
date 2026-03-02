@@ -89,6 +89,11 @@ const A_ZONE_FIXED_PORTAL_IMAGE_URL = new URL("../../../png/REC_FPS.png", import
 const BOX_FACE_KEYS = ["px", "nx", "py", "ny", "pz", "nz"];
 const NPC_GREETING_SESSION_KEY = "emptines_npc_greeting_seen_v1";
 const CITY_AD_BILLBOARD_BASE_PREFIX = "city_ad_board_";
+const OBJECT_EDITOR_SETTINGS_STORAGE_KEY = "objectEditorSettings_v1";
+const OBJECT_EDITOR_MIN_LIMIT = 1;
+const OBJECT_EDITOR_MAX_LIMIT = 10000;
+const OBJECT_EDITOR_MIN_SCALE = 0.25;
+const OBJECT_EDITOR_MAX_SCALE = 8;
 
 function resolveRuntimeAssetUrl(relativePath) {
   const normalized = String(relativePath ?? "").trim().replace(/^\/+/, "");
@@ -246,13 +251,24 @@ export class GameRuntime {
     this.jumpPlatformMeshes = [];
     this.flyModeActive = false;
     this.platformEditorPreviewMesh = null;
-    this.platformEditorSize = { w: 3, h: 0.3, d: 3 };
+    this.platformEditorBaseSize = { w: 3, h: 0.3, d: 3 };
+    this.ropeEditorBaseHeight = 4;
+    this.objectEditorSettingsStorageKey = OBJECT_EDITOR_SETTINGS_STORAGE_KEY;
+    this.objectEditorSettings = {
+      platformLimit: 400,
+      ropeLimit: 200,
+      platformScale: 1,
+      ropeScale: 1,
+      updatedAt: Date.now()
+    };
+    this.editorSettingsSetInFlight = false;
+    this.platformEditorSize = { ...this.platformEditorBaseSize };
     this.platformEditorDist = 4;
     this.jumpRopes = [];
     this.jumpRopeMeshes = [];
     this.climbingRope = null;
     this.editorMode = "platform";
-    this.ropeEditorHeight = 4;
+    this.ropeEditorHeight = this.ropeEditorBaseHeight;
     this.ropeEditorPreviewMesh = null;
     this.surfacePaintRaycaster = new THREE.Raycaster();
     this.surfacePaintAimPoint = new THREE.Vector2(0, 0);
@@ -525,6 +541,13 @@ export class GameRuntime {
     this.platformEditorClearBtnEl = document.getElementById("platform-editor-clear");
     this.platformEditorCountEl = document.getElementById("platform-editor-count");
     this.ropeEditorCountEl = document.getElementById("rope-editor-count");
+    this.editorPlatformLimitInputEl = document.getElementById("editor-platform-limit");
+    this.editorRopeLimitInputEl = document.getElementById("editor-rope-limit");
+    this.editorPlatformScaleInputEl = document.getElementById("editor-platform-scale");
+    this.editorRopeScaleInputEl = document.getElementById("editor-rope-scale");
+    this.editorPlatformScaleValueEl = document.getElementById("editor-platform-scale-value");
+    this.editorRopeScaleValueEl = document.getElementById("editor-rope-scale-value");
+    this.editorSettingsApplyBtnEl = document.getElementById("editor-settings-apply");
     this.ropeClimbPromptEl = document.getElementById("rope-climb-prompt");
     this.editorModePlatformBtnEl = document.getElementById("editor-mode-platform");
     this.editorModeRopeBtnEl = document.getElementById("editor-mode-rope");
@@ -716,6 +739,8 @@ export class GameRuntime {
     this.hideNicknameGate();
     this.hideNpcChoiceGate();
     this.syncGraphicsControlsUi();
+    this.loadSavedObjectEditorSettings();
+    this.applyObjectEditorSettings(this.objectEditorSettings, { persistLocal: false, syncUi: true });
 
     this.setupWorld();
     this.setupHubFlowWorld();
@@ -7570,7 +7595,8 @@ export class GameRuntime {
       this.leftBillboardSetInFlight ||
       this.rightBillboardResetInFlight ||
       this.hostMusicSetInFlight ||
-      this.securityTestSetInFlight;
+      this.securityTestSetInFlight ||
+      this.editorSettingsSetInFlight;
 
     this.hostControlsEl.classList.toggle("hidden", !visible || !this.hostControlsOpen);
     if (this.hostOpenPortalBtnEl) {
@@ -7638,10 +7664,224 @@ export class GameRuntime {
     if (this.hostMusicStopBtnEl) {
       this.hostMusicStopBtnEl.disabled = controlsBusy;
     }
+    if (this.editorPlatformLimitInputEl) {
+      this.editorPlatformLimitInputEl.disabled = controlsBusy;
+    }
+    if (this.editorRopeLimitInputEl) {
+      this.editorRopeLimitInputEl.disabled = controlsBusy;
+    }
+    if (this.editorPlatformScaleInputEl) {
+      this.editorPlatformScaleInputEl.disabled = controlsBusy;
+    }
+    if (this.editorRopeScaleInputEl) {
+      this.editorRopeScaleInputEl.disabled = controlsBusy;
+    }
+    if (this.editorSettingsApplyBtnEl) {
+      this.editorSettingsApplyBtnEl.disabled = controlsBusy;
+    }
+    this.syncObjectEditorSettingsUi();
     for (const button of this.hostRightVideoQuickButtons ?? []) {
       button.disabled = controlsBusy;
     }
     this.syncRightBillboardHostUi();
+  }
+
+  getDefaultObjectEditorSettings() {
+    return {
+      platformLimit: 400,
+      ropeLimit: 200,
+      platformScale: 1,
+      ropeScale: 1,
+      updatedAt: Date.now()
+    };
+  }
+
+  normalizeObjectEditorSettings(raw = {}, fallbackRaw = null) {
+    const fallback =
+      fallbackRaw && typeof fallbackRaw === "object"
+        ? fallbackRaw
+        : this.getDefaultObjectEditorSettings();
+
+    const pickLimit = (value, fallbackValue) => {
+      const parsed = Math.trunc(Number(value));
+      const safe = Number.isFinite(parsed) ? parsed : Math.trunc(Number(fallbackValue) || 0);
+      return THREE.MathUtils.clamp(safe, OBJECT_EDITOR_MIN_LIMIT, OBJECT_EDITOR_MAX_LIMIT);
+    };
+    const pickScale = (value, fallbackValue) => {
+      const parsed = Number(value);
+      const safe = Number.isFinite(parsed) ? parsed : Number(fallbackValue) || 1;
+      return THREE.MathUtils.clamp(safe, OBJECT_EDITOR_MIN_SCALE, OBJECT_EDITOR_MAX_SCALE);
+    };
+
+    const updatedAtRaw = Math.trunc(Number(raw?.updatedAt));
+    const fallbackUpdatedAt = Math.trunc(Number(fallback?.updatedAt) || Date.now());
+    const updatedAt = Math.max(
+      0,
+      Number.isFinite(updatedAtRaw) ? updatedAtRaw : fallbackUpdatedAt
+    );
+
+    return {
+      platformLimit: pickLimit(raw?.platformLimit, fallback?.platformLimit),
+      ropeLimit: pickLimit(raw?.ropeLimit, fallback?.ropeLimit),
+      platformScale: pickScale(raw?.platformScale, fallback?.platformScale),
+      ropeScale: pickScale(raw?.ropeScale, fallback?.ropeScale),
+      updatedAt
+    };
+  }
+
+  persistObjectEditorSettingsLocally() {
+    try {
+      localStorage.setItem(
+        this.objectEditorSettingsStorageKey,
+        JSON.stringify(this.objectEditorSettings)
+      );
+    } catch {
+      // ignore
+    }
+  }
+
+  loadSavedObjectEditorSettings() {
+    try {
+      const raw = localStorage.getItem(this.objectEditorSettingsStorageKey);
+      if (!raw) {
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      const normalized = this.normalizeObjectEditorSettings(parsed, this.objectEditorSettings);
+      this.objectEditorSettings = normalized;
+    } catch {
+      // ignore
+    }
+  }
+
+  refreshObjectEditorPreviewGeometry() {
+    if (this.platformEditorPreviewMesh) {
+      this.platformEditorPreviewMesh.geometry.dispose();
+      this.platformEditorPreviewMesh.geometry = new THREE.BoxGeometry(
+        this.platformEditorSize.w,
+        this.platformEditorSize.h,
+        this.platformEditorSize.d
+      );
+    }
+    if (this.ropeEditorPreviewMesh) {
+      this.ropeEditorPreviewMesh.geometry.dispose();
+      this.ropeEditorPreviewMesh.geometry = new THREE.CylinderGeometry(
+        0.07,
+        0.07,
+        this.ropeEditorHeight,
+        8
+      );
+    }
+  }
+
+  syncObjectEditorSettingsUi() {
+    this.resolveUiElements();
+    const settings = this.normalizeObjectEditorSettings(this.objectEditorSettings);
+    if (this.editorPlatformLimitInputEl && document.activeElement !== this.editorPlatformLimitInputEl) {
+      this.editorPlatformLimitInputEl.value = String(settings.platformLimit);
+    }
+    if (this.editorRopeLimitInputEl && document.activeElement !== this.editorRopeLimitInputEl) {
+      this.editorRopeLimitInputEl.value = String(settings.ropeLimit);
+    }
+    if (this.editorPlatformScaleInputEl && document.activeElement !== this.editorPlatformScaleInputEl) {
+      this.editorPlatformScaleInputEl.value = settings.platformScale.toFixed(2);
+    }
+    if (this.editorRopeScaleInputEl && document.activeElement !== this.editorRopeScaleInputEl) {
+      this.editorRopeScaleInputEl.value = settings.ropeScale.toFixed(2);
+    }
+    if (this.editorPlatformScaleValueEl) {
+      this.editorPlatformScaleValueEl.textContent = `${settings.platformScale.toFixed(2)}x`;
+    }
+    if (this.editorRopeScaleValueEl) {
+      this.editorRopeScaleValueEl.textContent = `${settings.ropeScale.toFixed(2)}x`;
+    }
+  }
+
+  applyObjectEditorSettings(
+    rawSettings = {},
+    { persistLocal = true, syncUi = true, forceScaleApply = false } = {}
+  ) {
+    const previous = this.normalizeObjectEditorSettings(this.objectEditorSettings);
+    const normalized = this.normalizeObjectEditorSettings(rawSettings, previous);
+    const platformScaleChanged =
+      Math.abs((normalized.platformScale || 1) - (previous.platformScale || 1)) > 0.0001;
+    const ropeScaleChanged =
+      Math.abs((normalized.ropeScale || 1) - (previous.ropeScale || 1)) > 0.0001;
+
+    this.objectEditorSettings = normalized;
+
+    if (forceScaleApply || platformScaleChanged) {
+      this.platformEditorSize = {
+        w: this.platformEditorBaseSize.w * normalized.platformScale,
+        h: Math.max(0.05, this.platformEditorBaseSize.h * normalized.platformScale),
+        d: this.platformEditorBaseSize.d * normalized.platformScale
+      };
+    }
+    if (forceScaleApply || ropeScaleChanged) {
+      this.ropeEditorHeight = THREE.MathUtils.clamp(
+        this.ropeEditorBaseHeight * normalized.ropeScale,
+        0.5,
+        50
+      );
+    }
+    if (forceScaleApply || platformScaleChanged || ropeScaleChanged) {
+      this.refreshObjectEditorPreviewGeometry();
+    }
+
+    if (persistLocal) {
+      this.persistObjectEditorSettingsLocally();
+    }
+    if (syncUi) {
+      this.syncObjectEditorSettingsUi();
+    }
+    this.updatePlatformEditorCount();
+    this.updateRopeEditorCount();
+  }
+
+  requestObjectEditorSettingsUpdate(rawSettings = {}, { announceErrors = true } = {}) {
+    if (!this.hasHostPrivilege()) {
+      return false;
+    }
+
+    const nextSettings = this.normalizeObjectEditorSettings(rawSettings, this.objectEditorSettings);
+
+    if (!(this.socket && this.networkConnected)) {
+      this.applyObjectEditorSettings(nextSettings, {
+        persistLocal: true,
+        syncUi: true,
+        forceScaleApply: true
+      });
+      return true;
+    }
+
+    this.editorSettingsSetInFlight = true;
+    this.syncHostControls();
+    this.socket.emit(
+      "editor:settings:set",
+      { settings: nextSettings },
+      (response = {}) => {
+        this.editorSettingsSetInFlight = false;
+        if (!response?.ok) {
+          if (announceErrors) {
+            this.appendChatLine("", `에디터 값 적용 실패: ${String(response?.error ?? "unknown")}`, "system");
+          }
+          this.syncHostControls();
+          return;
+        }
+        this.applyObjectEditorSettings(
+          response?.settings && typeof response.settings === "object"
+            ? response.settings
+            : nextSettings,
+          {
+            persistLocal: true,
+            syncUi: true,
+            forceScaleApply: true
+          }
+        );
+        this.syncHostControls();
+      }
+    );
+    return true;
   }
 
   normalizePortalSchedule(raw = {}) {
@@ -9362,7 +9602,7 @@ export class GameRuntime {
       if (!this.pointerLocked) return;
       event.preventDefault();
       if (this.editorMode === "rope") {
-        this.ropeEditorHeight = Math.max(1, Math.min(20, this.ropeEditorHeight - event.deltaY * 0.005));
+        this.ropeEditorHeight = Math.max(0.5, Math.min(50, this.ropeEditorHeight - event.deltaY * 0.005));
         if (this.ropeEditorPreviewMesh) {
           this.ropeEditorPreviewMesh.geometry.dispose();
           this.ropeEditorPreviewMesh.geometry = new THREE.CylinderGeometry(0.07, 0.07, this.ropeEditorHeight, 8);
@@ -9911,6 +10151,53 @@ export class GameRuntime {
       this.setSurfacePainterEraserEnabled(!this.surfacePainterEraserEnabled);
     });
 
+    const applyEditorSettingsFromPanel = () => {
+      const platformLimit = Math.trunc(Number(this.editorPlatformLimitInputEl?.value));
+      const ropeLimit = Math.trunc(Number(this.editorRopeLimitInputEl?.value));
+      const platformScale = Number(this.editorPlatformScaleInputEl?.value);
+      const ropeScale = Number(this.editorRopeScaleInputEl?.value);
+      this.requestObjectEditorSettingsUpdate(
+        {
+          platformLimit,
+          ropeLimit,
+          platformScale,
+          ropeScale,
+          updatedAt: Date.now()
+        },
+        { announceErrors: true }
+      );
+    };
+
+    this.editorSettingsApplyBtnEl?.addEventListener("click", () => {
+      applyEditorSettingsFromPanel();
+    });
+    this.editorPlatformLimitInputEl?.addEventListener("keydown", (event) => {
+      if (event.code !== "Enter") {
+        return;
+      }
+      event.preventDefault();
+      applyEditorSettingsFromPanel();
+    });
+    this.editorRopeLimitInputEl?.addEventListener("keydown", (event) => {
+      if (event.code !== "Enter") {
+        return;
+      }
+      event.preventDefault();
+      applyEditorSettingsFromPanel();
+    });
+    this.editorPlatformScaleInputEl?.addEventListener("input", () => {
+      const value = Number(this.editorPlatformScaleInputEl?.value);
+      if (this.editorPlatformScaleValueEl && Number.isFinite(value)) {
+        this.editorPlatformScaleValueEl.textContent = `${value.toFixed(2)}x`;
+      }
+    });
+    this.editorRopeScaleInputEl?.addEventListener("input", () => {
+      const value = Number(this.editorRopeScaleInputEl?.value);
+      if (this.editorRopeScaleValueEl && Number.isFinite(value)) {
+        this.editorRopeScaleValueEl.textContent = `${value.toFixed(2)}x`;
+      }
+    });
+
     this.platformEditorSaveBtnEl?.addEventListener("click", () => {
       this.savePlatforms();
       this.saveRopes();
@@ -10196,6 +10483,33 @@ export class GameRuntime {
     }
     if (!this.objEditorInfoEl) {
       this.objEditorInfoEl = document.getElementById("obj-editor-info");
+    }
+    if (!this.platformEditorCountEl) {
+      this.platformEditorCountEl = document.getElementById("platform-editor-count");
+    }
+    if (!this.ropeEditorCountEl) {
+      this.ropeEditorCountEl = document.getElementById("rope-editor-count");
+    }
+    if (!this.editorPlatformLimitInputEl) {
+      this.editorPlatformLimitInputEl = document.getElementById("editor-platform-limit");
+    }
+    if (!this.editorRopeLimitInputEl) {
+      this.editorRopeLimitInputEl = document.getElementById("editor-rope-limit");
+    }
+    if (!this.editorPlatformScaleInputEl) {
+      this.editorPlatformScaleInputEl = document.getElementById("editor-platform-scale");
+    }
+    if (!this.editorRopeScaleInputEl) {
+      this.editorRopeScaleInputEl = document.getElementById("editor-rope-scale");
+    }
+    if (!this.editorPlatformScaleValueEl) {
+      this.editorPlatformScaleValueEl = document.getElementById("editor-platform-scale-value");
+    }
+    if (!this.editorRopeScaleValueEl) {
+      this.editorRopeScaleValueEl = document.getElementById("editor-rope-scale-value");
+    }
+    if (!this.editorSettingsApplyBtnEl) {
+      this.editorSettingsApplyBtnEl = document.getElementById("editor-settings-apply");
     }
     this.chalkColorButtons = Array.from(document.querySelectorAll(".chalk-color[data-color]"));
     this.toolButtons = Array.from(document.querySelectorAll(".tool-slot[data-tool]"));
@@ -10938,6 +11252,12 @@ export class GameRuntime {
     }
     if (room?.securityTest && typeof room.securityTest === "object") {
       this.applySecurityTestState(room.securityTest, { announce: false });
+    }
+    if (room?.objectEditor && typeof room.objectEditor === "object") {
+      this.applyObjectEditorSettings(room.objectEditor, {
+        persistLocal: true,
+        syncUi: true
+      });
     }
 
     const players = Array.isArray(room?.players) ? room.players : [];
@@ -11803,6 +12123,12 @@ export class GameRuntime {
       }
       this.chatLiveLogEl.scrollTop = this.chatLiveLogEl.scrollHeight;
       appended = true;
+      // Auto-fade-remove live feed line after 7 s
+      setTimeout(() => {
+        liveLine.style.transition = "opacity 0.55s ease";
+        liveLine.style.opacity = "0";
+        setTimeout(() => liveLine.remove(), 560);
+      }, 7000);
     }
 
     return appended;
@@ -13051,6 +13377,14 @@ export class GameRuntime {
 
   placePlatformAtPreview() {
     if (!this.platformEditorPreviewMesh) return;
+    const platformLimit = Math.max(
+      OBJECT_EDITOR_MIN_LIMIT,
+      Math.trunc(Number(this.objectEditorSettings?.platformLimit) || 0)
+    );
+    if (this.jumpPlatforms.length >= platformLimit) {
+      this.appendChatLine("", `발판 최대 개수(${platformLimit})에 도달했습니다.`, "system");
+      return;
+    }
     const pos = this.platformEditorPreviewMesh.position;
     const p = {
       x: pos.x, y: pos.y, z: pos.z,
@@ -13155,7 +13489,11 @@ export class GameRuntime {
 
   updatePlatformEditorCount() {
     if (this.platformEditorCountEl) {
-      this.platformEditorCountEl.textContent = `발판: ${this.jumpPlatforms.length}개`;
+      const limit = Math.max(
+        OBJECT_EDITOR_MIN_LIMIT,
+        Math.trunc(Number(this.objectEditorSettings?.platformLimit) || 0)
+      );
+      this.platformEditorCountEl.textContent = `발판: ${this.jumpPlatforms.length}/${limit}개`;
     }
   }
 
@@ -13235,6 +13573,14 @@ export class GameRuntime {
 
   placeRopeAtPreview() {
     if (!this.ropeEditorPreviewMesh) return;
+    const ropeLimit = Math.max(
+      OBJECT_EDITOR_MIN_LIMIT,
+      Math.trunc(Number(this.objectEditorSettings?.ropeLimit) || 0)
+    );
+    if (this.jumpRopes.length >= ropeLimit) {
+      this.appendChatLine("", `줄 최대 개수(${ropeLimit})에 도달했습니다.`, "system");
+      return;
+    }
     const pos = this.ropeEditorPreviewMesh.position;
     const r = {
       x: pos.x,
@@ -13414,7 +13760,11 @@ export class GameRuntime {
 
   updateRopeEditorCount() {
     if (this.ropeEditorCountEl) {
-      this.ropeEditorCountEl.textContent = `줄: ${this.jumpRopes.length}개`;
+      const limit = Math.max(
+        OBJECT_EDITOR_MIN_LIMIT,
+        Math.trunc(Number(this.objectEditorSettings?.ropeLimit) || 0)
+      );
+      this.ropeEditorCountEl.textContent = `줄: ${this.jumpRopes.length}/${limit}개`;
     }
   }
 }
