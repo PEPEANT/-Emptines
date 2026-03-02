@@ -87,16 +87,6 @@ const A_ZONE_FIXED_PORTAL_IMAGE_URL = new URL("../../../png/REC_FPS.png", import
 const BOX_FACE_KEYS = ["px", "nx", "py", "ny", "pz", "nz"];
 const NPC_GREETING_SESSION_KEY = "emptines_npc_greeting_seen_v1";
 const CITY_AD_BILLBOARD_BASE_PREFIX = "city_ad_board_";
-const SPAWN_PORTAL_VEIL_FLOW_TEXT = Object.freeze([
-  "EMPTINES",
-  "CITY LOCK",
-  "PORTAL GATE",
-  "ACCESS BLOCK",
-  "LIVE STREAM",
-  "SYSTEM FLOW",
-  "DATA WAVE",
-  "NEON FIELD"
-]);
 
 function resolveRuntimeAssetUrl(relativePath) {
   const normalized = String(relativePath ?? "").trim().replace(/^\/+/, "");
@@ -604,8 +594,8 @@ export class GameRuntime {
     this.spawnPortalVeilCanvas = null;
     this.spawnPortalVeilContext = null;
     this.spawnPortalVeilTexture = null;
-    this.spawnPortalVeilFlowColumns = [];
-    this.spawnPortalVeilFlowTickMs = 0;
+    this.spawnPortalVeilFogLayers = [];
+    this.spawnPortalVeilFogTickMs = 0;
     this.aZonePortalGroup = null;
     this.aZonePortalRing = null;
     this.aZonePortalCore = null;
@@ -898,8 +888,8 @@ export class GameRuntime {
     this.spawnPortalVeilWorldZ = this.bridgeNpcPosition.z;
     this.spawnPortalVeilCanvas = null;
     this.spawnPortalVeilContext = null;
-    this.spawnPortalVeilFlowColumns = [];
-    this.spawnPortalVeilFlowTickMs = 0;
+    this.spawnPortalVeilFogLayers = [];
+    this.spawnPortalVeilFogTickMs = 0;
     this.aZonePortalGroup = null;
     this.aZonePortalRing = null;
     this.aZonePortalCore = null;
@@ -936,8 +926,8 @@ export class GameRuntime {
     this.spawnPortalVeilCanvas = null;
     this.spawnPortalVeilContext = null;
     this.spawnPortalVeilTexture = null;
-    this.spawnPortalVeilFlowColumns = [];
-    this.spawnPortalVeilFlowTickMs = 0;
+    this.spawnPortalVeilFogLayers = [];
+    this.spawnPortalVeilFogTickMs = 0;
     this.aZonePortalGroup = null;
     this.aZonePortalRing = null;
     this.aZonePortalCore = null;
@@ -2314,7 +2304,7 @@ export class GameRuntime {
     this.portalBillboardGroup = portalBillboard;
     this.spawnPortalVeilGroup = spawnPortalVeil;
     this.spawnPortalVeilWorldZ = npcGuide.position.z + npcTempleGate.position.z;
-    this.updateSpawnPortalVeilFlowTexture(true);
+    this.updateSpawnPortalVeilTexture(true);
     this.aZonePortalGroup = aZonePortalGroup;
     this.aZonePortalRing = aZonePortalRing;
     this.aZonePortalCore = aZonePortalCore;
@@ -3549,12 +3539,26 @@ export class GameRuntime {
       return cached;
     }
 
-    const texture = this.textureLoader.load(normalized);
+    const texture = this.textureLoader.load(normalized, (loadedTexture) => {
+      const width = Math.trunc(Number(loadedTexture?.image?.width) || 0);
+      const height = Math.trunc(Number(loadedTexture?.image?.height) || 0);
+      const canUseMipmaps =
+        Boolean(this.renderer?.capabilities?.isWebGL2) ||
+        (THREE.MathUtils.isPowerOfTwo(width) && THREE.MathUtils.isPowerOfTwo(height));
+      loadedTexture.generateMipmaps = canUseMipmaps;
+      loadedTexture.minFilter = canUseMipmaps
+        ? THREE.LinearMipmapLinearFilter
+        : THREE.LinearFilter;
+      loadedTexture.magFilter = THREE.LinearFilter;
+      loadedTexture.anisotropy = Math.min(8, this.renderer?.capabilities?.getMaxAnisotropy?.() || 1);
+      loadedTexture.needsUpdate = true;
+    });
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.wrapS = THREE.ClampToEdgeWrapping;
     texture.wrapT = THREE.ClampToEdgeWrapping;
     texture.minFilter = THREE.LinearFilter;
     texture.magFilter = THREE.LinearFilter;
+    texture.generateMipmaps = false;
     texture.anisotropy = Math.min(8, this.renderer?.capabilities?.getMaxAnisotropy?.() || 1);
     texture.needsUpdate = true;
     this.futureCityFixedBillboardTextureCache.set(normalized, texture);
@@ -3571,6 +3575,9 @@ export class GameRuntime {
       emissive: 0xffffff,
       emissiveMap: map,
       emissiveIntensity: THREE.MathUtils.clamp(Number(emissiveIntensity) || 0.9, 0.24, 1.4),
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -2,
       fog: false,
       toneMapped: false
     });
@@ -3852,7 +3859,7 @@ export class GameRuntime {
         new THREE.PlaneGeometry(topBoardWidth, topBoardHeight),
         this.createFutureCityFixedBillboardScreenMaterial(imageUrl, 0.98)
       );
-      topScreen.position.z = topBoardDepth * 0.5 + 0.03;
+      topScreen.position.z = topBoardDepth * 0.5 + 0.06;
       topScreen.renderOrder = 7;
       const topGlow = new THREE.Mesh(
         new THREE.PlaneGeometry(topBoardWidth + 0.36, topBoardHeight + 0.36),
@@ -3861,13 +3868,14 @@ export class GameRuntime {
           transparent: true,
           opacity: 0.2,
           side: THREE.DoubleSide,
+          depthTest: false,
           depthWrite: false,
           blending: THREE.AdditiveBlending,
           fog: false,
           toneMapped: false
         })
       );
-      topGlow.position.z = topBoardDepth * 0.5 + 0.035;
+      topGlow.position.z = topBoardDepth * 0.5 + 0.09;
       topGlow.renderOrder = 8;
       topBoardGroup.add(topFrame, topScreen, topGlow);
       districtGroup.add(topBoardGroup);
@@ -6126,26 +6134,31 @@ export class GameRuntime {
       return null;
     }
 
-    const columnCount = this.mobileEnabled ? 22 : 34;
-    const columns = [];
-    for (let index = 0; index < columnCount; index += 1) {
-      const ratio = columnCount <= 1 ? 0 : index / (columnCount - 1);
-      const spread = canvas.width * 0.08 + ratio * canvas.width * 0.84;
+    const fogLayerCount = this.mobileEnabled ? 8 : 12;
+    const fogLayers = [];
+    for (let index = 0; index < fogLayerCount; index += 1) {
       const seeded = Math.sin((index + 1) * 12.9898) * 43758.5453;
-      const rnd = seeded - Math.floor(seeded);
-      const text = SPAWN_PORTAL_VEIL_FLOW_TEXT[index % SPAWN_PORTAL_VEIL_FLOW_TEXT.length];
-      columns.push({
-        x: Math.round(spread),
-        speed: 54 + rnd * 112,
-        offset: rnd * canvas.height,
-        text
+      const seeded2 = Math.sin((index + 1) * 78.233) * 43758.5453;
+      const seeded3 = Math.sin((index + 1) * 39.425) * 43758.5453;
+      const rndA = seeded - Math.floor(seeded);
+      const rndB = seeded2 - Math.floor(seeded2);
+      const rndC = seeded3 - Math.floor(seeded3);
+      fogLayers.push({
+        baseX: 0.08 + rndA * 0.84,
+        baseY: 0.12 + rndB * 0.76,
+        radius: (this.mobileEnabled ? 130 : 170) + rndC * (this.mobileEnabled ? 140 : 210),
+        driftX: (this.mobileEnabled ? 22 : 32) + rndB * (this.mobileEnabled ? 26 : 42),
+        driftY: (this.mobileEnabled ? 10 : 18) + rndA * (this.mobileEnabled ? 14 : 24),
+        speed: 0.16 + rndC * 0.4,
+        phase: rndA * Math.PI * 2,
+        alpha: 0.22 + rndB * 0.28
       });
     }
 
     this.spawnPortalVeilCanvas = canvas;
     this.spawnPortalVeilContext = context;
-    this.spawnPortalVeilFlowColumns = columns;
-    this.spawnPortalVeilFlowTickMs = 0;
+    this.spawnPortalVeilFogLayers = fogLayers;
+    this.spawnPortalVeilFogTickMs = 0;
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
@@ -6156,11 +6169,11 @@ export class GameRuntime {
     texture.generateMipmaps = false;
     texture.needsUpdate = true;
     this.spawnPortalVeilTexture = texture;
-    this.updateSpawnPortalVeilFlowTexture(true);
+    this.updateSpawnPortalVeilTexture(true);
     return texture;
   }
 
-  updateSpawnPortalVeilFlowTexture(force = false) {
+  updateSpawnPortalVeilTexture(force = false) {
     const context = this.spawnPortalVeilContext;
     const canvas = this.spawnPortalVeilCanvas;
     const texture = this.spawnPortalVeilTexture;
@@ -6169,10 +6182,10 @@ export class GameRuntime {
     }
 
     const nowMs = performance.now();
-    if (!force && nowMs - this.spawnPortalVeilFlowTickMs < 33) {
+    if (!force && nowMs - this.spawnPortalVeilFogTickMs < 33) {
       return;
     }
-    this.spawnPortalVeilFlowTickMs = nowMs;
+    this.spawnPortalVeilFogTickMs = nowMs;
     const nowSec = nowMs * 0.001;
     const width = canvas.width;
     const height = canvas.height;
@@ -6200,37 +6213,49 @@ export class GameRuntime {
     context.fillStyle = edgeGlow;
     context.fillRect(0, 0, width, height);
 
-    context.font = `700 ${this.mobileEnabled ? 24 : 28}px monospace`;
-    context.textAlign = "center";
-    context.textBaseline = "middle";
-    for (const column of this.spawnPortalVeilFlowColumns) {
-      const glyphStep = this.mobileEnabled ? 26 : 30;
-      const streamText = String(column.text ?? "EMPTINES").replace(/\s+/g, "");
-      const streamLength = Math.max(1, streamText.length);
-      const trackLength = streamLength * glyphStep;
-      const offset = (nowSec * column.speed + column.offset) % trackLength;
-      for (let y = -glyphStep * 2; y <= height + glyphStep * 2; y += glyphStep) {
-        const streamY = y + offset;
-        const charIndex = Math.floor((streamY / glyphStep) % streamLength + streamLength) % streamLength;
-        const pulse = 0.45 + 0.55 * Math.sin(nowSec * 2.1 + column.x * 0.015 + charIndex * 0.8);
-        context.fillStyle = `rgba(108, 255, 155, ${0.42 + pulse * 0.44})`;
-        context.fillText(streamText.charAt(charIndex), column.x, streamY);
-      }
+    context.save();
+    context.globalCompositeOperation = "screen";
+    context.filter = this.mobileEnabled ? "blur(14px)" : "blur(20px)";
+    for (const layer of this.spawnPortalVeilFogLayers) {
+      const driftX = Math.sin(nowSec * layer.speed + layer.phase) * layer.driftX;
+      const driftY = Math.cos(nowSec * layer.speed * 0.74 + layer.phase * 0.61) * layer.driftY;
+      const x = layer.baseX * width + driftX;
+      const y = layer.baseY * height + driftY;
+      const radius = layer.radius * (0.9 + 0.12 * Math.sin(nowSec * (layer.speed * 0.72) + layer.phase));
+      const fog = context.createRadialGradient(x, y, radius * 0.06, x, y, radius);
+      fog.addColorStop(0, `rgba(166, 255, 212, ${layer.alpha * 0.42})`);
+      fog.addColorStop(0.42, `rgba(120, 232, 177, ${layer.alpha * 0.27})`);
+      fog.addColorStop(0.82, `rgba(56, 138, 99, ${layer.alpha * 0.18})`);
+      fog.addColorStop(1, "rgba(0, 0, 0, 0)");
+      context.fillStyle = fog;
+      context.fillRect(x - radius, y - radius, radius * 2, radius * 2);
     }
+    context.restore();
 
-    const tickerText = " EMPTINES // CITY STREAM LOCKED // PORTAL PASS REQUIRED // ";
-    context.font = `700 ${this.mobileEnabled ? 30 : 42}px monospace`;
-    context.textAlign = "left";
-    context.textBaseline = "middle";
-    const tickerWidth = context.measureText(tickerText).width;
-    const tickerShift = (nowSec * 180) % tickerWidth;
-    const tickerY = height * 0.52;
-    context.fillStyle = "rgba(18, 34, 23, 0.9)";
-    context.fillRect(0, tickerY - (this.mobileEnabled ? 24 : 30), width, this.mobileEnabled ? 48 : 60);
-    context.fillStyle = "rgba(186, 255, 205, 0.95)";
-    for (let x = -tickerShift - tickerWidth; x <= width + tickerWidth; x += tickerWidth) {
-      context.fillText(tickerText, x, tickerY);
-    }
+    const centralMist = context.createRadialGradient(
+      width * 0.5,
+      height * 0.5,
+      height * 0.05,
+      width * 0.5,
+      height * 0.5,
+      height * 0.66
+    );
+    centralMist.addColorStop(0, "rgba(124, 241, 184, 0.28)");
+    centralMist.addColorStop(0.5, "rgba(88, 177, 131, 0.2)");
+    centralMist.addColorStop(1, "rgba(6, 22, 14, 0)");
+    context.fillStyle = centralMist;
+    context.fillRect(0, 0, width, height);
+
+    context.save();
+    context.globalCompositeOperation = "soft-light";
+    const bandY = height * (0.48 + Math.sin(nowSec * 0.24) * 0.04);
+    const mistBand = context.createLinearGradient(0, bandY - height * 0.16, 0, bandY + height * 0.16);
+    mistBand.addColorStop(0, "rgba(8, 24, 15, 0)");
+    mistBand.addColorStop(0.5, "rgba(152, 255, 200, 0.22)");
+    mistBand.addColorStop(1, "rgba(8, 24, 15, 0)");
+    context.fillStyle = mistBand;
+    context.fillRect(0, bandY - height * 0.2, width, height * 0.4);
+    context.restore();
 
     texture.needsUpdate = true;
   }
@@ -6660,7 +6685,7 @@ export class GameRuntime {
       this.flowStage === "portal_transfer";
     this.spawnPortalVeilGroup.visible = !forceHideByFlow && !passedPortal;
     if (this.spawnPortalVeilGroup.visible) {
-      this.updateSpawnPortalVeilFlowTexture();
+      this.updateSpawnPortalVeilTexture();
     }
   }
 
