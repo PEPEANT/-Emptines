@@ -459,6 +459,7 @@ export class GameRuntime {
     this.mobileUiEl = document.getElementById("mobile-ui");
     this.mobileMovePadEl = document.getElementById("mobile-move-pad");
     this.mobileMoveStickEl = document.getElementById("mobile-move-stick");
+    this.mobilePromoPlaceBtnEl = document.getElementById("mobile-promo-place");
     this.mobileJumpBtnEl = document.getElementById("mobile-jump");
     this.mobileSprintBtnEl = document.getElementById("mobile-sprint");
     this.mobileChatBtnEl = document.getElementById("mobile-chat");
@@ -6200,6 +6201,9 @@ export class GameRuntime {
       this.mobilePaintBtnEl.classList.toggle("hidden", !paintVisible);
       this.mobilePaintBtnEl.disabled = !paintVisible;
     }
+    if (this.mobilePromoPlaceBtnEl) {
+      this.mobilePromoPlaceBtnEl.disabled = !visible;
+    }
     if (!visible) {
       this.resetMobileControlInputState();
     }
@@ -10505,6 +10509,14 @@ export class GameRuntime {
         this.tryOpenSurfacePainterFromInteraction();
       });
     }
+    if (this.mobilePromoPlaceBtnEl) {
+      this.mobilePromoPlaceBtnEl.addEventListener("pointerdown", () => {
+        if (!this.mobileEnabled || !this.canMovePlayer()) {
+          return;
+        }
+        this.requestPromoUpsert({ placeInFront: true });
+      });
+    }
     if (this.promoScaleInputEl) {
       this.promoScaleInputEl.addEventListener("input", () => {
         const value = Number(this.promoScaleInputEl?.value);
@@ -11046,6 +11058,9 @@ export class GameRuntime {
     }
     if (!this.mobileMoveStickEl) {
       this.mobileMoveStickEl = document.getElementById("mobile-move-stick");
+    }
+    if (!this.mobilePromoPlaceBtnEl) {
+      this.mobilePromoPlaceBtnEl = document.getElementById("mobile-promo-place");
     }
     if (!this.mobileJumpBtnEl) {
       this.mobileJumpBtnEl = document.getElementById("mobile-jump");
