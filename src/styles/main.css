@@ -324,6 +324,12 @@ canvas {
   color: #00e5cc;
 }
 
+#editor-mode-obj.active {
+  background: rgba(255, 204, 68, 0.2);
+  border-color: #ffcc44;
+  color: #ffcc44;
+}
+
 #rope-climb-prompt {
   position: fixed;
   bottom: 65px;
@@ -773,6 +779,34 @@ canvas {
 }
 
 #platform-editor.hidden {
+  display: none;
+}
+
+#obj-editor-bar {
+  position: fixed;
+  top: 44px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 90;
+  background: rgba(34, 21, 4, 0.9);
+  color: #ffcc44;
+  font: 600 0.76rem/1.4 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.03em;
+  padding: 5px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 204, 68, 0.46);
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+#obj-editor-info {
+  margin-left: 8px;
+  color: #ffe19a;
+  font-weight: 700;
+}
+
+#obj-editor-bar.hidden {
   display: none;
 }
 

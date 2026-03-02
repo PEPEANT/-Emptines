@@ -217,6 +217,16 @@ export class GameRuntime {
     this.ossModelTemplateCache = new Map();
     this.ossModelLoadPromiseCache = new Map();
     this.staticWorldColliders = [];
+    this.movableObjects = [];
+    this.objEditorActive = false;
+    this.objEditorSelected = null;
+    this.objEditorDragging = false;
+    this.objEditorDragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    this.objEditorDragOffset = new THREE.Vector3();
+    this.objEditorRaycaster = new THREE.Raycaster();
+    this.objEditorMouseNdc = new THREE.Vector2(0, 0);
+    this.objEditorDragHitPoint = new THREE.Vector3();
+    this.objEditorDragTargetWorld = new THREE.Vector3();
 
     this.jumpPlatforms = [];
     this.jumpPlatformMeshes = [];
@@ -489,6 +499,9 @@ export class GameRuntime {
     this.ropeClimbPromptEl = document.getElementById("rope-climb-prompt");
     this.editorModePlatformBtnEl = document.getElementById("editor-mode-platform");
     this.editorModeRopeBtnEl = document.getElementById("editor-mode-rope");
+    this.editorModeObjBtnEl = document.getElementById("editor-mode-obj");
+    this.objEditorBarEl = document.getElementById("obj-editor-bar");
+    this.objEditorInfoEl = document.getElementById("obj-editor-info");
 
     const hubFlowConfig = this.worldContent?.hubFlow ?? {};
     const bridgeConfig = hubFlowConfig?.bridge ?? {};
@@ -689,6 +702,7 @@ export class GameRuntime {
     this.updateRoomPlayerSnapshot([]);
     this.loadSavedPlatforms();
     this.loadSavedRopes();
+    this.loadSavedObjectPositions();
 
     this.loop();
   }
@@ -854,6 +868,9 @@ export class GameRuntime {
       this.futureCityFixedBillboardTextureCache.clear();
     }
     this.staticWorldColliders.length = 0;
+    this.movableObjects.length = 0;
+    this.objEditorDragging = false;
+    this.clearObjEditorSelection();
 
     if (this.npcGreetingVideoEl) {
       this.npcGreetingVideoEl.onended = null;
@@ -1165,7 +1182,7 @@ export class GameRuntime {
     const cityGroupWorldX = cityGroup.position.x;
     const cityGroupWorldZ = cityGroup.position.z;
     const registerCityBuildingCollider = (localX, localZ, width, depth, minY = -2, maxY = 180) => {
-      this.registerStaticWorldBoxCollider(
+      return this.registerStaticWorldBoxCollider(
         cityGroupWorldX + (Number(localX) || 0),
         cityGroupWorldZ + (Number(localZ) || 0),
         width,
@@ -1352,7 +1369,8 @@ export class GameRuntime {
       tower.castShadow = false;
       tower.receiveShadow = true;
       cityGroup.add(tower);
-      registerCityBuildingCollider(placed.x, placed.z, 4.8, 4.8, -2, h + 4);
+      const towerColliderIndex = registerCityBuildingCollider(placed.x, placed.z, 4.8, 4.8, -2, h + 4);
+      this.registerMovableObject(tower, `city_tower_${ti}`, towerColliderIndex);
     }
 
     const skylineMats = [
@@ -1747,7 +1765,15 @@ export class GameRuntime {
       kiosk.castShadow = false;
       kiosk.receiveShadow = true;
       cityGroup.add(kiosk);
-      registerCityBuildingCollider(placed.x, placed.z, footprint + 0.5, footprint + 0.5, -2, height + 3);
+      const kioskColliderIndex = registerCityBuildingCollider(
+        placed.x,
+        placed.z,
+        footprint + 0.5,
+        footprint + 0.5,
+        -2,
+        height + 3
+      );
+      this.registerMovableObject(kiosk, `city_kiosk_${index}`, kioskColliderIndex);
     }
 
     const districtPaintMat = new THREE.MeshStandardMaterial({
@@ -1803,7 +1829,15 @@ export class GameRuntime {
       block.castShadow = false;
       block.receiveShadow = true;
       cityGroup.add(block);
-      registerCityBuildingCollider(placed.x, placed.z, footprint + 0.6, depth + 0.6, -2, height + 4);
+      const blockColliderIndex = registerCityBuildingCollider(
+        placed.x,
+        placed.z,
+        footprint + 0.6,
+        depth + 0.6,
+        -2,
+        height + 4
+      );
+      this.registerMovableObject(block, `city_block_${index}`, blockColliderIndex);
     }
 
     const outerDistrictPaintMat = new THREE.MeshStandardMaterial({
@@ -1859,7 +1893,15 @@ export class GameRuntime {
       block.castShadow = false;
       block.receiveShadow = true;
       cityGroup.add(block);
-      registerCityBuildingCollider(placed.x, placed.z, width + 0.7, depth + 0.7, -2, height + 4);
+      const outerBlockColliderIndex = registerCityBuildingCollider(
+        placed.x,
+        placed.z,
+        width + 0.7,
+        depth + 0.7,
+        -2,
+        height + 4
+      );
+      this.registerMovableObject(block, `city_outer_block_${index}`, outerBlockColliderIndex);
     }
 
     const bridgeDistrictPaintMat = new THREE.MeshStandardMaterial({
@@ -1909,7 +1951,19 @@ export class GameRuntime {
       bridgeBlock.castShadow = false;
       bridgeBlock.receiveShadow = true;
       cityGroup.add(bridgeBlock);
-      registerCityBuildingCollider(localX, localZ, width + 0.7, depth + 0.7, -2, height + 4);
+      const bridgeBlockColliderIndex = registerCityBuildingCollider(
+        localX,
+        localZ,
+        width + 0.7,
+        depth + 0.7,
+        -2,
+        height + 4
+      );
+      this.registerMovableObject(
+        bridgeBlock,
+        `city_bridge_block_${bridgeDistrictIndex}`,
+        bridgeBlockColliderIndex
+      );
       bridgeDistrictIndex += 1;
     }
 
@@ -2328,6 +2382,7 @@ export class GameRuntime {
       aZonePortalGroup
     );
     this.scene.add(group);
+    this.loadSavedObjectPositions();
     this.setMirrorGateVisible(this.flowStage === "bridge_mirror");
     this.updateBridgeBoundaryMarker(0);
     this.updatePortalVisual();
@@ -6379,7 +6434,7 @@ export class GameRuntime {
   }
 
   canUsePointerLock() {
-    return this.canMovePlayer() && !this.portalTransitioning;
+    return this.canMovePlayer() && !this.portalTransitioning && !this.objEditorActive;
   }
 
   getFullscreenElement() {
@@ -7200,7 +7255,9 @@ export class GameRuntime {
   }
 
   syncHostControls() {
-    const visible = this.hubFlowEnabled;
+    const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
+    const hasHostPrivilege = this.isRoomHost || localHostMode;
+    const visible = this.hubFlowEnabled && hasHostPrivilege;
     const canHostUseChat = this.canUseHostChatShortcut();
     const chatEnabled = this.canUseChatControls();
     this.chatUiEl?.classList.toggle("hidden", !chatEnabled);
@@ -8748,6 +8805,19 @@ export class GameRuntime {
         return;
       }
 
+      if (this.objEditorActive && this.flyModeActive) {
+        if (event.code === "KeyE") {
+          event.preventDefault();
+          this.adjustSelectedObjEditorHeight(0.25);
+          return;
+        }
+        if (event.code === "KeyQ") {
+          event.preventDefault();
+          this.adjustSelectedObjEditorHeight(-0.25);
+          return;
+        }
+      }
+
       if (event.code === "KeyF" && this.canUseGameplayControls()) {
         event.preventDefault();
         if (this.tryOpenSurfacePainterFromInteraction()) {
@@ -8781,6 +8851,9 @@ export class GameRuntime {
         event.preventDefault();
         if (this.editorMode === "rope") {
           this.undoLastRope();
+        } else if (this.editorMode === "obj") {
+          // reserved for future object-editor undo
+          return;
         } else {
           this.undoLastPlatform();
         }
@@ -8830,6 +8903,7 @@ export class GameRuntime {
       this.mobileSprintHeld = false;
       this.mobileJumpQueued = false;
       this.pendingJumpInput = false;
+      this.objEditorDragging = false;
       this.resetMobileMoveInput();
       this.mobileSprintBtnEl?.classList.remove("active");
       this.mobileJumpBtnEl?.classList.remove("active");
@@ -8854,10 +8928,15 @@ export class GameRuntime {
       this.hud.setStatus(this.getStatusText());
     });
     this.renderer.domElement.addEventListener("mousedown", (event) => {
+      if (event.button === 0 && this.flyModeActive && this.editorMode === "obj" && this.objEditorActive) {
+        event.preventDefault();
+        this.beginObjEditorDrag(event.clientX, event.clientY);
+        return;
+      }
       if (event.button === 0 && this.flyModeActive && this.pointerLocked) {
         if (this.editorMode === "rope") {
           this.placeRopeAtPreview();
-        } else {
+        } else if (this.editorMode === "platform") {
           this.placePlatformAtPreview();
         }
         return;
@@ -8878,11 +8957,22 @@ export class GameRuntime {
       if (event.button !== 0) {
         return;
       }
+      const wasObjDragging = this.objEditorDragging;
+      this.objEditorDragging = false;
+      if (wasObjDragging) {
+        this.saveObjectPositions();
+      }
       this.chalkDrawingActive = false;
       this.chalkLastStamp = null;
     });
     this.renderer.domElement.addEventListener("wheel", (event) => {
-      if (!this.flyModeActive || !this.pointerLocked) return;
+      if (!this.flyModeActive) return;
+      if (this.editorMode === "obj" && this.objEditorActive) {
+        event.preventDefault();
+        this.platformEditorDist = Math.max(2, Math.min(18, this.platformEditorDist - event.deltaY * 0.005));
+        return;
+      }
+      if (!this.pointerLocked) return;
       event.preventDefault();
       if (this.editorMode === "rope") {
         this.ropeEditorHeight = Math.max(1, Math.min(20, this.ropeEditorHeight - event.deltaY * 0.005));
@@ -8975,6 +9065,10 @@ export class GameRuntime {
     window.addEventListener(
       "mousemove",
       (event) => {
+        if (this.objEditorActive && this.objEditorDragging && this.objEditorSelected) {
+          this.updateObjEditorDrag(event.clientX, event.clientY);
+          return;
+        }
         if (!this.pointerLocked && !this.mobileEnabled) {
           this.updateChalkPointerFromClient(event.clientX, event.clientY);
           return;
@@ -9073,7 +9167,8 @@ export class GameRuntime {
     }
     if (this.hostControlsToggleBtnEl) {
       this.hostControlsToggleBtnEl.addEventListener("click", () => {
-        if (!this.hubFlowEnabled) {
+        const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
+        if (!this.hubFlowEnabled || (!this.isRoomHost && !localHostMode)) {
           return;
         }
         this.hostControlsOpen = !this.hostControlsOpen;
@@ -9427,6 +9522,7 @@ export class GameRuntime {
     this.platformEditorSaveBtnEl?.addEventListener("click", () => {
       this.savePlatforms();
       this.saveRopes();
+      this.saveObjectPositions();
     });
     this.platformEditorClearBtnEl?.addEventListener("click", () => {
       for (const mesh of this.jumpPlatformMeshes) {
@@ -9454,6 +9550,9 @@ export class GameRuntime {
     });
     this.editorModeRopeBtnEl?.addEventListener("click", () => {
       this.setEditorMode("rope");
+    });
+    this.editorModeObjBtnEl?.addEventListener("click", () => {
+      this.setEditorMode("obj");
     });
   }
 
@@ -9666,6 +9765,15 @@ export class GameRuntime {
     }
     if (!this.playerRosterListEl) {
       this.playerRosterListEl = document.getElementById("player-roster-list");
+    }
+    if (!this.editorModeObjBtnEl) {
+      this.editorModeObjBtnEl = document.getElementById("editor-mode-obj");
+    }
+    if (!this.objEditorBarEl) {
+      this.objEditorBarEl = document.getElementById("obj-editor-bar");
+    }
+    if (!this.objEditorInfoEl) {
+      this.objEditorInfoEl = document.getElementById("obj-editor-info");
     }
     this.chalkColorButtons = Array.from(document.querySelectorAll(".chalk-color[data-color]"));
     this.toolButtons = Array.from(document.querySelectorAll(".tool-slot[data-tool]"));
@@ -10653,6 +10761,7 @@ export class GameRuntime {
       minY: Math.min(yMin, yMax),
       maxY: Math.max(yMin, yMax)
     });
+    return this.staticWorldColliders.length - 1;
   }
 
   resolveStaticWorldCollisions(position, radius = this.playerCollisionRadius) {
@@ -11752,9 +11861,290 @@ export class GameRuntime {
     this.syncMobileUiState();
   }
 
+  registerMovableObject(mesh, id, colliderIndex) {
+    if (!mesh) {
+      return null;
+    }
+    const normalizedId = String(id ?? "").trim();
+    const normalizedColliderIndex = Math.trunc(Number(colliderIndex));
+    if (!normalizedId || !Number.isFinite(normalizedColliderIndex) || normalizedColliderIndex < 0) {
+      return null;
+    }
+    if (!this.staticWorldColliders[normalizedColliderIndex]) {
+      return null;
+    }
+    const entry = {
+      id: normalizedId,
+      mesh,
+      colliderIndex: normalizedColliderIndex,
+      _savedEmissive: null,
+      _savedEmissiveIntensity: null
+    };
+    this.movableObjects.push(entry);
+    return entry;
+  }
+
+  updateMovableObjectCollider(entry) {
+    if (!entry?.mesh) {
+      return false;
+    }
+    const colliderIndex = Math.trunc(Number(entry.colliderIndex));
+    const collider = this.staticWorldColliders[colliderIndex];
+    if (!collider) {
+      return false;
+    }
+    const mesh = entry.mesh;
+    mesh.updateMatrixWorld(true);
+    const worldBounds = new THREE.Box3().setFromObject(mesh);
+    if (worldBounds.isEmpty()) {
+      return false;
+    }
+
+    collider.minX = worldBounds.min.x;
+    collider.maxX = worldBounds.max.x;
+    collider.minZ = worldBounds.min.z;
+    collider.maxZ = worldBounds.max.z;
+    collider.minY = worldBounds.min.y - 0.05;
+    collider.maxY = worldBounds.max.y + 0.05;
+    return true;
+  }
+
+  updateObjEditorMouseFromClient(clientX, clientY) {
+    const width = Math.max(1, Number(window.innerWidth) || 1);
+    const height = Math.max(1, Number(window.innerHeight) || 1);
+    this.objEditorMouseNdc.x = (clientX / width) * 2 - 1;
+    this.objEditorMouseNdc.y = -(clientY / height) * 2 + 1;
+  }
+
+  pickMovableObjectAtClient(clientX, clientY) {
+    if (!this.camera || !this.movableObjects.length) {
+      return null;
+    }
+    const meshes = [];
+    for (const entry of this.movableObjects) {
+      if (entry?.mesh) {
+        meshes.push(entry.mesh);
+      }
+    }
+    if (!meshes.length) {
+      return null;
+    }
+
+    this.updateObjEditorMouseFromClient(clientX, clientY);
+    this.objEditorRaycaster.setFromCamera(this.objEditorMouseNdc, this.camera);
+    const intersections = this.objEditorRaycaster.intersectObjects(meshes, false);
+    if (!intersections.length) {
+      return null;
+    }
+    for (const intersection of intersections) {
+      const hitMesh = intersection?.object;
+      const entry = this.movableObjects.find((candidate) => candidate?.mesh === hitMesh) ?? null;
+      if (entry) {
+        return { entry, intersection };
+      }
+    }
+    return null;
+  }
+
+  selectObjEditorEntry(entry) {
+    if (!entry || !entry.mesh) {
+      this.clearObjEditorSelection();
+      return;
+    }
+    if (this.objEditorSelected === entry) {
+      this.updateObjEditorInfoEl(entry);
+      return;
+    }
+    this.clearObjEditorSelection();
+
+    const materials = Array.isArray(entry.mesh.material) ? entry.mesh.material : [entry.mesh.material];
+    entry._savedEmissive = [];
+    entry._savedEmissiveIntensity = [];
+    for (const material of materials) {
+      if (material?.emissive && typeof material.emissive.setHex === "function") {
+        entry._savedEmissive.push(material.emissive.clone());
+        entry._savedEmissiveIntensity.push(Number(material.emissiveIntensity) || 0);
+        material.emissive.setHex(0x00aaff);
+        material.emissiveIntensity = 0.55;
+      } else {
+        entry._savedEmissive.push(null);
+        entry._savedEmissiveIntensity.push(0);
+      }
+    }
+
+    this.objEditorSelected = entry;
+    this.updateObjEditorInfoEl(entry);
+  }
+
+  clearObjEditorSelection() {
+    const entry = this.objEditorSelected;
+    if (!entry?.mesh) {
+      this.objEditorSelected = null;
+      this.updateObjEditorInfoEl(null);
+      return;
+    }
+
+    const materials = Array.isArray(entry.mesh.material) ? entry.mesh.material : [entry.mesh.material];
+    for (let index = 0; index < materials.length; index += 1) {
+      const material = materials[index];
+      const savedEmissive = entry?._savedEmissive?.[index] ?? null;
+      const savedIntensity = entry?._savedEmissiveIntensity?.[index] ?? 0;
+      if (material?.emissive && typeof material.emissive.copy === "function" && savedEmissive) {
+        material.emissive.copy(savedEmissive);
+        material.emissiveIntensity = Number(savedIntensity) || 0;
+      }
+    }
+    entry._savedEmissive = null;
+    entry._savedEmissiveIntensity = null;
+    this.objEditorSelected = null;
+    this.updateObjEditorInfoEl(null);
+  }
+
+  updateObjEditorInfoEl(entry) {
+    if (!this.objEditorInfoEl) {
+      return;
+    }
+    if (!entry?.mesh) {
+      this.objEditorInfoEl.textContent = "선택 없음";
+      return;
+    }
+    const pos = entry.mesh.position;
+    this.objEditorInfoEl.textContent =
+      `ID:${entry.id} (${pos.x.toFixed(2)}, ${pos.y.toFixed(2)}, ${pos.z.toFixed(2)})`;
+  }
+
+  beginObjEditorDrag(clientX, clientY) {
+    if (!this.objEditorActive || !this.flyModeActive) {
+      return false;
+    }
+    const picked = this.pickMovableObjectAtClient(clientX, clientY);
+    if (!picked) {
+      this.clearObjEditorSelection();
+      return false;
+    }
+
+    const entry = picked.entry;
+    const intersection = picked.intersection;
+    this.selectObjEditorEntry(entry);
+    entry.mesh.getWorldPosition(this.objEditorDragTargetWorld);
+    this.objEditorDragPlane.constant = -this.objEditorDragTargetWorld.y;
+
+    const hitPoint = this.objEditorRaycaster.ray.intersectPlane(
+      this.objEditorDragPlane,
+      this.objEditorDragHitPoint
+    );
+    if (!hitPoint) {
+      return false;
+    }
+
+    this.objEditorDragOffset.copy(this.objEditorDragTargetWorld).sub(this.objEditorDragHitPoint);
+    this.objEditorDragging = true;
+    return true;
+  }
+
+  updateObjEditorDrag(clientX, clientY) {
+    if (!this.objEditorActive || !this.objEditorDragging || !this.objEditorSelected?.mesh) {
+      return false;
+    }
+    this.updateObjEditorMouseFromClient(clientX, clientY);
+    this.objEditorRaycaster.setFromCamera(this.objEditorMouseNdc, this.camera);
+    const hitPoint = this.objEditorRaycaster.ray.intersectPlane(
+      this.objEditorDragPlane,
+      this.objEditorDragHitPoint
+    );
+    if (!hitPoint) {
+      return false;
+    }
+
+    const entry = this.objEditorSelected;
+    const mesh = entry.mesh;
+    this.objEditorDragTargetWorld
+      .copy(this.objEditorDragHitPoint)
+      .add(this.objEditorDragOffset);
+    if (mesh.parent) {
+      mesh.parent.worldToLocal(this.objEditorDragTargetWorld);
+    }
+
+    mesh.position.x = this.objEditorDragTargetWorld.x;
+    mesh.position.z = this.objEditorDragTargetWorld.z;
+    this.updateMovableObjectCollider(entry);
+    this.updateObjEditorInfoEl(entry);
+    return true;
+  }
+
+  adjustSelectedObjEditorHeight(deltaY = 0) {
+    const entry = this.objEditorSelected;
+    if (!this.objEditorActive || !entry?.mesh) {
+      return false;
+    }
+    const nextY = (Number(entry.mesh.position.y) || 0) + (Number(deltaY) || 0);
+    entry.mesh.position.y = THREE.MathUtils.clamp(nextY, -10, 260);
+    this.updateMovableObjectCollider(entry);
+    this.updateObjEditorInfoEl(entry);
+    this.saveObjectPositions();
+    return true;
+  }
+
+  saveObjectPositions() {
+    if (!this.movableObjects.length) {
+      return;
+    }
+    try {
+      const payload = {};
+      for (const entry of this.movableObjects) {
+        if (!entry?.mesh || !entry?.id) {
+          continue;
+        }
+        const pos = entry.mesh.position;
+        payload[entry.id] = {
+          x: Math.round((Number(pos.x) || 0) * 1000) / 1000,
+          y: Math.round((Number(pos.y) || 0) * 1000) / 1000,
+          z: Math.round((Number(pos.z) || 0) * 1000) / 1000
+        };
+      }
+      localStorage.setItem("objPositions_v1", JSON.stringify(payload));
+    } catch {
+      // ignore
+    }
+  }
+
+  loadSavedObjectPositions() {
+    if (!this.movableObjects.length) {
+      return;
+    }
+    try {
+      const savedRaw = localStorage.getItem("objPositions_v1");
+      if (!savedRaw) {
+        return;
+      }
+      const saved = JSON.parse(savedRaw);
+      if (!saved || typeof saved !== "object") {
+        return;
+      }
+      for (const entry of this.movableObjects) {
+        if (!entry?.mesh || !entry?.id) {
+          continue;
+        }
+        const position = saved[entry.id];
+        const x = Number(position?.x);
+        const y = Number(position?.y);
+        const z = Number(position?.z);
+        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+          continue;
+        }
+        entry.mesh.position.set(x, y, z);
+        this.updateMovableObjectCollider(entry);
+      }
+      this.updateObjEditorInfoEl(this.objEditorSelected);
+    } catch {
+      // ignore
+    }
+  }
+
   // ── Platform Editor ──────────────────────────────────────────────────────
 
   toggleFlyMode() {
+    const exitingObjEditor = this.flyModeActive && this.objEditorActive;
     this.climbingRope = null;
     this.flyModeActive = !this.flyModeActive;
     if (this.flyModeActive) {
@@ -11777,15 +12167,39 @@ export class GameRuntime {
       this.platformEditorPreviewMesh.visible = this.editorMode === "platform";
       if (this.ropeEditorPreviewMesh) this.ropeEditorPreviewMesh.visible = this.editorMode === "rope";
       this.platformEditorEl?.classList.remove("hidden");
+      if (this.editorMode === "obj") {
+        this.objEditorActive = true;
+        this.objEditorBarEl?.classList.remove("hidden");
+        if (this.platformEditorPreviewMesh) this.platformEditorPreviewMesh.visible = false;
+        if (this.ropeEditorPreviewMesh) this.ropeEditorPreviewMesh.visible = false;
+        if (document.pointerLockElement === this.renderer.domElement) {
+          document.exitPointerLock?.();
+        }
+      } else {
+        this.objEditorActive = false;
+        this.objEditorBarEl?.classList.add("hidden");
+      }
     } else {
       if (this.platformEditorPreviewMesh) this.platformEditorPreviewMesh.visible = false;
       if (this.ropeEditorPreviewMesh) this.ropeEditorPreviewMesh.visible = false;
       this.platformEditorEl?.classList.add("hidden");
+      this.objEditorDragging = false;
+      this.objEditorActive = false;
+      this.objEditorBarEl?.classList.add("hidden");
+      this.clearObjEditorSelection();
+      if (exitingObjEditor && !this.pointerLocked) {
+        this.tryPointerLock();
+      }
     }
   }
 
   updatePlatformEditor() {
     if (!this.flyModeActive) return;
+    if (this.editorMode === "obj") {
+      if (this.platformEditorPreviewMesh) this.platformEditorPreviewMesh.visible = false;
+      if (this.ropeEditorPreviewMesh) this.ropeEditorPreviewMesh.visible = false;
+      return;
+    }
     if (this.editorMode === "rope") {
       if (this.platformEditorPreviewMesh) this.platformEditorPreviewMesh.visible = false;
       this.updateRopeEditorPreview();
@@ -11920,12 +12334,37 @@ export class GameRuntime {
   // ── Rope Editor ───────────────────────────────────────────────────────
 
   setEditorMode(mode) {
-    this.editorMode = mode;
-    this.editorModePlatformBtnEl?.classList.toggle("active", mode === "platform");
-    this.editorModeRopeBtnEl?.classList.toggle("active", mode === "rope");
+    const normalized = mode === "rope" || mode === "obj" ? mode : "platform";
+    const wasObjMode = this.objEditorActive;
+    this.editorMode = normalized;
+    this.editorModePlatformBtnEl?.classList.toggle("active", normalized === "platform");
+    this.editorModeRopeBtnEl?.classList.toggle("active", normalized === "rope");
+    this.editorModeObjBtnEl?.classList.toggle("active", normalized === "obj");
+
+    if (normalized === "obj" && this.flyModeActive) {
+      this.objEditorActive = true;
+      this.objEditorDragging = false;
+      this.objEditorBarEl?.classList.remove("hidden");
+      this.updateObjEditorInfoEl(this.objEditorSelected);
+      if (this.platformEditorPreviewMesh) this.platformEditorPreviewMesh.visible = false;
+      if (this.ropeEditorPreviewMesh) this.ropeEditorPreviewMesh.visible = false;
+      if (document.pointerLockElement === this.renderer.domElement) {
+        document.exitPointerLock?.();
+      }
+      return;
+    }
+
+    this.objEditorActive = false;
+    this.objEditorDragging = false;
+    this.objEditorBarEl?.classList.add("hidden");
+    this.clearObjEditorSelection();
+
     if (this.flyModeActive) {
-      if (this.platformEditorPreviewMesh) this.platformEditorPreviewMesh.visible = mode === "platform";
-      if (this.ropeEditorPreviewMesh) this.ropeEditorPreviewMesh.visible = mode === "rope";
+      if (this.platformEditorPreviewMesh) this.platformEditorPreviewMesh.visible = normalized === "platform";
+      if (this.ropeEditorPreviewMesh) this.ropeEditorPreviewMesh.visible = normalized === "rope";
+      if (wasObjMode && !this.pointerLocked) {
+        this.tryPointerLock();
+      }
     }
   }
 
