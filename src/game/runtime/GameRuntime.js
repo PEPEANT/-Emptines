@@ -3,6 +3,7 @@ import { io } from "socket.io-client";
 import { Sky } from "three/addons/objects/Sky.js";
 import { Water } from "three/addons/objects/Water.js";
 import { RGBELoader } from "three/addons/loaders/RGBELoader.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
@@ -36,6 +37,24 @@ const INTRO_BOOT_VIDEO_URL = new URL("../../../mp4/grok-video.0.mp4", import.met
 const NPC_GREETING_VIDEO_URL = new URL("../../../mp4/grok-video.webm", import.meta.url).href;
 const ENTRY_BGM_URL = new URL("../../../mp3/TSUKUYOMI.mp3", import.meta.url).href;
 const AD_BILLBOARD_IMAGE_URL = new URL("../../../png/AD.41415786.1.png", import.meta.url).href;
+const FUTURE_CITY_FIXED_BILLBOARD_IMAGE_URLS = Object.freeze([
+  new URL("../../../png/AD.41415786.1.png", import.meta.url).href,
+  new URL("../../../png/claude.jpg", import.meta.url).href,
+  new URL("../../../png/DC.png", import.meta.url).href,
+  new URL("../../../png/Gemini.png", import.meta.url).href,
+  new URL("../../../png/Onenal.png", import.meta.url).href,
+  new URL("../../../png/Slngula.jpg", import.meta.url).href,
+  new URL("../../../png/grok.png", import.meta.url).href
+]);
+const FUTURE_CITY_OSS_MODEL_FILES = Object.freeze([
+  "bank.glb",
+  "restaurant.glb",
+  "store.glb",
+  "pharmacy.glb",
+  "police.glb",
+  "bar.glb",
+  "store.glb"
+]);
 const RIGHT_BILLBOARD_VIDEO_PATHS = Object.freeze({
   GROK01: "mp4/av/grok-video_01.mp4",
   GROK02: "mp4/av/grok-video_02.mp4",
@@ -136,6 +155,7 @@ export class GameRuntime {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     this.textureLoader = new THREE.TextureLoader();
+    this.gltfLoader = new GLTFLoader();
 
     this.playerPosition = new THREE.Vector3(0, GAME_CONSTANTS.PLAYER_HEIGHT, 0);
     this.verticalVelocity = 0;
@@ -192,6 +212,10 @@ export class GameRuntime {
     this.cityWindowTextureCache = new Map();
     this.cityAdBillboardTexture = null;
     this.futureCityBackdropTextureCache = new Map();
+    this.futureCityFixedBillboardTextureCache = new Map();
+    this.ossModelTemplateCache = new Map();
+    this.ossModelLoadPromiseCache = new Map();
+    this.staticWorldColliders = [];
 
     this.jumpPlatforms = [];
     this.jumpPlatformMeshes = [];
@@ -803,6 +827,13 @@ export class GameRuntime {
       }
       this.futureCityBackdropTextureCache.clear();
     }
+    if (this.futureCityFixedBillboardTextureCache.size > 0) {
+      for (const texture of this.futureCityFixedBillboardTextureCache.values()) {
+        texture?.dispose?.();
+      }
+      this.futureCityFixedBillboardTextureCache.clear();
+    }
+    this.staticWorldColliders.length = 0;
 
     if (this.npcGreetingVideoEl) {
       this.npcGreetingVideoEl.onended = null;
@@ -1082,6 +1113,18 @@ export class GameRuntime {
       const mappedZ = THREE.MathUtils.clamp(sourceZ * zScale + zOffset, -zClamp, zClamp);
       return { x: mappedX, z: mappedZ };
     };
+    const cityGroupWorldX = cityGroup.position.x;
+    const cityGroupWorldZ = cityGroup.position.z;
+    const registerCityBuildingCollider = (localX, localZ, width, depth, minY = -2, maxY = 180) => {
+      this.registerStaticWorldBoxCollider(
+        cityGroupWorldX + (Number(localX) || 0),
+        cityGroupWorldZ + (Number(localZ) || 0),
+        width,
+        depth,
+        minY,
+        maxY
+      );
+    };
 
     const towerPositions = [
       [-22, 6.4, -10],
@@ -1146,6 +1189,7 @@ export class GameRuntime {
       tower.castShadow = false;
       tower.receiveShadow = true;
       cityGroup.add(tower);
+      registerCityBuildingCollider(mapped.x, mapped.z, 4.8, 4.8, -2, h + 4);
     }
 
     const skylineMats = [
@@ -1198,29 +1242,33 @@ export class GameRuntime {
       emissive: 0x1d2732,
       emissiveIntensity: 0.16
     });
-    const createFloatingTowerBillboard = (towerIndex, towerX, towerZ, footprint, towerHeight) => {
-      const toCenter = new THREE.Vector3(-towerX, 0, -towerZ);
-      if (toCenter.lengthSq() < 0.0001) {
-        toCenter.set(0, 0, 1);
-      } else {
-        toCenter.normalize();
-      }
-
+    const bridgeLocalTarget = new THREE.Vector3(
+      this.bridgeApproachSpawn.x - cityGroupWorldX,
+      0,
+      this.bridgeApproachSpawn.z - cityGroupWorldZ
+    );
+    const buildCityAdBoard = ({
+      boardWidth,
+      boardHeight,
+      boardThickness,
+      frameThickness,
+      position,
+      facingDirection,
+      surfaceBaseId = "",
+      sharedScreenMaterials = null,
+      glowOpacity = 0.2
+    }) => {
       const boardGroup = new THREE.Group();
-      const boardWidth = THREE.MathUtils.clamp(footprint * 1.16, 5.8, 8.4);
-      const boardHeight = THREE.MathUtils.clamp(footprint * 0.72, 3.2, 4.9);
-      const boardThickness = 0.08;
-      const frameThickness = 0.26;
-      const floatHeight = Math.max(2.8, footprint * 0.44);
-      const boardY = towerHeight + floatHeight;
-      const boardOffset = footprint * 0.08;
+      boardGroup.position.copy(position);
 
-      boardGroup.position.set(
-        towerX + toCenter.x * boardOffset,
-        boardY,
-        towerZ + toCenter.z * boardOffset
-      );
-      boardGroup.rotation.y = Math.atan2(toCenter.x, toCenter.z);
+      const direction = facingDirection.clone();
+      direction.y = 0;
+      if (direction.lengthSq() < 0.0001) {
+        direction.set(0, 0, 1);
+      } else {
+        direction.normalize();
+      }
+      boardGroup.rotation.y = Math.atan2(direction.x, direction.z);
 
       const frameMesh = new THREE.Mesh(
         new THREE.BoxGeometry(
@@ -1240,12 +1288,22 @@ export class GameRuntime {
       frameMesh.castShadow = false;
       frameMesh.receiveShadow = true;
 
-      const surfaceBaseId = `${CITY_AD_BILLBOARD_BASE_PREFIX}${towerIndex}`;
-      const screenMesh = this.createPaintableBoxMesh(
-        new THREE.BoxGeometry(boardWidth, boardHeight, boardThickness),
-        this.createCityAdBillboardMaterial(),
-        surfaceBaseId
-      );
+      let screenMesh;
+      if (surfaceBaseId) {
+        screenMesh = this.createPaintableBoxMesh(
+          new THREE.BoxGeometry(boardWidth, boardHeight, boardThickness),
+          this.createCityAdBillboardMaterial(),
+          surfaceBaseId
+        );
+      } else {
+        const materials = Array.isArray(sharedScreenMaterials)
+          ? sharedScreenMaterials
+          : this.createCityAdBillboardMaterial();
+        screenMesh = new THREE.Mesh(
+          new THREE.BoxGeometry(boardWidth, boardHeight, boardThickness),
+          materials
+        );
+      }
       screenMesh.position.z = 0.02;
       screenMesh.castShadow = false;
       screenMesh.receiveShadow = true;
@@ -1256,7 +1314,7 @@ export class GameRuntime {
         new THREE.MeshBasicMaterial({
           color: 0x35daff,
           transparent: true,
-          opacity: 0.2,
+          opacity: glowOpacity,
           depthWrite: false,
           blending: THREE.AdditiveBlending,
           side: THREE.DoubleSide
@@ -1267,6 +1325,68 @@ export class GameRuntime {
 
       boardGroup.add(frameMesh, screenMesh, glowPlane);
       cityGroup.add(boardGroup);
+      return { boardGroup, screenMesh };
+    };
+    const createFloatingTowerBillboard = (towerIndex, towerX, towerZ, footprint, towerHeight) => {
+      const toCenter = new THREE.Vector3(-towerX, 0, -towerZ);
+      if (toCenter.lengthSq() < 0.0001) {
+        toCenter.set(0, 0, 1);
+      } else {
+        toCenter.normalize();
+      }
+      const surfaceBaseId = `${CITY_AD_BILLBOARD_BASE_PREFIX}${towerIndex}`;
+      const boardThickness = 0.08;
+      const frameThickness = 0.26;
+
+      const toBridge = bridgeLocalTarget
+        .clone()
+        .sub(new THREE.Vector3(towerX, 0, towerZ));
+      if (toBridge.lengthSq() < 0.0001) {
+        toBridge.set(0, 0, -1);
+      } else {
+        toBridge.normalize();
+      }
+
+      const lowerBoardWidth = THREE.MathUtils.clamp(footprint * 1.24, 6.2, 9.8);
+      const lowerBoardHeight = THREE.MathUtils.clamp(footprint * 0.82, 3.8, 5.8);
+      const lowerBoardY = THREE.MathUtils.clamp(footprint * 0.62 + 2.5, 4.8, 7.2);
+      const lowerOffset = footprint * 0.72;
+
+      const lowerBoard = buildCityAdBoard({
+        boardWidth: lowerBoardWidth,
+        boardHeight: lowerBoardHeight,
+        boardThickness,
+        frameThickness,
+        position: new THREE.Vector3(
+          towerX + toBridge.x * lowerOffset,
+          lowerBoardY,
+          towerZ + toBridge.z * lowerOffset
+        ),
+        facingDirection: toBridge,
+        surfaceBaseId,
+        glowOpacity: 0.26
+      });
+
+      const upperBoardWidth = THREE.MathUtils.clamp(footprint * 1.2, 6.2, 9.2);
+      const upperBoardHeight = THREE.MathUtils.clamp(footprint * 0.78, 3.6, 5.4);
+      const upperFloatHeight = Math.max(3.2, footprint * 0.56);
+      const upperBoardY = towerHeight + upperFloatHeight;
+      const upperOffset = footprint * 0.44;
+      const upperBoard = buildCityAdBoard({
+        boardWidth: upperBoardWidth,
+        boardHeight: upperBoardHeight,
+        boardThickness,
+        frameThickness,
+        position: new THREE.Vector3(
+          towerX + toCenter.x * upperOffset,
+          upperBoardY,
+          towerZ + toCenter.z * upperOffset
+        ),
+        facingDirection: toCenter,
+        sharedScreenMaterials: lowerBoard.screenMesh.material,
+        glowOpacity: 0.2
+      });
+      upperBoard.boardGroup.rotation.x = -0.12;
     };
     // Clone the plaza tower pattern into a larger skyline ring so it reads from mid-distance.
     for (let i = 0; i < towerPositions.length; i += 1) {
@@ -1275,11 +1395,41 @@ export class GameRuntime {
       const megaZ = z * 2.7;
       const megaHeight = Math.max(30, h * 4.2 + (i % 3) * 4.5);
       const footprint = 8.4 + (i % 2) * 1.8;
+      const podiumHeight = Math.max(6, megaHeight * 0.18);
+      const shaftHeight = megaHeight;
+      const crownHeight = Math.max(4.8, megaHeight * 0.16);
+      const totalTowerHeight = podiumHeight + shaftHeight + crownHeight;
 
       const wallMaterial = skylineMats[i % skylineMats.length].clone();
       const roofMaterial = skylineRoofMaterial.clone();
+      const podiumMaterial = wallMaterial.clone();
+
+      const podium = new THREE.Mesh(
+        new THREE.BoxGeometry(footprint * 1.22, podiumHeight, footprint * 1.2),
+        [
+          podiumMaterial,
+          podiumMaterial,
+          roofMaterial, // +Y
+          roofMaterial, // -Y
+          podiumMaterial,
+          podiumMaterial
+        ]
+      );
+      podium.position.set(megaX, podiumHeight * 0.5, megaZ);
+      podium.castShadow = false;
+      podium.receiveShadow = true;
+      cityGroup.add(podium);
+      registerCityBuildingCollider(
+        megaX,
+        megaZ,
+        footprint * 1.24,
+        footprint * 1.22,
+        -2,
+        totalTowerHeight + 6
+      );
+
       const megaTower = new THREE.Mesh(
-        new THREE.BoxGeometry(footprint, megaHeight, footprint),
+        new THREE.BoxGeometry(footprint, shaftHeight, footprint * 0.97),
         [
           wallMaterial, // +X
           wallMaterial, // -X
@@ -1289,20 +1439,71 @@ export class GameRuntime {
           wallMaterial  // -Z
         ]
       );
-      megaTower.position.set(megaX, megaHeight * 0.5, megaZ);
+      megaTower.position.set(megaX, podiumHeight + shaftHeight * 0.5, megaZ);
       megaTower.castShadow = false;
       megaTower.receiveShadow = true;
       cityGroup.add(megaTower);
 
+      const upperShaft = new THREE.Mesh(
+        new THREE.BoxGeometry(footprint * 0.76, crownHeight, footprint * 0.72),
+        [
+          wallMaterial.clone(),
+          wallMaterial.clone(),
+          roofMaterial,
+          roofMaterial,
+          wallMaterial.clone(),
+          wallMaterial.clone()
+        ]
+      );
+      upperShaft.position.set(megaX, podiumHeight + shaftHeight + crownHeight * 0.5 + 0.12, megaZ);
+      upperShaft.castShadow = false;
+      upperShaft.receiveShadow = true;
+      cityGroup.add(upperShaft);
+
       const towerCap = new THREE.Mesh(
-        new THREE.CylinderGeometry(footprint * 0.26, footprint * 0.32, 1.7, this.mobileEnabled ? 9 : 14),
+        new THREE.CylinderGeometry(
+          footprint * 0.24,
+          footprint * 0.29,
+          1.7,
+          this.mobileEnabled ? 9 : 14
+        ),
         skylineCapMats[i % 3]
       );
-      towerCap.position.set(megaX, megaHeight + 0.86, megaZ);
+      towerCap.position.set(megaX, totalTowerHeight + 0.86, megaZ);
       towerCap.castShadow = false;
       towerCap.receiveShadow = true;
       cityGroup.add(towerCap);
-      createFloatingTowerBillboard(i, megaX, megaZ, footprint, megaHeight);
+
+      const edgeStripMaterial = new THREE.MeshBasicMaterial({
+        color: i % 2 === 0 ? 0x6fe8ff : 0x79ffca,
+        transparent: true,
+        opacity: 0.28,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        fog: false,
+        toneMapped: false
+      });
+      const edgeHeight = shaftHeight * 0.9;
+      const edgeY = podiumHeight + edgeHeight * 0.5 + 0.36;
+      const edgeOffsetX = footprint * 0.48;
+      const edgeOffsetZ = footprint * 0.46;
+      for (const sx of [-1, 1]) {
+        for (const sz of [-1, 1]) {
+          const edgeStrip = new THREE.Mesh(
+            new THREE.BoxGeometry(
+              Math.max(0.08, footprint * 0.032),
+              edgeHeight,
+              Math.max(0.08, footprint * 0.032)
+            ),
+            edgeStripMaterial
+          );
+          edgeStrip.position.set(megaX + sx * edgeOffsetX, edgeY, megaZ + sz * edgeOffsetZ);
+          edgeStrip.renderOrder = 6;
+          cityGroup.add(edgeStrip);
+        }
+      }
+
+      createFloatingTowerBillboard(i, megaX, megaZ, footprint, totalTowerHeight);
     }
 
     const plazaPaintMat = new THREE.MeshStandardMaterial({
@@ -1338,6 +1539,7 @@ export class GameRuntime {
       kiosk.castShadow = false;
       kiosk.receiveShadow = true;
       cityGroup.add(kiosk);
+      registerCityBuildingCollider(mapped.x, mapped.z, footprint + 0.5, footprint + 0.5, -2, height + 3);
     }
 
     const districtPaintMat = new THREE.MeshStandardMaterial({
@@ -1374,6 +1576,7 @@ export class GameRuntime {
       block.castShadow = false;
       block.receiveShadow = true;
       cityGroup.add(block);
+      registerCityBuildingCollider(mapped.x, mapped.z, footprint + 0.6, depth + 0.6, -2, height + 4);
     }
 
     const outerDistrictPaintMat = new THREE.MeshStandardMaterial({
@@ -1410,6 +1613,7 @@ export class GameRuntime {
       block.castShadow = false;
       block.receiveShadow = true;
       cityGroup.add(block);
+      registerCityBuildingCollider(mapped.x, mapped.z, width + 0.7, depth + 0.7, -2, height + 4);
     }
 
     const bridgePaintMat = new THREE.MeshStandardMaterial({
@@ -1576,49 +1780,6 @@ export class GameRuntime {
     cityEntryTempleGate.position.set(this.bridgeCityEntry.x, 0, this.bridgeCityEntry.z + 2.2);
     cityEntryTempleGate.rotation.y = bridgeYaw;
 
-    const boundaryMarker = new THREE.Group();
-    boundaryMarker.position.set(this.bridgeCityEntry.x, 0, this.bridgeCityEntry.z);
-    const boundaryPortalRadius = Math.max(2.2, this.bridgeWidth * 0.34);
-
-    const boundaryRing = new THREE.Mesh(
-      new THREE.TorusGeometry(boundaryPortalRadius, 0.22, 22, this.mobileEnabled ? 36 : 68),
-      new THREE.MeshStandardMaterial({
-        color: 0x84dcff,
-        roughness: 0.14,
-        metalness: 0.46,
-        emissive: 0x49bfff,
-        emissiveIntensity: 0.48,
-        transparent: true,
-        opacity: 0.82
-      })
-    );
-    boundaryRing.position.y = 2.06;
-
-    const boundaryHalo = new THREE.Mesh(
-      new THREE.CircleGeometry(boundaryPortalRadius * 0.82, this.mobileEnabled ? 26 : 52),
-      new THREE.MeshBasicMaterial({
-        color: 0xaaf2ff,
-        transparent: true,
-        opacity: 0.24,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending
-      })
-    );
-    boundaryHalo.position.y = 2.06;
-
-    const boundaryBeam = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.07, 0.12, 1.18, this.mobileEnabled ? 10 : 16),
-      new THREE.MeshBasicMaterial({
-        color: 0x7fe6ff,
-        transparent: true,
-        opacity: 0.28,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending
-      })
-    );
-    boundaryBeam.position.y = 0.62;
-
     const portalGroup = new THREE.Group();
     portalGroup.position.copy(this.portalFloorPosition);
     portalGroup.position.y = 0;
@@ -1693,12 +1854,10 @@ export class GameRuntime {
     this.npcGuideGroup = npcGuide;
     this.mirrorGateGroup = mirrorGate;
     this.mirrorGatePanel = null;
-    this.bridgeBoundaryMarker = boundaryMarker;
-    this.bridgeBoundaryRing = boundaryRing;
-    this.bridgeBoundaryHalo = boundaryHalo;
-    this.bridgeBoundaryBeam = boundaryBeam;
-
-    boundaryMarker.add(boundaryRing, boundaryHalo, boundaryBeam);
+    this.bridgeBoundaryMarker = null;
+    this.bridgeBoundaryRing = null;
+    this.bridgeBoundaryHalo = null;
+    this.bridgeBoundaryBeam = null;
     group.add(
       bridgeGroup,
       cityGroup,
@@ -1706,7 +1865,6 @@ export class GameRuntime {
       mirrorGate,
       bridgeFarEndTempleGate,
       cityEntryTempleGate,
-      boundaryMarker,
       portalGroup
     );
     this.scene.add(group);
@@ -1719,8 +1877,8 @@ export class GameRuntime {
   createKoreanTempleGateMesh(options = {}) {
     const includePortal = Boolean(options?.includePortal);
     const trackPortalRefs = Boolean(options?.trackPortalRefs);
-    const gateScale = Math.max(0.4, Number(options?.scale) || 1.26);
-    const portalScale = Math.max(0.4, Number(options?.portalScale) || 1.24);
+    const gateScale = Math.max(0.4, Number(options?.scale) || 1.48);
+    const portalScale = Math.max(0.4, Number(options?.portalScale) || 1.44);
     const gateGroup = new THREE.Group();
     const gateWoodMat = new THREE.MeshStandardMaterial({
       color: 0x6a3f24,
@@ -2807,7 +2965,7 @@ export class GameRuntime {
     const centerDistance = this.mobileEnabled ? 228 : 248;
     const center = spawnBase.clone().addScaledVector(forward, centerDistance);
     const skylineHeight = this.mobileEnabled ? 92 : 118;
-    const skylineY = this.mobileEnabled ? 64 : 72;
+    const skylineY = this.mobileEnabled ? 42 : 52;
     const baseYaw = Math.atan2(forward.x, forward.z) + Math.PI;
 
     const segments = [
@@ -2906,7 +3064,387 @@ export class GameRuntime {
     floorGlow.renderOrder = 1;
 
     backdropGroup.add(floorGlow);
+    this.addFutureCityBillboardDistrict(backdropGroup, center, forward, right);
     rootGroup.add(backdropGroup);
+  }
+
+  getFutureCityFixedBillboardTexture(imageUrl) {
+    const normalized = String(imageUrl ?? "").trim();
+    if (!normalized) {
+      return null;
+    }
+    const cached = this.futureCityFixedBillboardTextureCache.get(normalized);
+    if (cached) {
+      return cached;
+    }
+
+    const texture = this.textureLoader.load(normalized);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.anisotropy = Math.min(8, this.renderer?.capabilities?.getMaxAnisotropy?.() || 1);
+    texture.needsUpdate = true;
+    this.futureCityFixedBillboardTextureCache.set(normalized, texture);
+    return texture;
+  }
+
+  createFutureCityFixedBillboardScreenMaterial(imageUrl, emissiveIntensity = 0.9) {
+    const map = this.getFutureCityFixedBillboardTexture(imageUrl);
+    return new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 0.18,
+      metalness: 0.08,
+      map,
+      emissive: 0xffffff,
+      emissiveMap: map,
+      emissiveIntensity: THREE.MathUtils.clamp(Number(emissiveIntensity) || 0.9, 0.24, 1.4),
+      fog: false,
+      toneMapped: false
+    });
+  }
+
+  loadOssNeonTownModelTemplate(modelFile) {
+    const normalizedFile = String(modelFile ?? "").trim();
+    if (!normalizedFile) {
+      return Promise.resolve(null);
+    }
+    const cachedTemplate = this.ossModelTemplateCache.get(normalizedFile);
+    if (cachedTemplate) {
+      return Promise.resolve(cachedTemplate);
+    }
+    const inflight = this.ossModelLoadPromiseCache.get(normalizedFile);
+    if (inflight) {
+      return inflight;
+    }
+
+    const encodedName = normalizedFile.split("/").map((part) => encodeURIComponent(part)).join("/");
+    const modelUrl = resolveRuntimeAssetUrl(
+      `assets/graphics/world/models/oss-neontown/GLTF/${encodedName}`
+    );
+
+    const promise = new Promise((resolve) => {
+      this.gltfLoader.load(
+        modelUrl,
+        (gltf) => {
+          const scene = gltf?.scene ?? gltf?.scenes?.[0] ?? null;
+          if (!scene) {
+            resolve(null);
+            return;
+          }
+          scene.updateMatrixWorld(true);
+          scene.traverse((child) => {
+            if (!child?.isMesh) {
+              return;
+            }
+            child.castShadow = false;
+            child.receiveShadow = true;
+            if (Array.isArray(child.material)) {
+              for (const mat of child.material) {
+                if (mat && "emissiveIntensity" in mat) {
+                  mat.emissiveIntensity = Math.max(0.08, Number(mat.emissiveIntensity) || 0.08);
+                }
+              }
+            } else if (child.material && "emissiveIntensity" in child.material) {
+              child.material.emissiveIntensity = Math.max(
+                0.08,
+                Number(child.material.emissiveIntensity) || 0.08
+              );
+            }
+          });
+          this.ossModelTemplateCache.set(normalizedFile, scene);
+          resolve(scene);
+        },
+        undefined,
+        () => {
+          resolve(null);
+        }
+      );
+    });
+    this.ossModelLoadPromiseCache.set(normalizedFile, promise);
+    promise.finally(() => {
+      if (this.ossModelLoadPromiseCache.get(normalizedFile) === promise) {
+        this.ossModelLoadPromiseCache.delete(normalizedFile);
+      }
+    });
+    return promise;
+  }
+
+  placeFutureCityOssBuilding(
+    parentGroup,
+    modelFile,
+    worldPosition,
+    facingDirection,
+    targetWidth,
+    targetDepth,
+    targetHeight
+  ) {
+    if (!parentGroup || !worldPosition) {
+      return;
+    }
+
+    this.loadOssNeonTownModelTemplate(modelFile).then((template) => {
+      if (!template || !parentGroup.parent) {
+        return;
+      }
+
+      const wrapper = new THREE.Group();
+      wrapper.position.copy(worldPosition);
+
+      const direction = (facingDirection instanceof THREE.Vector3
+        ? facingDirection.clone()
+        : new THREE.Vector3(0, 0, 1));
+      direction.y = 0;
+      if (direction.lengthSq() < 0.0001) {
+        direction.set(0, 0, 1);
+      } else {
+        direction.normalize();
+      }
+      wrapper.rotation.y = Math.atan2(direction.x, direction.z) + Math.PI;
+
+      const model = template.clone(true);
+      const localBounds = new THREE.Box3().setFromObject(model);
+      const size = localBounds.getSize(new THREE.Vector3());
+      const center = localBounds.getCenter(new THREE.Vector3());
+      const safeWidth = Math.max(0.2, Number(targetWidth) || 0.2);
+      const safeDepth = Math.max(0.2, Number(targetDepth) || 0.2);
+      const safeHeight = Math.max(0.4, Number(targetHeight) || 0.4);
+      const scaleX = safeWidth / Math.max(0.01, size.x);
+      const scaleY = safeHeight / Math.max(0.01, size.y);
+      const scaleZ = safeDepth / Math.max(0.01, size.z);
+      const fitScale = THREE.MathUtils.clamp(Math.min(scaleX, scaleY, scaleZ), 0.05, 60);
+
+      model.scale.setScalar(fitScale);
+      model.position.set(
+        -center.x * fitScale,
+        -localBounds.min.y * fitScale,
+        -center.z * fitScale
+      );
+      model.updateMatrixWorld(true);
+      wrapper.add(model);
+      parentGroup.add(wrapper);
+    });
+  }
+
+  addFutureCityBillboardDistrict(parentGroup, center, forward, right) {
+    if (!parentGroup || !center || !forward || !right) {
+      return;
+    }
+
+    const assetUrls = FUTURE_CITY_FIXED_BILLBOARD_IMAGE_URLS.filter((url) => String(url ?? "").trim());
+    if (!assetUrls.length) {
+      return;
+    }
+
+    const districtGroup = new THREE.Group();
+    districtGroup.name = "future_city_billboard_district";
+    const toPlayer = forward.clone().multiplyScalar(-1).normalize();
+    const baseCenter = center.clone().addScaledVector(forward, this.mobileEnabled ? -12 : -8);
+    const styleCycle = ["cyan", "slate", "amber"];
+
+    for (let index = 0; index < assetUrls.length; index += 1) {
+      const imageUrl = assetUrls[index];
+      const columnOffset = index - (assetUrls.length - 1) * 0.5;
+      const rowSign = index % 2 === 0 ? -1 : 1;
+      const laneDepth = Math.floor(index / 3) * (this.mobileEnabled ? 7 : 10);
+      const anchor = baseCenter
+        .clone()
+        .addScaledVector(right, columnOffset * (this.mobileEnabled ? 54 : 72))
+        .addScaledVector(forward, rowSign * (this.mobileEnabled ? 14 : 20) + laneDepth);
+
+      const footprint = (this.mobileEnabled ? 9.8 : 12.4) + (index % 3) * (this.mobileEnabled ? 1.1 : 1.5);
+      const shaftHeight = (this.mobileEnabled ? 34 : 46) + (index % 4) * (this.mobileEnabled ? 4.2 : 6.2);
+      const podiumHeight = Math.max(4.8, shaftHeight * 0.2);
+      const crownHeight = Math.max(4.2, shaftHeight * 0.15);
+      const totalHeight = podiumHeight + shaftHeight + crownHeight;
+      this.registerStaticWorldBoxCollider(
+        anchor.x,
+        anchor.z,
+        footprint * 1.26,
+        footprint * 1.2,
+        -2,
+        totalHeight + 8
+      );
+      const ossModelFile =
+        FUTURE_CITY_OSS_MODEL_FILES[index % FUTURE_CITY_OSS_MODEL_FILES.length] || "store.glb";
+      this.placeFutureCityOssBuilding(
+        districtGroup,
+        ossModelFile,
+        anchor.clone(),
+        toPlayer,
+        footprint * 1.2,
+        footprint * 1.16,
+        totalHeight * 0.9
+      );
+      const style = styleCycle[index % styleCycle.length];
+
+      const wallMaterial = this.createCityWindowMaterial({
+        style,
+        repeatX: 1.6 + (index % 3) * 0.18,
+        repeatY: 7.2 + (index % 4) * 0.78,
+        roughness: 0.58,
+        metalness: 0.18,
+        emissive: 0x122130,
+        emissiveIntensity: 0.11
+      });
+      const roofMaterial = new THREE.MeshStandardMaterial({
+        color: 0x4d5c69,
+        roughness: 0.72,
+        metalness: 0.16,
+        emissive: 0x1a2633,
+        emissiveIntensity: 0.14
+      });
+
+      const podium = new THREE.Mesh(
+        new THREE.BoxGeometry(footprint * 1.24, podiumHeight, footprint * 1.18),
+        [wallMaterial.clone(), wallMaterial.clone(), roofMaterial, roofMaterial, wallMaterial.clone(), wallMaterial.clone()]
+      );
+      podium.position.set(anchor.x, podiumHeight * 0.5, anchor.z);
+      podium.castShadow = false;
+      podium.receiveShadow = true;
+      districtGroup.add(podium);
+
+      const shaft = new THREE.Mesh(
+        new THREE.BoxGeometry(footprint, shaftHeight, footprint * 0.96),
+        [wallMaterial.clone(), wallMaterial.clone(), roofMaterial, roofMaterial, wallMaterial.clone(), wallMaterial.clone()]
+      );
+      shaft.position.set(anchor.x, podiumHeight + shaftHeight * 0.5, anchor.z);
+      shaft.castShadow = false;
+      shaft.receiveShadow = true;
+      districtGroup.add(shaft);
+
+      const crown = new THREE.Mesh(
+        new THREE.BoxGeometry(footprint * 0.76, crownHeight, footprint * 0.72),
+        [wallMaterial.clone(), wallMaterial.clone(), roofMaterial, roofMaterial, wallMaterial.clone(), wallMaterial.clone()]
+      );
+      crown.position.set(anchor.x, podiumHeight + shaftHeight + crownHeight * 0.5 + 0.12, anchor.z);
+      crown.castShadow = false;
+      crown.receiveShadow = true;
+      districtGroup.add(crown);
+
+      const edgeLightMaterial = new THREE.MeshBasicMaterial({
+        color: 0x76e9ff,
+        transparent: true,
+        opacity: 0.36,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        fog: false,
+        toneMapped: false
+      });
+      const edgeHeight = shaftHeight * 0.9;
+      const edgeY = podiumHeight + edgeHeight * 0.5 + 0.24;
+      const edgeOffsetX = footprint * 0.48;
+      const edgeOffsetZ = footprint * 0.45;
+      for (const sx of [-1, 1]) {
+        for (const sz of [-1, 1]) {
+          const edge = new THREE.Mesh(
+            new THREE.BoxGeometry(Math.max(0.08, footprint * 0.03), edgeHeight, Math.max(0.08, footprint * 0.03)),
+            edgeLightMaterial
+          );
+          edge.position.set(anchor.x + sx * edgeOffsetX, edgeY, anchor.z + sz * edgeOffsetZ);
+          edge.renderOrder = 6;
+          districtGroup.add(edge);
+        }
+      }
+
+      const billboardDirection = toPlayer.clone();
+      const billboardYaw = Math.atan2(billboardDirection.x, billboardDirection.z);
+      const topBoardWidth = footprint * 1.44;
+      const topBoardHeight = topBoardWidth * 0.48;
+      const topBoardDepth = 0.18;
+      const topFrameDepth = topBoardDepth + 0.06;
+      const topBoardGroup = new THREE.Group();
+      topBoardGroup.position.set(anchor.x, totalHeight + topBoardHeight * 0.54 + 0.8, anchor.z);
+      topBoardGroup.rotation.y = billboardYaw;
+      topBoardGroup.rotation.x = -0.08;
+
+      const topFrame = new THREE.Mesh(
+        new THREE.BoxGeometry(topBoardWidth + 0.34, topBoardHeight + 0.34, topFrameDepth),
+        new THREE.MeshStandardMaterial({
+          color: 0x0f151c,
+          roughness: 0.28,
+          metalness: 0.56,
+          emissive: 0x1a2e42,
+          emissiveIntensity: 0.24
+        })
+      );
+      topFrame.position.z = -0.02;
+      topFrame.castShadow = false;
+      topFrame.receiveShadow = true;
+      const topScreen = new THREE.Mesh(
+        new THREE.PlaneGeometry(topBoardWidth, topBoardHeight),
+        this.createFutureCityFixedBillboardScreenMaterial(imageUrl, 0.98)
+      );
+      topScreen.position.z = topBoardDepth * 0.5 + 0.03;
+      topScreen.renderOrder = 7;
+      const topGlow = new THREE.Mesh(
+        new THREE.PlaneGeometry(topBoardWidth + 0.36, topBoardHeight + 0.36),
+        new THREE.MeshBasicMaterial({
+          color: 0x67f3ff,
+          transparent: true,
+          opacity: 0.2,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          fog: false,
+          toneMapped: false
+        })
+      );
+      topGlow.position.z = topBoardDepth * 0.5 + 0.035;
+      topGlow.renderOrder = 8;
+      topBoardGroup.add(topFrame, topScreen, topGlow);
+      districtGroup.add(topBoardGroup);
+
+      const lowerBoardWidth = footprint * 1.18;
+      const lowerBoardHeight = lowerBoardWidth * 0.42;
+      const lowerBoardDepth = 0.16;
+      const lowerBoardGroup = new THREE.Group();
+      lowerBoardGroup.position.set(
+        anchor.x + billboardDirection.x * footprint * 0.72,
+        podiumHeight + Math.min(shaftHeight * 0.36, 18),
+        anchor.z + billboardDirection.z * footprint * 0.72
+      );
+      lowerBoardGroup.rotation.y = billboardYaw;
+      const lowerFrame = new THREE.Mesh(
+        new THREE.BoxGeometry(lowerBoardWidth + 0.28, lowerBoardHeight + 0.28, lowerBoardDepth + 0.06),
+        new THREE.MeshStandardMaterial({
+          color: 0x101821,
+          roughness: 0.3,
+          metalness: 0.5,
+          emissive: 0x173049,
+          emissiveIntensity: 0.2
+        })
+      );
+      lowerFrame.position.z = -0.02;
+      lowerFrame.castShadow = false;
+      lowerFrame.receiveShadow = true;
+      const lowerScreen = new THREE.Mesh(
+        new THREE.PlaneGeometry(lowerBoardWidth, lowerBoardHeight),
+        this.createFutureCityFixedBillboardScreenMaterial(imageUrl, 0.9)
+      );
+      lowerScreen.position.z = lowerBoardDepth * 0.5 + 0.03;
+      lowerScreen.renderOrder = 7;
+      const lowerGlow = new THREE.Mesh(
+        new THREE.PlaneGeometry(lowerBoardWidth + 0.28, lowerBoardHeight + 0.28),
+        new THREE.MeshBasicMaterial({
+          color: 0x56e8ff,
+          transparent: true,
+          opacity: 0.16,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          fog: false,
+          toneMapped: false
+        })
+      );
+      lowerGlow.position.z = lowerBoardDepth * 0.5 + 0.035;
+      lowerGlow.renderOrder = 8;
+      lowerBoardGroup.add(lowerFrame, lowerScreen, lowerGlow);
+      districtGroup.add(lowerBoardGroup);
+    }
+
+    parentGroup.add(districtGroup);
   }
 
   getFutureCityBackdropTexture(layer = "base") {
@@ -3104,12 +3642,12 @@ export class GameRuntime {
     context.fillStyle = wallShade;
     context.fillRect(0, 0, canvas.width, canvas.height);
 
-    const cols = 8;
-    const rows = 12;
-    const marginX = 13;
-    const marginY = 10;
-    const gapX = 4;
-    const gapY = 5;
+    const cols = 7;
+    const rows = 14;
+    const marginX = 14;
+    const marginY = 8;
+    const gapX = 5;
+    const gapY = 4;
     const innerWidth = canvas.width - marginX * 2;
     const innerHeight = canvas.height - marginY * 2;
     const windowWidth = Math.max(6, Math.floor((innerWidth - gapX * (cols - 1)) / cols));
@@ -3117,6 +3655,10 @@ export class GameRuntime {
 
     context.fillStyle = palette.mullion;
     context.fillRect(marginX - 3, marginY - 3, innerWidth + 6, innerHeight + 6);
+    context.fillStyle = "rgba(255, 255, 255, 0.04)";
+    context.fillRect(marginX - 1, marginY - 1, innerWidth + 2, 2);
+    context.fillStyle = "rgba(0, 0, 0, 0.12)";
+    context.fillRect(marginX - 1, marginY + innerHeight - 1, innerWidth + 2, 2);
 
     const pseudoRandom = (x, y, seed = 0) => {
       const value = Math.sin((x + 1) * 12.9898 + (y + 1) * 78.233 + seed * 37.719) * 43758.5453;
@@ -3124,11 +3666,17 @@ export class GameRuntime {
     };
 
     for (let row = 0; row < rows; row += 1) {
+      const rowY = marginY + row * (windowHeight + gapY);
+      if (row % 4 === 0) {
+        context.fillStyle = "rgba(134, 164, 196, 0.06)";
+        context.fillRect(marginX, Math.max(marginY, rowY - 1), innerWidth, 2);
+      }
       for (let col = 0; col < cols; col += 1) {
         const x = marginX + col * (windowWidth + gapX);
-        const y = marginY + row * (windowHeight + gapY);
+        const y = rowY;
         const n = pseudoRandom(col, row, safeRepeatX + safeRepeatY);
-        const lit = n > 0.82;
+        const litThreshold = row % 3 === 0 ? 0.78 : 0.84;
+        const lit = n > litThreshold;
         let fillColor = palette.glassDark;
         if (lit) {
           fillColor = palette.glassLight;
@@ -3632,6 +4180,13 @@ export class GameRuntime {
       return;
     }
 
+    if (this.climbingRope || this.getNearestClimbableRope()) {
+      this.surfacePaintTarget = null;
+      this.surfacePaintProbeClock = this.surfacePaintProbeIntervalIdle;
+      this.surfacePaintPromptEl?.classList.add("hidden");
+      if (this.mobilePaintBtnEl) { this.mobilePaintBtnEl.classList.add("hidden"); this.mobilePaintBtnEl.disabled = true; }
+      return;
+    }
     if (this.chatOpen || this.surfacePainterOpen || !this.canMovePlayer()) {
       this.surfacePaintTarget = null;
       this.surfacePaintProbeClock = this.surfacePaintProbeIntervalIdle;
@@ -7577,7 +8132,6 @@ export class GameRuntime {
 
       if (event.code === "KeyF" && this.canUseGameplayControls()) {
         event.preventDefault();
-        if (this.tryClimbRope()) return;
         if (this.tryOpenSurfacePainterFromInteraction()) {
           return;
         }
@@ -7590,6 +8144,12 @@ export class GameRuntime {
       if (event.code === "KeyB" && this.canUseGameplayControls() && this.hasChalk) {
         event.preventDefault();
         this.setActiveTool(this.activeTool === "chalk" ? "move" : "chalk");
+        return;
+      }
+
+      if (event.code === "KeyE" && this.canUseGameplayControls()) {
+        event.preventDefault();
+        this.tryClimbRope();
         return;
       }
 
@@ -9445,6 +10005,94 @@ export class GameRuntime {
     };
   }
 
+  registerStaticWorldBoxCollider(centerX, centerZ, width, depth, minY = -2, maxY = 220) {
+    const safeWidth = Math.max(0.2, Number(width) || 0);
+    const safeDepth = Math.max(0.2, Number(depth) || 0);
+    if (safeWidth <= 0 || safeDepth <= 0) {
+      return;
+    }
+    const cx = Number(centerX) || 0;
+    const cz = Number(centerZ) || 0;
+    const halfW = safeWidth * 0.5;
+    const halfD = safeDepth * 0.5;
+    const yMin = Number.isFinite(Number(minY)) ? Number(minY) : -2;
+    const yMax = Number.isFinite(Number(maxY)) ? Number(maxY) : 220;
+    this.staticWorldColliders.push({
+      minX: cx - halfW,
+      maxX: cx + halfW,
+      minZ: cz - halfD,
+      maxZ: cz + halfD,
+      minY: Math.min(yMin, yMax),
+      maxY: Math.max(yMin, yMax)
+    });
+  }
+
+  resolveStaticWorldCollisions(position, radius = this.playerCollisionRadius) {
+    if (!position || !this.staticWorldColliders.length) {
+      return;
+    }
+
+    const collisionRadius = Math.max(0.12, Number(radius) || this.playerCollisionRadius);
+    const radiusSq = collisionRadius * collisionRadius;
+    const feetY = position.y - GAME_CONSTANTS.PLAYER_HEIGHT;
+    const headY = position.y + 0.18;
+    const epsilon = 0.0001;
+
+    for (let pass = 0; pass < 3; pass += 1) {
+      let adjusted = false;
+      for (const collider of this.staticWorldColliders) {
+        if (!collider) {
+          continue;
+        }
+        if (headY < collider.minY || feetY > collider.maxY) {
+          continue;
+        }
+
+        const nearestX = THREE.MathUtils.clamp(position.x, collider.minX, collider.maxX);
+        const nearestZ = THREE.MathUtils.clamp(position.z, collider.minZ, collider.maxZ);
+        let offsetX = position.x - nearestX;
+        let offsetZ = position.z - nearestZ;
+        let distSq = offsetX * offsetX + offsetZ * offsetZ;
+        if (distSq >= radiusSq - epsilon) {
+          continue;
+        }
+
+        if (distSq > epsilon) {
+          const dist = Math.sqrt(distSq);
+          const push = collisionRadius - dist + epsilon;
+          position.x += (offsetX / dist) * push;
+          position.z += (offsetZ / dist) * push;
+        } else {
+          const pushLeft = Math.abs(position.x - collider.minX);
+          const pushRight = Math.abs(collider.maxX - position.x);
+          const pushBack = Math.abs(position.z - collider.minZ);
+          const pushFront = Math.abs(collider.maxZ - position.z);
+          const smallest = Math.min(pushLeft, pushRight, pushBack, pushFront);
+          if (smallest === pushLeft) {
+            position.x = collider.minX - collisionRadius - epsilon;
+          } else if (smallest === pushRight) {
+            position.x = collider.maxX + collisionRadius + epsilon;
+          } else if (smallest === pushBack) {
+            position.z = collider.minZ - collisionRadius - epsilon;
+          } else {
+            position.z = collider.maxZ + collisionRadius + epsilon;
+          }
+        }
+
+        offsetX = position.x - nearestX;
+        offsetZ = position.z - nearestZ;
+        distSq = offsetX * offsetX + offsetZ * offsetZ;
+        if (distSq < radiusSq) {
+          adjusted = true;
+        }
+      }
+
+      if (!adjusted) {
+        break;
+      }
+    }
+  }
+
   updateMovement(delta) {
     if (this.climbingRope) {
       this.updateClimbing(delta);
@@ -9523,6 +10171,7 @@ export class GameRuntime {
           worldLimit
         );
       }
+      this.resolveStaticWorldCollisions(this.playerPosition, this.playerCollisionRadius);
       const prevFeetY = this.playerPosition.y - GAME_CONSTANTS.PLAYER_HEIGHT;
       this.verticalVelocity += GAME_CONSTANTS.PLAYER_GRAVITY * delta;
       this.playerPosition.y += this.verticalVelocity * delta;

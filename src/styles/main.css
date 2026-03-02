@@ -326,7 +326,7 @@ canvas {
 
 #rope-climb-prompt {
   position: fixed;
-  bottom: 110px;
+  bottom: 65px;
   left: 50%;
   transform: translateX(-50%);
   background: rgba(8, 22, 35, 0.82);
@@ -779,7 +779,7 @@ canvas {
 #chalk-pickup-prompt {
   position: fixed;
   left: 50%;
-  bottom: 100px;
+  bottom: 55px;
   z-index: 60;
   transform: translateX(-50%);
   background: rgba(6, 16, 28, 0.76);
@@ -808,10 +808,10 @@ canvas {
 #surface-paint-prompt {
   position: fixed;
   left: 50%;
-  top: 50%;
-  bottom: auto;
+  bottom: 65px;
+  top: auto;
   z-index: 60;
-  transform: translate(-50%, -50%);
+  transform: translateX(-50%);
   background: rgba(6, 16, 28, 0.8);
   color: #d8eeff;
   font: 600 0.82rem/1.4 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
