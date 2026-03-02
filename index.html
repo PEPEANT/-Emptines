@@ -141,11 +141,11 @@
 
     </div>
 
-    <div id="hub-flow-ui" aria-live="polite">
+    <div id="hub-flow-ui" class="hidden" aria-live="polite">
       <div id="hub-billboard">
-        <p class="hub-kicker">리클레임 허브</p>
-        <h1 id="hub-phase-title">브리지 검문소</h1>
-        <p id="hub-phase-subtitle">도시 입장 전 호출명을 설정하세요.</p>
+        <p class="hub-kicker">EMPTYNES HUB</p>
+        <h1 id="hub-phase-title">도시 입장 대기</h1>
+        <p id="hub-phase-subtitle">신사문 통과 시 바로 입장</p>
       </div>
     </div>
 
@@ -164,6 +164,18 @@
         <p id="nickname-error" class="hidden" aria-live="polite"></p>
         <button id="nickname-submit" type="submit">시작</button>
       </form>
+    </div>
+
+    <div id="npc-choice-gate" class="hidden" aria-modal="true" role="dialog" aria-labelledby="npc-choice-title">
+      <div id="npc-choice-panel">
+        <h2 id="npc-choice-title">NPC 안내</h2>
+        <p class="npc-choice-copy">원하는 항목을 선택하세요.</p>
+        <div id="npc-choice-actions">
+          <button id="npc-choice-nickname" type="button">1. 임시 닉네임 정하기</button>
+          <button id="npc-choice-guide" type="button">2. 도시 설명듣기</button>
+          <button id="npc-choice-play" type="button">3. 놀아달라하기</button>
+        </div>
+      </div>
     </div>
 
     <div id="intro-video-overlay" class="hidden" aria-hidden="true">

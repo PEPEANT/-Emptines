@@ -103,9 +103,74 @@ canvas {
   background: rgba(19, 45, 69, 0.92);
 }
 
-#host-chat-toggle {
+#graphics-toggle {
   position: fixed;
   top: 52px;
+  right: 14px;
+  z-index: 72;
+  min-width: 96px;
+  height: 32px;
+  border: 1px solid rgba(180, 212, 239, 0.66);
+  border-radius: 999px;
+  background: rgba(10, 24, 39, 0.84);
+  color: #e6f4ff;
+  font: 700 0.66rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+
+#graphics-toggle:hover {
+  border-color: rgba(214, 236, 255, 0.92);
+  background: rgba(19, 45, 69, 0.92);
+}
+
+#graphics-toggle[aria-pressed="true"] {
+  border-color: rgba(210, 232, 251, 0.92);
+  background: rgba(21, 50, 76, 0.9);
+}
+
+#graphics-controls {
+  position: fixed;
+  top: 52px;
+  right: 118px;
+  z-index: 73;
+  width: min(44vw, 178px);
+  padding: 8px 10px;
+  border: 1px solid rgba(180, 212, 239, 0.58);
+  border-radius: 10px;
+  background: rgba(10, 24, 39, 0.9);
+  backdrop-filter: blur(4px);
+  box-shadow: 0 8px 18px rgba(2, 8, 12, 0.34);
+  display: grid;
+  gap: 6px;
+}
+
+#graphics-controls label {
+  color: rgba(204, 230, 250, 0.92);
+  font: 700 0.63rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.06em;
+}
+
+#graphics-quality-select {
+  width: 100%;
+  height: 30px;
+  border: 1px solid rgba(160, 204, 236, 0.65);
+  border-radius: 7px;
+  background: rgba(6, 18, 29, 0.84);
+  color: #e8f5ff;
+  font: 700 0.64rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.04em;
+  padding: 0 8px;
+}
+
+#graphics-quality-select:focus-visible {
+  outline: 2px solid rgba(123, 201, 255, 0.82);
+  outline-offset: 1px;
+}
+
+#host-chat-toggle {
+  position: fixed;
+  top: 90px;
   right: 14px;
   z-index: 72;
   min-width: 88px;
@@ -126,7 +191,7 @@ canvas {
 
 #host-controls-toggle {
   position: fixed;
-  top: 90px;
+  top: 128px;
   right: 14px;
   z-index: 72;
   min-width: 110px;
@@ -220,14 +285,14 @@ canvas {
 
 #host-controls {
   position: fixed;
-  top: 132px;
+  top: 170px;
   right: 14px;
   left: auto;
   z-index: 36;
   pointer-events: auto;
   display: grid;
   gap: 6px;
-  max-height: calc(100vh - 146px);
+  max-height: calc(100vh - 184px);
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -328,6 +393,15 @@ canvas {
   background: rgba(255, 204, 68, 0.2);
   border-color: #ffcc44;
   color: #ffcc44;
+}
+
+#obj-editor-row {
+  margin-top: 2px;
+}
+
+#obj-editor-row .editor-mode-btn {
+  flex: 1;
+  min-width: 0;
 }
 
 #rope-climb-prompt {
@@ -639,6 +713,61 @@ canvas {
   border-color: rgba(198, 231, 255, 0.95);
 }
 
+#npc-choice-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 79;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(2, 8, 14, 0.94);
+}
+
+#npc-choice-panel {
+  width: min(92vw, 460px);
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+  border: 1px solid rgba(145, 191, 228, 0.68);
+  border-radius: 14px;
+  background: var(--panel-bg);
+  box-shadow: 0 16px 38px rgba(2, 8, 14, 0.5);
+}
+
+#npc-choice-title {
+  margin: 0;
+  color: #ebf8ff;
+  font: 700 1.06rem/1.2 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.06em;
+}
+
+.npc-choice-copy {
+  margin: 0;
+  color: #b6d7f2;
+  font: 600 0.84rem/1.35 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.03em;
+}
+
+#npc-choice-actions {
+  display: grid;
+  gap: 8px;
+}
+
+#npc-choice-actions button {
+  height: 42px;
+  border: 1px solid rgba(179, 220, 250, 0.82);
+  border-radius: 9px;
+  background: linear-gradient(140deg, rgba(20, 53, 83, 0.95), rgba(9, 22, 35, 0.98));
+  color: #e8f7ff;
+  font: 700 0.78rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+
+#npc-choice-actions button:hover {
+  border-color: rgba(198, 231, 255, 0.95);
+}
+
 #intro-video-overlay {
   position: fixed;
   inset: 0;
@@ -699,7 +828,10 @@ canvas {
   display: grid;
   place-items: center;
   gap: 10px;
-  background: rgba(2, 7, 13, 0.96);
+  background:
+    radial-gradient(circle at 50% 42%, rgba(122, 192, 255, 0.22), transparent 52%),
+    rgba(5, 20, 37, 0.84);
+  backdrop-filter: blur(9px);
   opacity: 0;
   pointer-events: none;
   transition: opacity 460ms ease;
@@ -1486,8 +1618,34 @@ body.is-mobile-ui #chat-ui.mobile-fullscreen #chat-send {
     font-size: 0.68rem;
   }
 
-  #host-chat-toggle {
+  #graphics-toggle {
     top: 46px;
+    right: 8px;
+    min-width: 84px;
+    height: 28px;
+    font-size: 0.58rem;
+  }
+
+  #graphics-controls {
+    top: 46px;
+    right: 96px;
+    width: min(54vw, 152px);
+    padding: 6px 8px;
+    gap: 4px;
+  }
+
+  #graphics-controls label {
+    font-size: 0.56rem;
+  }
+
+  #graphics-quality-select {
+    height: 24px;
+    font-size: 0.54rem;
+    padding: 0 6px;
+  }
+
+  #host-chat-toggle {
+    top: 78px;
     right: 8px;
     min-width: 76px;
     height: 28px;
@@ -1495,7 +1653,7 @@ body.is-mobile-ui #chat-ui.mobile-fullscreen #chat-send {
   }
 
   #host-controls-toggle {
-    top: 78px;
+    top: 110px;
     right: 8px;
     min-width: 90px;
     height: 26px;
@@ -1517,10 +1675,10 @@ body.is-mobile-ui #chat-ui.mobile-fullscreen #chat-send {
   }
 
   #host-controls {
-    top: 106px;
+    top: 138px;
     right: 8px;
     left: auto;
-    max-height: calc(100vh - 114px);
+    max-height: calc(100vh - 146px);
   }
 
   #host-open-portal {
@@ -1902,11 +2060,14 @@ body.mobile-portrait-lock #host-controls,
 body.mobile-portrait-lock #player-roster,
 body.mobile-portrait-lock #hub-flow-ui,
 body.mobile-portrait-lock #nickname-gate,
+body.mobile-portrait-lock #npc-choice-gate,
 body.mobile-portrait-lock #surface-paint-prompt,
 body.mobile-portrait-lock #chalk-pickup-prompt,
 body.mobile-portrait-lock #surface-painter,
 body.mobile-portrait-lock #hud-ui,
 body.mobile-portrait-lock #fullscreen-toggle,
+body.mobile-portrait-lock #graphics-toggle,
+body.mobile-portrait-lock #graphics-controls,
 body.mobile-portrait-lock #host-chat-toggle,
 body.mobile-portrait-lock #host-controls-toggle {
   display: none !important;

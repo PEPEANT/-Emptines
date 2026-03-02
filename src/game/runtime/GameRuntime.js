@@ -690,6 +690,9 @@ export class GameRuntime {
     this.updateFullscreenToggleState();
     this.setupToolState();
     this.setChatOpen(false);
+    // Keep gates closed on initial boot until an explicit interaction opens them.
+    this.hideNicknameGate();
+    this.hideNpcChoiceGate();
     this.syncGraphicsControlsUi();
 
     this.setupWorld();
@@ -2057,8 +2060,8 @@ export class GameRuntime {
         map: veilTexture,
         roughness: 0.62,
         metalness: 0.1,
-        emissive: 0x0b1f12,
-        emissiveIntensity: 0.24,
+        emissive: 0x102d46,
+        emissiveIntensity: 0.32,
         depthWrite: true,
         side: THREE.DoubleSide
       })
@@ -6360,9 +6363,9 @@ export class GameRuntime {
     context.clearRect(0, 0, width, height);
 
     const base = context.createLinearGradient(0, 0, 0, height);
-    base.addColorStop(0, "#010402");
-    base.addColorStop(0.38, "#041009");
-    base.addColorStop(1, "#020804");
+    base.addColorStop(0, "#020a18");
+    base.addColorStop(0.38, "#07203d");
+    base.addColorStop(1, "#041128");
     context.fillStyle = base;
     context.fillRect(0, 0, width, height);
 
@@ -6374,15 +6377,15 @@ export class GameRuntime {
       height * 0.5,
       height * 0.78
     );
-    edgeGlow.addColorStop(0, "rgba(28, 126, 88, 0.22)");
-    edgeGlow.addColorStop(0.66, "rgba(8, 33, 21, 0.5)");
-    edgeGlow.addColorStop(1, "rgba(1, 6, 3, 0.92)");
+    edgeGlow.addColorStop(0, "rgba(82, 177, 255, 0.24)");
+    edgeGlow.addColorStop(0.66, "rgba(15, 44, 88, 0.54)");
+    edgeGlow.addColorStop(1, "rgba(3, 10, 20, 0.92)");
     context.fillStyle = edgeGlow;
     context.fillRect(0, 0, width, height);
 
     context.save();
     context.globalCompositeOperation = "screen";
-    context.filter = this.mobileEnabled ? "blur(14px)" : "blur(20px)";
+    context.filter = this.mobileEnabled ? "blur(20px)" : "blur(28px)";
     for (const layer of this.spawnPortalVeilFogLayers) {
       const driftX = Math.sin(nowSec * layer.speed + layer.phase) * layer.driftX;
       const driftY = Math.cos(nowSec * layer.speed * 0.74 + layer.phase * 0.61) * layer.driftY;
@@ -6390,9 +6393,9 @@ export class GameRuntime {
       const y = layer.baseY * height + driftY;
       const radius = layer.radius * (0.9 + 0.12 * Math.sin(nowSec * (layer.speed * 0.72) + layer.phase));
       const fog = context.createRadialGradient(x, y, radius * 0.06, x, y, radius);
-      fog.addColorStop(0, `rgba(166, 255, 212, ${layer.alpha * 0.42})`);
-      fog.addColorStop(0.42, `rgba(120, 232, 177, ${layer.alpha * 0.27})`);
-      fog.addColorStop(0.82, `rgba(56, 138, 99, ${layer.alpha * 0.18})`);
+      fog.addColorStop(0, `rgba(198, 236, 255, ${layer.alpha * 0.44})`);
+      fog.addColorStop(0.42, `rgba(132, 201, 255, ${layer.alpha * 0.3})`);
+      fog.addColorStop(0.82, `rgba(74, 132, 212, ${layer.alpha * 0.2})`);
       fog.addColorStop(1, "rgba(0, 0, 0, 0)");
       context.fillStyle = fog;
       context.fillRect(x - radius, y - radius, radius * 2, radius * 2);
@@ -6407,9 +6410,9 @@ export class GameRuntime {
       height * 0.5,
       height * 0.66
     );
-    centralMist.addColorStop(0, "rgba(124, 241, 184, 0.28)");
-    centralMist.addColorStop(0.5, "rgba(88, 177, 131, 0.2)");
-    centralMist.addColorStop(1, "rgba(6, 22, 14, 0)");
+    centralMist.addColorStop(0, "rgba(157, 224, 255, 0.3)");
+    centralMist.addColorStop(0.5, "rgba(99, 168, 255, 0.22)");
+    centralMist.addColorStop(1, "rgba(8, 26, 52, 0)");
     context.fillStyle = centralMist;
     context.fillRect(0, 0, width, height);
 
@@ -6417,9 +6420,9 @@ export class GameRuntime {
     context.globalCompositeOperation = "soft-light";
     const bandY = height * (0.48 + Math.sin(nowSec * 0.24) * 0.04);
     const mistBand = context.createLinearGradient(0, bandY - height * 0.16, 0, bandY + height * 0.16);
-    mistBand.addColorStop(0, "rgba(8, 24, 15, 0)");
-    mistBand.addColorStop(0.5, "rgba(152, 255, 200, 0.22)");
-    mistBand.addColorStop(1, "rgba(8, 24, 15, 0)");
+    mistBand.addColorStop(0, "rgba(11, 28, 55, 0)");
+    mistBand.addColorStop(0.5, "rgba(182, 232, 255, 0.24)");
+    mistBand.addColorStop(1, "rgba(11, 28, 55, 0)");
     context.fillStyle = mistBand;
     context.fillRect(0, bandY - height * 0.2, width, height * 0.4);
     context.restore();
