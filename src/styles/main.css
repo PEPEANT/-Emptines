@@ -2296,7 +2296,7 @@ body.is-mobile-ui #mobile-move-stick {
   }
 }
 
-/* Mobile surface painter: full-screen canvas workspace + fixed bottom 3 actions */
+/* ─── Mobile surface painter: maximised canvas + compact toolbar ─────────── */
 body.is-mobile-ui #surface-painter {
   place-items: stretch;
   padding: 0;
@@ -2310,19 +2310,77 @@ body.is-mobile-ui #surface-painter-panel {
   border: none;
   border-radius: 0;
   box-shadow: none;
-  padding: calc(env(safe-area-inset-top, 0px) + 8px) 10px
-    calc(env(safe-area-inset-bottom, 0px) + 8px);
-  gap: 8px;
+  padding: calc(env(safe-area-inset-top, 0px) + 5px) 8px
+    calc(env(safe-area-inset-bottom, 0px) + 5px);
+  gap: 5px;
   overflow: hidden;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  /* row order: title → compact-toolbar → canvas(1fr) → actions */
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
 }
 
+/* ① title row — minimal */
 body.is-mobile-ui #surface-painter-title {
-  font-size: 0.76rem;
+  grid-row: 1;
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  padding: 0 2px;
 }
 
+/* ② toolbar row — single horizontal flex line, NO scroll */
+body.is-mobile-ui #surface-painter-toolbar {
+  grid-row: 2;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px 10px;
+  max-height: none;
+  overflow: visible;
+  padding: 2px 0;
+  /* reset grid-only props */
+  grid-template-columns: unset;
+  overscroll-behavior: unset;
+}
+
+body.is-mobile-ui #surface-painter-toolbar label {
+  font-size: 0.52rem;
+  letter-spacing: 0.06em;
+  color: rgba(190, 224, 248, 0.88);
+  white-space: nowrap;
+}
+
+body.is-mobile-ui #surface-painter-color,
+body.is-mobile-ui #surface-painter-bg {
+  width: 32px;
+  min-height: 26px;
+  flex-shrink: 0;
+}
+
+body.is-mobile-ui #surface-painter-size {
+  flex: 1 1 60px;
+  max-width: 120px;
+}
+
+body.is-mobile-ui #surface-painter-eraser {
+  grid-column: unset;
+  justify-self: unset;
+  flex-shrink: 0;
+  min-height: 26px;
+  height: 26px;
+  padding: 0 9px;
+  font-size: 0.56rem;
+}
+
+body.is-mobile-ui .surface-painter-check {
+  grid-column: unset;
+  justify-self: unset;
+  font-size: 0.54rem;
+  flex-shrink: 0;
+}
+
+/* ③ canvas row — fills all remaining space */
 body.is-mobile-ui #surface-painter-canvas {
+  grid-row: 3;
   width: 100%;
   height: 100%;
   max-height: none;
@@ -2331,42 +2389,39 @@ body.is-mobile-ui #surface-painter-canvas {
   aspect-ratio: auto;
 }
 
-body.is-mobile-ui #surface-painter-toolbar {
-  grid-template-columns: auto 1fr;
-  gap: 6px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  max-height: min(22dvh, 190px);
-  padding-right: 2px;
-}
-
-body.is-mobile-ui #surface-painter-eraser,
-body.is-mobile-ui .surface-painter-check {
-  grid-column: 1 / -1;
-  justify-self: stretch;
-}
-
+/* ④ actions row — flex, 저장 prominent */
 body.is-mobile-ui #surface-painter-actions {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  justify-content: stretch;
-  position: sticky;
-  bottom: 0;
-  z-index: 3;
-  padding: 6px 0 calc(env(safe-area-inset-bottom, 0px) + 2px);
-  background: linear-gradient(
-    to top,
-    rgba(8, 21, 34, 0.98) 72%,
-    rgba(8, 21, 34, 0.14)
-  );
+  grid-row: 4;
+  display: flex;
+  gap: 5px;
+  align-items: stretch;
+  position: static;
+  background: none;
+  padding: 0;
+  z-index: auto;
 }
 
 body.is-mobile-ui #surface-painter-actions button {
-  width: 100%;
+  flex: 1;
   min-width: 0;
-  height: 42px;
-  font-size: 0.72rem;
+  width: auto;
+  height: 40px;
+  font-size: 0.6rem;
+  letter-spacing: 0.04em;
+}
+
+/* Save button: most prominent */
+body.is-mobile-ui #surface-painter-save {
+  flex: 2;
+  background: rgba(14, 42, 66, 0.95);
+  border-color: rgba(100, 184, 255, 0.7);
+  color: #c4e4ff;
+  font-size: 0.68rem;
+}
+
+/* Cancel: slightly wider than others */
+body.is-mobile-ui #surface-painter-cancel {
+  flex: 1.5;
 }
 
 body.mobile-portrait-lock #tool-ui,
