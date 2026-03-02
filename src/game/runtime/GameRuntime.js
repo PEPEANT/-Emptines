@@ -66,7 +66,7 @@ const DEFAULT_PORTAL_TARGET_URL =
   "http://localhost:5173/?server=http://localhost:3001&name=PLAYER";
 const BOX_FACE_KEYS = ["px", "nx", "py", "ny", "pz", "nz"];
 const NPC_GREETING_SESSION_KEY = "emptines_npc_greeting_seen_v1";
-const CITY_MAIN_AD_BILLBOARD_BASE_ID = "city_ad_board_main";
+const CITY_AD_BILLBOARD_BASE_PREFIX = "city_ad_board_";
 
 function resolveRuntimeAssetUrl(relativePath) {
   const normalized = String(relativePath ?? "").trim().replace(/^\/+/, "");
@@ -962,7 +962,7 @@ export class GameRuntime {
     ring.position.y = 0.24;
     cityGroup.add(ring);
 
-    // Side district expansion: extend a long left-side road from the city center.
+    // Side district expansion: extend roads and pads on both sides of the city center.
     const sideRoadMaterial = new THREE.MeshStandardMaterial({
       color: 0x333d48,
       roughness: 0.8,
@@ -978,6 +978,14 @@ export class GameRuntime {
     sideRoad.receiveShadow = true;
     cityGroup.add(sideRoad);
 
+    const sideRoadRight = new THREE.Mesh(
+      new THREE.BoxGeometry(58, 0.2, 7.4),
+      sideRoadMaterial
+    );
+    sideRoadRight.position.set(29, 0.1, 0);
+    sideRoadRight.receiveShadow = true;
+    cityGroup.add(sideRoadRight);
+
     const sideRoadStripe = new THREE.Mesh(
       new THREE.BoxGeometry(54, 0.03, 0.34),
       new THREE.MeshStandardMaterial({
@@ -992,6 +1000,11 @@ export class GameRuntime {
     sideRoadStripe.receiveShadow = true;
     cityGroup.add(sideRoadStripe);
 
+    const sideRoadStripeRight = sideRoadStripe.clone();
+    sideRoadStripeRight.position.set(29, 0.215, 0);
+    sideRoadStripeRight.receiveShadow = true;
+    cityGroup.add(sideRoadStripeRight);
+
     const sideFloor = new THREE.Mesh(
       new THREE.BoxGeometry(30, 0.24, 24),
       new THREE.MeshStandardMaterial({
@@ -1005,6 +1018,32 @@ export class GameRuntime {
     sideFloor.position.set(-60, 0.12, 0);
     sideFloor.receiveShadow = true;
     cityGroup.add(sideFloor);
+
+    const sideFloorRight = sideFloor.clone();
+    sideFloorRight.position.set(60, 0.12, 0);
+    sideFloorRight.receiveShadow = true;
+    cityGroup.add(sideFloorRight);
+
+    const mapToSideDistrict = (
+      rawX,
+      rawZ,
+      {
+        xScale = 0.3,
+        zScale = 0.44,
+        xClamp = 11.2,
+        zClamp = 10.8,
+        zOffset = 0
+      } = {}
+    ) => {
+      const sourceX = Number(rawX) || 0;
+      const sourceZ = Number(rawZ) || 0;
+      const sideSign = sourceX < 0 ? -1 : 1;
+      const sideCenterX = sideSign < 0 ? -60 : 60;
+      const mappedX =
+        sideCenterX + THREE.MathUtils.clamp(sourceX * xScale, -xClamp, xClamp);
+      const mappedZ = THREE.MathUtils.clamp(sourceZ * zScale + zOffset, -zClamp, zClamp);
+      return { x: mappedX, z: mappedZ };
+    };
 
     const towerPositions = [
       [-22, 6.4, -10],
@@ -1029,28 +1068,28 @@ export class GameRuntime {
         style: "slate",
         repeatX: 1.1,
         repeatY: 3.2,
-        roughness: 0.58,
-        metalness: 0.1,
-        emissive: 0x1b2128,
-        emissiveIntensity: 0.1
+        roughness: 0.6,
+        metalness: 0.12,
+        emissive: 0x131920,
+        emissiveIntensity: 0.08
       }),
       this.createCityWindowMaterial({
         style: "cyan",
         repeatX: 1.2,
         repeatY: 3.6,
-        roughness: 0.52,
-        metalness: 0.16,
-        emissive: 0x1a2f40,
-        emissiveIntensity: 0.16
+        roughness: 0.58,
+        metalness: 0.14,
+        emissive: 0x152231,
+        emissiveIntensity: 0.1
       }),
       this.createCityWindowMaterial({
         style: "amber",
         repeatX: 1.15,
         repeatY: 3.4,
-        roughness: 0.6,
+        roughness: 0.62,
         metalness: 0.12,
-        emissive: 0x2b1f16,
-        emissiveIntensity: 0.14
+        emissive: 0x1a1d23,
+        emissiveIntensity: 0.09
       })
     ];
     for (let ti = 0; ti < towerPositions.length; ti++) {
@@ -1060,7 +1099,8 @@ export class GameRuntime {
         towerMats[ti % 3],
         `city_tower_${ti}`
       );
-      tower.position.set(x, h * 0.5, z);
+      const mapped = mapToSideDistrict(x, z, { xScale: 0.27, zScale: 0.42 });
+      tower.position.set(mapped.x, h * 0.5, mapped.z);
       tower.castShadow = false;
       tower.receiveShadow = true;
       cityGroup.add(tower);
@@ -1071,28 +1111,28 @@ export class GameRuntime {
         style: "slate",
         repeatX: 2.2,
         repeatY: 8.8,
-        roughness: 0.6,
-        metalness: 0.1,
-        emissive: 0x182028,
-        emissiveIntensity: 0.12
+        roughness: 0.62,
+        metalness: 0.12,
+        emissive: 0x111720,
+        emissiveIntensity: 0.09
       }),
       this.createCityWindowMaterial({
         style: "cyan",
         repeatX: 2.3,
         repeatY: 9.4,
-        roughness: 0.52,
-        metalness: 0.18,
-        emissive: 0x1a3244,
-        emissiveIntensity: 0.18
+        roughness: 0.6,
+        metalness: 0.16,
+        emissive: 0x132433,
+        emissiveIntensity: 0.1
       }),
       this.createCityWindowMaterial({
         style: "amber",
         repeatX: 2.1,
         repeatY: 8.9,
-        roughness: 0.62,
+        roughness: 0.64,
         metalness: 0.12,
-        emissive: 0x322115,
-        emissiveIntensity: 0.16
+        emissive: 0x171c23,
+        emissiveIntensity: 0.09
       })
     ];
     const skylineCapMats = [
@@ -1116,7 +1156,76 @@ export class GameRuntime {
       emissive: 0x1d2732,
       emissiveIntensity: 0.16
     });
-    let mainAdTowerAnchor = null;
+    const createFloatingTowerBillboard = (towerIndex, towerX, towerZ, footprint, towerHeight) => {
+      const toCenter = new THREE.Vector3(-towerX, 0, -towerZ);
+      if (toCenter.lengthSq() < 0.0001) {
+        toCenter.set(0, 0, 1);
+      } else {
+        toCenter.normalize();
+      }
+
+      const boardGroup = new THREE.Group();
+      const boardWidth = THREE.MathUtils.clamp(footprint * 1.16, 5.8, 8.4);
+      const boardHeight = THREE.MathUtils.clamp(footprint * 0.72, 3.2, 4.9);
+      const boardThickness = 0.08;
+      const frameThickness = 0.26;
+      const floatHeight = Math.max(2.8, footprint * 0.44);
+      const boardY = towerHeight + floatHeight;
+      const boardOffset = footprint * 0.08;
+
+      boardGroup.position.set(
+        towerX + toCenter.x * boardOffset,
+        boardY,
+        towerZ + toCenter.z * boardOffset
+      );
+      boardGroup.rotation.y = Math.atan2(toCenter.x, toCenter.z);
+
+      const frameMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(
+          boardWidth + frameThickness * 2,
+          boardHeight + frameThickness * 2,
+          boardThickness + 0.05
+        ),
+        new THREE.MeshStandardMaterial({
+          color: 0x10161d,
+          roughness: 0.28,
+          metalness: 0.58,
+          emissive: 0x1e3348,
+          emissiveIntensity: 0.26
+        })
+      );
+      frameMesh.position.z = -0.015;
+      frameMesh.castShadow = false;
+      frameMesh.receiveShadow = true;
+
+      const surfaceBaseId = `${CITY_AD_BILLBOARD_BASE_PREFIX}${towerIndex}`;
+      const screenMesh = this.createPaintableBoxMesh(
+        new THREE.BoxGeometry(boardWidth, boardHeight, boardThickness),
+        this.createCityAdBillboardMaterial(),
+        surfaceBaseId
+      );
+      screenMesh.position.z = 0.02;
+      screenMesh.castShadow = false;
+      screenMesh.receiveShadow = true;
+      screenMesh.userData.paintPreferredFace = "pz";
+
+      const glowPlane = new THREE.Mesh(
+        new THREE.PlaneGeometry(boardWidth + frameThickness * 1.2, boardHeight + frameThickness * 1.2),
+        new THREE.MeshBasicMaterial({
+          color: 0x35daff,
+          transparent: true,
+          opacity: 0.2,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          side: THREE.DoubleSide
+        })
+      );
+      glowPlane.position.z = boardThickness * 0.5 + 0.03;
+      glowPlane.renderOrder = 10;
+
+      boardGroup.add(frameMesh, screenMesh, glowPlane);
+      cityGroup.add(boardGroup);
+    };
     // Clone the plaza tower pattern into a larger skyline ring so it reads from mid-distance.
     for (let i = 0; i < towerPositions.length; i += 1) {
       const [x, h, z] = towerPositions[i];
@@ -1143,17 +1252,6 @@ export class GameRuntime {
       megaTower.receiveShadow = true;
       cityGroup.add(megaTower);
 
-      const centerDistance = Math.hypot(megaX, megaZ);
-      if (!mainAdTowerAnchor || centerDistance < mainAdTowerAnchor.distance) {
-        mainAdTowerAnchor = {
-          x: megaX,
-          z: megaZ,
-          footprint,
-          height: megaHeight,
-          distance: centerDistance
-        };
-      }
-
       const towerCap = new THREE.Mesh(
         new THREE.CylinderGeometry(footprint * 0.26, footprint * 0.32, 1.7, this.mobileEnabled ? 9 : 14),
         skylineCapMats[i % 3]
@@ -1162,77 +1260,7 @@ export class GameRuntime {
       towerCap.castShadow = false;
       towerCap.receiveShadow = true;
       cityGroup.add(towerCap);
-    }
-
-    if (mainAdTowerAnchor) {
-      const toCenter = new THREE.Vector3(-mainAdTowerAnchor.x, 0, -mainAdTowerAnchor.z);
-      if (toCenter.lengthSq() < 0.0001) {
-        toCenter.set(0, 0, 1);
-      } else {
-        toCenter.normalize();
-      }
-
-      const boardGroup = new THREE.Group();
-      const boardWidth = THREE.MathUtils.clamp(mainAdTowerAnchor.footprint * 1.35, 6.2, 8.8);
-      const boardHeight = THREE.MathUtils.clamp(mainAdTowerAnchor.footprint * 0.78, 3.6, 5.2);
-      const boardThickness = 0.18;
-      const frameThickness = 0.32;
-      const boardY = 4.8;
-      const boardOffset = mainAdTowerAnchor.footprint * 0.5 + boardThickness * 0.5 + 0.08;
-
-      boardGroup.position.set(
-        mainAdTowerAnchor.x + toCenter.x * boardOffset,
-        boardY,
-        mainAdTowerAnchor.z + toCenter.z * boardOffset
-      );
-      boardGroup.rotation.y = Math.atan2(toCenter.x, toCenter.z);
-
-      const frameMesh = new THREE.Mesh(
-        new THREE.BoxGeometry(
-          boardWidth + frameThickness * 2,
-          boardHeight + frameThickness * 2,
-          boardThickness + 0.08
-        ),
-        new THREE.MeshStandardMaterial({
-          color: 0x121820,
-          roughness: 0.34,
-          metalness: 0.56,
-          emissive: 0x203247,
-          emissiveIntensity: 0.2
-        })
-      );
-      frameMesh.position.z = -0.02;
-      frameMesh.castShadow = false;
-      frameMesh.receiveShadow = true;
-
-      const screenMesh = this.createPaintableBoxMesh(
-        new THREE.BoxGeometry(boardWidth, boardHeight, boardThickness),
-        this.createCityAdBillboardMaterial(),
-        CITY_MAIN_AD_BILLBOARD_BASE_ID
-      );
-      screenMesh.position.z = 0.03;
-      screenMesh.castShadow = false;
-      screenMesh.receiveShadow = true;
-
-      const glowBorder = new THREE.Mesh(
-        new THREE.BoxGeometry(
-          boardWidth + frameThickness * 1.15,
-          boardHeight + frameThickness * 1.15,
-          0.05
-        ),
-        new THREE.MeshBasicMaterial({
-          color: 0x34d8ff,
-          transparent: true,
-          opacity: 0.42,
-          depthWrite: false,
-          blending: THREE.AdditiveBlending
-        })
-      );
-      glowBorder.position.z = boardThickness * 0.5 + 0.04;
-      glowBorder.renderOrder = 9;
-
-      boardGroup.add(frameMesh, screenMesh, glowBorder);
-      cityGroup.add(boardGroup);
+      createFloatingTowerBillboard(i, megaX, megaZ, footprint, megaHeight);
     }
 
     const plazaPaintMat = new THREE.MeshStandardMaterial({
@@ -1248,16 +1276,19 @@ export class GameRuntime {
       const angle = (index / plazaPaintableCount) * Math.PI * 2 + Math.PI * 0.125;
       const footprint = index % 3 === 0 ? 2.4 : 1.9;
       const height = index % 2 === 0 ? 3.4 : 2.9;
+      const rawX = Math.cos(angle) * plazaPaintableRadius;
+      const rawZ = Math.sin(angle) * plazaPaintableRadius;
       const kiosk = this.createPaintableBoxMesh(
         new THREE.BoxGeometry(footprint, height, footprint),
         plazaPaintMat,
         `city_kiosk_${index}`
       );
-      kiosk.position.set(
-        Math.cos(angle) * plazaPaintableRadius,
-        height * 0.5,
-        Math.sin(angle) * plazaPaintableRadius
-      );
+      const mapped = mapToSideDistrict(rawX, rawZ, {
+        xScale: 0.3,
+        zScale: 0.4,
+        zOffset: index % 2 === 0 ? -2.2 : 2.2
+      });
+      kiosk.position.set(mapped.x, height * 0.5, mapped.z);
       kiosk.castShadow = false;
       kiosk.receiveShadow = true;
       cityGroup.add(kiosk);
@@ -1277,16 +1308,19 @@ export class GameRuntime {
       const footprint = index % 2 === 0 ? 3.3 : 2.7;
       const depth = index % 3 === 0 ? 3.6 : 2.9;
       const height = 4.2 + (index % 4) * 0.9;
+      const rawX = Math.cos(angle) * districtPaintableRadius;
+      const rawZ = Math.sin(angle) * districtPaintableRadius;
       const block = this.createPaintableBoxMesh(
         new THREE.BoxGeometry(footprint, height, depth),
         districtPaintMat,
         `city_block_${index}`
       );
-      block.position.set(
-        Math.cos(angle) * districtPaintableRadius,
-        height * 0.5,
-        Math.sin(angle) * districtPaintableRadius
-      );
+      const mapped = mapToSideDistrict(rawX, rawZ, {
+        xScale: 0.24,
+        zScale: 0.32,
+        zOffset: index % 2 === 0 ? -3.8 : 3.8
+      });
+      block.position.set(mapped.x, height * 0.5, mapped.z);
       block.castShadow = false;
       block.receiveShadow = true;
       cityGroup.add(block);
@@ -1306,16 +1340,19 @@ export class GameRuntime {
       const width = index % 2 === 0 ? 4.8 : 3.8;
       const depth = index % 3 === 0 ? 5.2 : 4.1;
       const height = 6.2 + (index % 5) * 1.1;
+      const rawX = Math.cos(angle) * outerDistrictRadius;
+      const rawZ = Math.sin(angle) * outerDistrictRadius;
       const block = this.createPaintableBoxMesh(
         new THREE.BoxGeometry(width, height, depth),
         outerDistrictPaintMat,
         `city_outer_block_${index}`
       );
-      block.position.set(
-        Math.cos(angle) * outerDistrictRadius,
-        height * 0.5,
-        Math.sin(angle) * outerDistrictRadius
-      );
+      const mapped = mapToSideDistrict(rawX, rawZ, {
+        xScale: 0.18,
+        zScale: 0.26,
+        zOffset: index % 2 === 0 ? -5.4 : 5.4
+      });
+      block.position.set(mapped.x, height * 0.5, mapped.z);
       block.castShadow = false;
       block.receiveShadow = true;
       cityGroup.add(block);
@@ -1464,11 +1501,7 @@ export class GameRuntime {
     npcGuide.add(npcTempleGate, npcHoloFloor, npcHoloRing, npcHoloBeam, npcBody, npcHead, npcPad, npcHoloFrame);
     const npcGreetingScreen = this.createNpcGreetingScreen();
     npcGuide.add(npcGreetingScreen);
-    const npcWelcomeBubble = this.createTextLabel("어서와~ 여기는 대기장소야", "chat");
-    npcWelcomeBubble.position.set(0, 3.05, 0);
-    npcWelcomeBubble.renderOrder = 42;
-    npcGuide.add(npcWelcomeBubble);
-    this.npcWelcomeBubbleLabel = npcWelcomeBubble;
+    this.npcWelcomeBubbleLabel = null;
 
     const mirrorGate = new THREE.Group();
     mirrorGate.position.set(this.bridgeMirrorPosition.x, 0, this.bridgeMirrorPosition.z);
@@ -1476,6 +1509,14 @@ export class GameRuntime {
     const bridgeTempleGate = this.createKoreanTempleGateMesh();
     bridgeTempleGate.position.set(0, 0, 0.12);
     mirrorGate.add(bridgeTempleGate);
+
+    const spawnTempleGate = this.createKoreanTempleGateMesh();
+    spawnTempleGate.position.set(this.bridgeSpawn.x, 0, this.bridgeSpawn.z + 0.6);
+    spawnTempleGate.rotation.y = bridgeYaw;
+
+    const cityEntryTempleGate = this.createKoreanTempleGateMesh();
+    cityEntryTempleGate.position.set(this.bridgeCityEntry.x, 0, this.bridgeCityEntry.z + 2.2);
+    cityEntryTempleGate.rotation.y = bridgeYaw;
 
     const boundaryMarker = new THREE.Group();
     boundaryMarker.position.set(this.bridgeCityEntry.x, 0, this.bridgeCityEntry.z);
@@ -1600,7 +1641,16 @@ export class GameRuntime {
     this.bridgeBoundaryBeam = boundaryBeam;
 
     boundaryMarker.add(boundaryRing, boundaryHalo, boundaryBeam);
-    group.add(bridgeGroup, cityGroup, npcGuide, mirrorGate, boundaryMarker, portalGroup);
+    group.add(
+      bridgeGroup,
+      cityGroup,
+      npcGuide,
+      mirrorGate,
+      spawnTempleGate,
+      cityEntryTempleGate,
+      boundaryMarker,
+      portalGroup
+    );
     this.scene.add(group);
     this.setMirrorGateVisible(this.flowStage === "bridge_mirror");
     this.updateBridgeBoundaryMarker(0);
@@ -1611,6 +1661,8 @@ export class GameRuntime {
   createKoreanTempleGateMesh(options = {}) {
     const includePortal = Boolean(options?.includePortal);
     const trackPortalRefs = Boolean(options?.trackPortalRefs);
+    const gateScale = Math.max(0.4, Number(options?.scale) || 1.26);
+    const portalScale = Math.max(0.4, Number(options?.portalScale) || 1.24);
     const gateGroup = new THREE.Group();
     const gateWoodMat = new THREE.MeshStandardMaterial({
       color: 0x6a3f24,
@@ -1724,8 +1776,12 @@ export class GameRuntime {
     );
 
     if (includePortal) {
+      const portalRingRadius = 1.06 * portalScale;
+      const portalRingTube = 0.1 * portalScale;
+      const portalCoreRadius = 0.98 * portalScale;
+      const portalGlowRadius = 0.78 * portalScale;
       const portalRing = new THREE.Mesh(
-        new THREE.TorusGeometry(1.06, 0.1, 20, this.mobileEnabled ? 28 : 44),
+        new THREE.TorusGeometry(portalRingRadius, portalRingTube, 20, this.mobileEnabled ? 28 : 44),
         new THREE.MeshStandardMaterial({
           color: 0x0abf4d,
           roughness: 0.22,
@@ -1741,7 +1797,7 @@ export class GameRuntime {
       portalRing.receiveShadow = true;
 
       const portalCore = new THREE.Mesh(
-        new THREE.CircleGeometry(0.98, this.mobileEnabled ? 24 : 40),
+        new THREE.CircleGeometry(portalCoreRadius, this.mobileEnabled ? 24 : 40),
         new THREE.MeshStandardMaterial({
           color: 0x00ee55,
           roughness: 0.16,
@@ -1756,7 +1812,7 @@ export class GameRuntime {
       portalCore.receiveShadow = true;
 
       const portalGlow = new THREE.Mesh(
-        new THREE.CircleGeometry(0.78, this.mobileEnabled ? 22 : 36),
+        new THREE.CircleGeometry(portalGlowRadius, this.mobileEnabled ? 22 : 36),
         new THREE.MeshBasicMaterial({
           color: 0x00ee55,
           transparent: true,
@@ -1775,6 +1831,8 @@ export class GameRuntime {
         this.npcTemplePortalGlow = portalGlow;
       }
     }
+
+    gateGroup.scale.setScalar(gateScale);
 
     return gateGroup;
   }
@@ -2669,28 +2727,31 @@ export class GameRuntime {
     const key = String(style ?? "").trim().toLowerCase();
     if (key === "cyan") {
       return {
-        wall: "#2d3947",
-        mullion: "#41556a",
-        glassDark: "#1f3446",
-        glassLight: "#5cc9f1",
-        reflection: "rgba(201, 245, 255, 0.42)"
+        wall: "#313c47",
+        mullion: "#465464",
+        glassDark: "#223445",
+        glassMid: "#2b4258",
+        glassLight: "#7ea3c4",
+        reflection: "rgba(208, 232, 255, 0.18)"
       };
     }
     if (key === "amber") {
       return {
-        wall: "#403833",
-        mullion: "#5e5148",
-        glassDark: "#34261e",
-        glassLight: "#f1b56a",
-        reflection: "rgba(255, 232, 201, 0.38)"
+        wall: "#3a3835",
+        mullion: "#504c47",
+        glassDark: "#272f39",
+        glassMid: "#333f4d",
+        glassLight: "#9ea8b3",
+        reflection: "rgba(243, 232, 212, 0.14)"
       };
     }
     return {
-      wall: "#343b44",
-      mullion: "#4a5562",
-      glassDark: "#263341",
-      glassLight: "#8db3d5",
-      reflection: "rgba(220, 236, 255, 0.34)"
+      wall: "#343d47",
+      mullion: "#495664",
+      glassDark: "#253545",
+      glassMid: "#304459",
+      glassLight: "#8aa8c5",
+      reflection: "rgba(216, 234, 255, 0.16)"
     };
   }
 
@@ -2715,36 +2776,58 @@ export class GameRuntime {
     context.fillStyle = palette.wall;
     context.fillRect(0, 0, canvas.width, canvas.height);
 
-    const cols = 6;
-    const rows = 10;
-    const marginX = 16;
-    const marginY = 14;
-    const gapX = 8;
-    const gapY = 9;
+    const wallShade = context.createLinearGradient(0, 0, 0, canvas.height);
+    wallShade.addColorStop(0, "rgba(255, 255, 255, 0.06)");
+    wallShade.addColorStop(0.55, "rgba(0, 0, 0, 0.02)");
+    wallShade.addColorStop(1, "rgba(0, 0, 0, 0.13)");
+    context.fillStyle = wallShade;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    const cols = 8;
+    const rows = 12;
+    const marginX = 13;
+    const marginY = 10;
+    const gapX = 4;
+    const gapY = 5;
     const innerWidth = canvas.width - marginX * 2;
     const innerHeight = canvas.height - marginY * 2;
-    const windowWidth = Math.max(7, Math.floor((innerWidth - gapX * (cols - 1)) / cols));
-    const windowHeight = Math.max(8, Math.floor((innerHeight - gapY * (rows - 1)) / rows));
+    const windowWidth = Math.max(6, Math.floor((innerWidth - gapX * (cols - 1)) / cols));
+    const windowHeight = Math.max(7, Math.floor((innerHeight - gapY * (rows - 1)) / rows));
 
     context.fillStyle = palette.mullion;
-    context.fillRect(marginX - 6, marginY - 6, innerWidth + 12, innerHeight + 12);
+    context.fillRect(marginX - 3, marginY - 3, innerWidth + 6, innerHeight + 6);
+
+    const pseudoRandom = (x, y, seed = 0) => {
+      const value = Math.sin((x + 1) * 12.9898 + (y + 1) * 78.233 + seed * 37.719) * 43758.5453;
+      return value - Math.floor(value);
+    };
 
     for (let row = 0; row < rows; row += 1) {
       for (let col = 0; col < cols; col += 1) {
         const x = marginX + col * (windowWidth + gapX);
         const y = marginY + row * (windowHeight + gapY);
-        const lit = ((row * 11 + col * 7 + col) % 5) <= 1;
+        const n = pseudoRandom(col, row, safeRepeatX + safeRepeatY);
+        const lit = n > 0.82;
+        let fillColor = palette.glassDark;
+        if (lit) {
+          fillColor = palette.glassLight;
+        } else if (n > 0.4) {
+          fillColor = palette.glassMid;
+        }
 
-        context.fillStyle = lit ? palette.glassLight : palette.glassDark;
+        context.fillStyle = fillColor;
         context.fillRect(x, y, windowWidth, windowHeight);
 
         context.fillStyle = palette.reflection;
         context.fillRect(
           x + 1,
           y + 1,
-          Math.max(2, Math.floor(windowWidth * 0.32)),
-          Math.max(2, Math.floor(windowHeight * 0.18))
+          Math.max(1, Math.floor(windowWidth * 0.18)),
+          Math.max(1, Math.floor(windowHeight * 0.14))
         );
+
+        context.fillStyle = "rgba(0, 0, 0, 0.08)";
+        context.fillRect(x, y + windowHeight - 1, windowWidth, 1);
       }
     }
 
@@ -2847,7 +2930,7 @@ export class GameRuntime {
 
   isCityMainAdBillboardSurface(surfaceId = "") {
     const normalized = String(surfaceId ?? "").trim().toLowerCase();
-    return normalized.startsWith(`${CITY_MAIN_AD_BILLBOARD_BASE_ID}:`);
+    return normalized.startsWith(CITY_AD_BILLBOARD_BASE_PREFIX);
   }
 
   getSurfacePainterTitle(surfaceId = "") {
@@ -3008,6 +3091,13 @@ export class GameRuntime {
       return "";
     }
 
+    const preferredFace = String(intersection?.object?.userData?.paintPreferredFace ?? "")
+      .trim()
+      .toLowerCase();
+    if (preferredFace && BOX_FACE_KEYS.includes(preferredFace)) {
+      return `${baseId}:${preferredFace}`;
+    }
+
     const faceIndex = Math.trunc(Number(intersection?.faceIndex) || -1);
     if (faceIndex < 0) {
       return "";
@@ -3036,6 +3126,7 @@ export class GameRuntime {
 
     this.surfacePaintRaycaster.setFromCamera(this.surfacePaintAimPoint, this.camera);
     const intersections = this.surfacePaintRaycaster.intersectObjects(this.paintableSurfaceMeshes, false);
+    let raycastTarget = null;
     for (const intersection of intersections) {
       if (!intersection || !Number.isFinite(intersection.distance)) {
         continue;
@@ -3047,14 +3138,24 @@ export class GameRuntime {
       if (!surfaceId || !this.paintableSurfaceMap.has(surfaceId)) {
         continue;
       }
-      return {
+      raycastTarget = {
         surfaceId,
         distance: intersection.distance
       };
+      break;
     }
     const adBoardTarget = this.getCityAdBillboardProximityTarget(this.mobileEnabled ? 16 : 9.4);
     if (adBoardTarget) {
-      return adBoardTarget;
+      if (!raycastTarget) {
+        return adBoardTarget;
+      }
+      const rayIsBillboard = this.isCityMainAdBillboardSurface(raycastTarget.surfaceId);
+      if (!rayIsBillboard && adBoardTarget.distance <= raycastTarget.distance + 2.4) {
+        return adBoardTarget;
+      }
+    }
+    if (raycastTarget) {
+      return raycastTarget;
     }
     if (this.mobileEnabled) {
       return this.getMobileSurfacePaintTargetByProximity(Math.max(distanceLimit, 16));
@@ -3065,6 +3166,10 @@ export class GameRuntime {
   resolveSurfacePaintFaceFromCamera(mesh) {
     if (!mesh || !this.camera) {
       return "";
+    }
+    const preferredFace = String(mesh.userData?.paintPreferredFace ?? "").trim().toLowerCase();
+    if (preferredFace && BOX_FACE_KEYS.includes(preferredFace)) {
+      return preferredFace;
     }
     this.surfacePaintProbeCameraLocal.copy(this.camera.position);
     mesh.worldToLocal(this.surfacePaintProbeCameraLocal);
@@ -3162,7 +3267,7 @@ export class GameRuntime {
         continue;
       }
       const baseId = String(mesh.userData?.paintSurfaceBaseId ?? "").trim().toLowerCase();
-      if (baseId !== CITY_MAIN_AD_BILLBOARD_BASE_ID) {
+      if (!baseId.startsWith(CITY_AD_BILLBOARD_BASE_PREFIX)) {
         continue;
       }
 
@@ -3170,26 +3275,25 @@ export class GameRuntime {
       const dx = this.surfacePaintProbeWorldPosition.x - cameraPos.x;
       const dy = this.surfacePaintProbeWorldPosition.y - cameraPos.y;
       const dz = this.surfacePaintProbeWorldPosition.z - cameraPos.z;
-      const distance = Math.hypot(dx, dy * 0.25, dz);
-      if (!Number.isFinite(distance) || distance > maxDistance) {
+      const horizontalDistance = Math.hypot(dx, dz);
+      if (!Number.isFinite(horizontalDistance) || horizontalDistance > maxDistance) {
         continue;
       }
 
-      const faceKey = this.resolveSurfacePaintFaceFromCamera(mesh);
-      if (!faceKey) {
-        continue;
-      }
-      const surfaceId = `${CITY_MAIN_AD_BILLBOARD_BASE_ID}:${faceKey}`;
+      const preferredFace = String(mesh.userData?.paintPreferredFace ?? "pz").trim().toLowerCase();
+      const faceKey = BOX_FACE_KEYS.includes(preferredFace) ? preferredFace : "pz";
+      const surfaceId = `${baseId}:${faceKey}`;
       if (!this.paintableSurfaceMap.has(surfaceId)) {
         continue;
       }
 
-      const score = distance + Math.abs(dy) * 0.03;
+      // Allow selecting rooftop floating billboards while standing near the building base.
+      const score = horizontalDistance + Math.abs(dy) * 0.02;
       if (score >= bestScore) {
         continue;
       }
       bestScore = score;
-      bestTarget = { surfaceId, distance };
+      bestTarget = { surfaceId, distance: horizontalDistance };
     }
 
     return bestTarget;
@@ -3521,6 +3625,19 @@ export class GameRuntime {
     const normalized = String(surfaceId ?? "").trim();
     if (!normalized) {
       return [];
+    }
+    if (this.isCityMainAdBillboardSurface(normalized)) {
+      const separatorIndex = normalized.indexOf(":");
+      const baseId = separatorIndex > 0 ? normalized.slice(0, separatorIndex) : normalized;
+      const billboardFaces = ["pz", "nz"];
+      const targetIds = [];
+      for (const faceKey of billboardFaces) {
+        const faceId = `${baseId}:${faceKey}`;
+        if (this.paintableSurfaceMap.has(faceId)) {
+          targetIds.push(faceId);
+        }
+      }
+      return targetIds.length > 0 ? targetIds : [normalized];
     }
     if (!this.surfacePainterApplyAllEl?.checked) {
       return [normalized];
@@ -4629,7 +4746,8 @@ export class GameRuntime {
     const video = document.createElement("video");
     video.preload = "auto";
     video.playsInline = true;
-    video.muted = true;
+    video.muted = false;
+    video.volume = 1;
     video.loop = false;
     video.crossOrigin = "anonymous";
     video.disablePictureInPicture = true;
@@ -4649,28 +4767,25 @@ export class GameRuntime {
       if (this.npcGreetingVideoEl !== video) {
         return;
       }
-      this.npcGreetingVideoEl = null;
-      if (video) {
-        video.onended = null;
-        video.onerror = null;
-        video.pause();
-        video.removeAttribute("src");
-        video.load();
+      video.onended = null;
+      video.onerror = null;
+      try {
+        if (Number.isFinite(video.duration) && video.duration > 0) {
+          video.currentTime = Math.max(0, video.duration - 0.04);
+        }
+      } catch {
+        // ignore seek failures on ended media
       }
+      video.pause();
+
       if (this.npcGreetingScreen && !Array.isArray(this.npcGreetingScreen.material)) {
         const mat = this.npcGreetingScreen.material;
-        if (mat.map === texture) {
-          mat.map = null;
-        }
-        mat.color.setHex(0x5ecbff);
-        mat.opacity = 0.08;
+        mat.map = texture;
+        mat.color.setHex(0xffffff);
+        mat.opacity = 1;
         mat.needsUpdate = true;
-        this.npcGreetingScreen.visible = false;
+        this.npcGreetingScreen.visible = true;
       }
-      if (this.npcGreetingVideoTexture === texture) {
-        this.npcGreetingVideoTexture = null;
-      }
-      texture.dispose();
     };
 
     screenMaterial.map = texture;
@@ -4684,7 +4799,15 @@ export class GameRuntime {
     video.onended = finishPlayback;
     video.onerror = finishPlayback;
     video.play().catch(() => {
-      finishPlayback();
+      // Fallback for strict autoplay policies: retry muted before giving up.
+      video.muted = true;
+      video.currentTime = 0;
+      video.play().then(
+        () => {},
+        () => {
+          finishPlayback();
+        }
+      );
     });
   }
 
@@ -7369,7 +7492,13 @@ export class GameRuntime {
         if (this.mobileEnabled) {
           return;
         }
-        this.setChatOpen(false);
+        window.setTimeout(() => {
+          const activeElement = typeof document !== "undefined" ? document.activeElement : null;
+          if (activeElement && this.chatUiEl?.contains(activeElement)) {
+            return;
+          }
+          this.setChatOpen(false);
+        }, 0);
       });
     }
     if (this.chatToggleBtnEl) {
@@ -7386,6 +7515,10 @@ export class GameRuntime {
       });
     }
     if (this.chatSendBtnEl) {
+      this.chatSendBtnEl.addEventListener("pointerdown", (event) => {
+        // Keep focus on chat input so desktop send-click does not collapse chat before send.
+        event.preventDefault();
+      });
       this.chatSendBtnEl.addEventListener("click", () => {
         this.sendChatMessage();
       });
@@ -8959,45 +9092,67 @@ export class GameRuntime {
     const baseSpeed = sprinting ? GAME_CONSTANTS.PLAYER_SPRINT : GAME_CONSTANTS.PLAYER_SPEED;
     const speed = this.onGround ? baseSpeed : baseSpeed * 1.35;
 
-    if (keyForward !== 0 || keyStrafe !== 0) {
-      const sinYaw = Math.sin(this.yaw);
-      const cosYaw = Math.cos(this.yaw);
-
-      this.moveForwardVec.set(-sinYaw, 0, -cosYaw);
-      this.moveRightVec.set(cosYaw, 0, -sinYaw);
-
-      this.moveVec
-        .set(0, 0, 0)
-        .addScaledVector(this.moveForwardVec, keyForward)
-        .addScaledVector(this.moveRightVec, keyStrafe);
-
-      if (this.moveVec.lengthSq() > 0.0001) {
-        this.moveVec.normalize();
-      }
-
-      const moveStep = speed * delta;
-      const worldLimit = this.getBoundaryHardLimit();
-      this.playerPosition.x = THREE.MathUtils.clamp(
-        this.playerPosition.x + this.moveVec.x * moveStep,
-        -worldLimit,
-        worldLimit
-      );
-      this.playerPosition.z = THREE.MathUtils.clamp(
-        this.playerPosition.z + this.moveVec.z * moveStep,
-        -worldLimit,
-        worldLimit
-      );
-    }
-
     if (this.flyModeActive) {
-      const flySpeed = GAME_CONSTANTS.PLAYER_SPEED;
-      if (this.keys.has("KeyE")) this.playerPosition.y += flySpeed * delta;
-      if (this.keys.has("KeyQ")) this.playerPosition.y -= flySpeed * delta;
+      // 카메라가 보는 방향(피치 포함) 그대로 3D 자유비행
+      const flySpeed = sprinting ? GAME_CONSTANTS.PLAYER_SPRINT : GAME_CONSTANTS.PLAYER_SPEED;
+      if (keyForward !== 0 || keyStrafe !== 0) {
+        const sinYaw = Math.sin(this.yaw);
+        const cosYaw = Math.cos(this.yaw);
+        const cosPitch = Math.cos(this.pitch);
+        const sinPitch = Math.sin(this.pitch);
+        // 앞/뒤: 카메라 3D 방향 (Y 포함)
+        const fwdX = -sinYaw * cosPitch;
+        const fwdY = sinPitch;
+        const fwdZ = -cosYaw * cosPitch;
+        // 좌/우: 항상 수평
+        const rightX = cosYaw;
+        const rightZ = -sinYaw;
+        const dx = fwdX * keyForward + rightX * keyStrafe;
+        const dy = fwdY * keyForward;
+        const dz = fwdZ * keyForward + rightZ * keyStrafe;
+        const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (len > 0.0001) {
+          const step = flySpeed * delta / len;
+          const worldLimit = this.getBoundaryHardLimit();
+          this.playerPosition.x = THREE.MathUtils.clamp(this.playerPosition.x + dx * step, -worldLimit, worldLimit);
+          this.playerPosition.y += dy * step;
+          this.playerPosition.z = THREE.MathUtils.clamp(this.playerPosition.z + dz * step, -worldLimit, worldLimit);
+        }
+      }
       this.playerPosition.y = Math.max(GAME_CONSTANTS.PLAYER_HEIGHT, this.playerPosition.y);
       this.verticalVelocity = 0;
       this.onGround = false;
       this.mobileJumpQueued = false;
     } else {
+      if (keyForward !== 0 || keyStrafe !== 0) {
+        const sinYaw = Math.sin(this.yaw);
+        const cosYaw = Math.cos(this.yaw);
+
+        this.moveForwardVec.set(-sinYaw, 0, -cosYaw);
+        this.moveRightVec.set(cosYaw, 0, -sinYaw);
+
+        this.moveVec
+          .set(0, 0, 0)
+          .addScaledVector(this.moveForwardVec, keyForward)
+          .addScaledVector(this.moveRightVec, keyStrafe);
+
+        if (this.moveVec.lengthSq() > 0.0001) {
+          this.moveVec.normalize();
+        }
+
+        const moveStep = speed * delta;
+        const worldLimit = this.getBoundaryHardLimit();
+        this.playerPosition.x = THREE.MathUtils.clamp(
+          this.playerPosition.x + this.moveVec.x * moveStep,
+          -worldLimit,
+          worldLimit
+        );
+        this.playerPosition.z = THREE.MathUtils.clamp(
+          this.playerPosition.z + this.moveVec.z * moveStep,
+          -worldLimit,
+          worldLimit
+        );
+      }
       const prevFeetY = this.playerPosition.y - GAME_CONSTANTS.PLAYER_HEIGHT;
       this.verticalVelocity += GAME_CONSTANTS.PLAYER_GRAVITY * delta;
       this.playerPosition.y += this.verticalVelocity * delta;

@@ -1067,8 +1067,9 @@ canvas {
 #mobile-paint {
   position: fixed;
   left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
+  top: auto;
+  bottom: max(108px, calc(env(safe-area-inset-bottom, 0px) + 86px));
+  transform: translateX(-50%);
   min-width: 116px;
   height: 42px;
   border-radius: 999px;
