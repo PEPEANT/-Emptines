@@ -458,7 +458,6 @@ export class GameRuntime {
     this.chatLiveLogEl = document.getElementById("chat-live-log");
     this.chatControlsEl = document.getElementById("chat-controls");
     this.chatToggleBtnEl = document.getElementById("chat-toggle");
-    this.promoPanelToggleBtnEl = document.getElementById("promo-panel-toggle");
     this.hostChatToggleBtnEl = document.getElementById("host-chat-toggle");
     this.hostControlsToggleBtnEl = document.getElementById("host-controls-toggle");
     this.chatInputEl = document.getElementById("chat-input");
@@ -8517,9 +8516,6 @@ export class GameRuntime {
     const allowOthersDraw = own?.allowOthersDraw ?? false;
     const placeBtnLabel = own ? "수정" : "앞에 배치+저장";
     const mobilePromoLabel = own ? "수정" : "배치";
-    const promoPanelToggleLabel = this.promoPanelDesktopOpen
-      ? (own ? "수정 닫기" : "배치 닫기")
-      : (own ? "수정 열기" : "배치 열기");
     const prefersTouchUi =
       typeof window !== "undefined" &&
       typeof window.matchMedia === "function" &&
@@ -8555,11 +8551,6 @@ export class GameRuntime {
     }
     if (this.mobilePromoPlaceBtnEl) {
       this.mobilePromoPlaceBtnEl.textContent = mobilePromoLabel;
-    }
-    if (this.promoPanelToggleBtnEl) {
-      this.promoPanelToggleBtnEl.classList.toggle("hidden", this.mobileEnabled);
-      this.promoPanelToggleBtnEl.classList.toggle("active", Boolean(!this.mobileEnabled && panelVisible));
-      this.promoPanelToggleBtnEl.textContent = promoPanelToggleLabel;
     }
     if (panelVisible) {
       this.initPromoDrawCanvasIfNeeded();
@@ -10584,6 +10575,12 @@ export class GameRuntime {
         return;
       }
 
+      if (!this.mobileEnabled && this.promoPanelDesktopOpen && event.code === "Escape") {
+        event.preventDefault();
+        this.setPromoPanelDesktopOpen(false, { syncUi: true });
+        return;
+      }
+
       if (event.code === "Tab") {
         event.preventDefault();
         this.setPlayerRosterVisible(true);
@@ -10601,6 +10598,17 @@ export class GameRuntime {
       ) {
         event.preventDefault();
         this.focusChatInput();
+        return;
+      }
+
+      if (event.code === "KeyY" && this.canUseGameplayControls() && !this.mobileEnabled) {
+        event.preventDefault();
+        if (!this.promoPanelDesktopOpen) {
+          this.setPromoPanelDesktopOpen(true, { syncUi: true });
+          this.setPromoPanelStatus("패널 열림 · Y 키로 앞에 배치+저장");
+          return;
+        }
+        this.requestPromoUpsert({ placeInFront: true });
         return;
       }
 
@@ -11126,14 +11134,6 @@ export class GameRuntime {
           return;
         }
         this.setPromoPanelMobileOpen(true);
-      });
-    }
-    if (this.promoPanelToggleBtnEl) {
-      this.promoPanelToggleBtnEl.addEventListener("click", () => {
-        if (this.mobileEnabled) {
-          return;
-        }
-        this.setPromoPanelDesktopOpen(!this.promoPanelDesktopOpen, { syncUi: true });
       });
     }
     if (this.promoScaleInputEl) {
@@ -11681,9 +11681,6 @@ export class GameRuntime {
     }
     if (!this.chatToggleBtnEl) {
       this.chatToggleBtnEl = document.getElementById("chat-toggle");
-    }
-    if (!this.promoPanelToggleBtnEl) {
-      this.promoPanelToggleBtnEl = document.getElementById("promo-panel-toggle");
     }
     if (!this.hostChatToggleBtnEl) {
       this.hostChatToggleBtnEl = document.getElementById("host-chat-toggle");

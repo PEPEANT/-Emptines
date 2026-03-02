@@ -1524,6 +1524,10 @@ canvas {
   backdrop-filter: blur(5px);
 }
 
+body:not(.is-mobile-ui) #promo-place-btn {
+  display: none;
+}
+
 #promo-panel.mobile-fullscreen {
   inset: 0;
   width: auto;
@@ -1805,8 +1809,7 @@ canvas {
   text-transform: uppercase;
 }
 
-#chat-toggle,
-#promo-panel-toggle {
+#chat-toggle {
   min-width: 62px;
   height: 26px;
   border: 1px solid rgba(175, 208, 238, 0.62);
@@ -1818,10 +1821,34 @@ canvas {
   cursor: pointer;
 }
 
-#promo-panel-toggle.active {
-  border-color: rgba(202, 229, 249, 0.9);
-  background: rgba(20, 53, 83, 0.92);
-  box-shadow: 0 0 0 2px rgba(132, 176, 216, 0.24);
+#promo-hotkey-hint {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  z-index: 33;
+  padding: 6px 10px;
+  border: 1px solid rgba(175, 208, 238, 0.62);
+  border-radius: 8px;
+  background: rgba(10, 21, 34, 0.82);
+  color: #dcedfc;
+  font: 700 0.58rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.03em;
+  pointer-events: none;
+}
+
+#promo-hotkey-hint kbd {
+  display: inline-flex;
+  min-width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  margin: 0 2px;
+  padding: 0 4px;
+  border: 1px solid rgba(198, 222, 242, 0.65);
+  border-radius: 4px;
+  background: rgba(20, 45, 68, 0.78);
+  color: #eef8ff;
+  font: 700 0.56rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
 }
 
 #chat-log {
@@ -2019,7 +2046,7 @@ body.is-mobile-ui #chat-ui.mobile-fullscreen #chat-toggle {
   justify-content: center;
 }
 
-body.is-mobile-ui #promo-panel-toggle {
+body.is-mobile-ui #promo-hotkey-hint {
   display: none;
 }
 
@@ -2391,8 +2418,7 @@ body.is-mobile-ui #mobile-move-stick {
     font-size: 0.56rem;
   }
 
-  #chat-toggle,
-  #promo-panel-toggle {
+  #chat-toggle {
     min-width: 54px;
     height: 20px;
     font-size: 0.52rem;
@@ -2438,10 +2464,6 @@ body.is-mobile-ui #mobile-move-stick {
     min-width: 68px;
     height: 30px;
     font-size: 0.67rem;
-  }
-
-  #chat-ui.mobile-fullscreen #promo-panel-toggle {
-    display: none;
   }
 
   #chat-ui.mobile-fullscreen #chat-log {
