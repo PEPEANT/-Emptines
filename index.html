@@ -251,6 +251,46 @@
       </div>
     </div>
 
+    <div id="promo-panel" aria-label="내 홍보 오브젝트">
+      <div id="promo-panel-title">내 홍보 오브젝트 (1인 1개)</div>
+      <div class="promo-panel-row">
+        <label for="promo-scale">크기</label>
+        <input id="promo-scale" type="range" min="0.35" max="8" step="0.05" value="1" />
+        <span id="promo-scale-value">1.00x</span>
+      </div>
+      <label class="promo-panel-label" for="promo-link-url">사이트 URL</label>
+      <input
+        id="promo-link-url"
+        type="url"
+        inputmode="url"
+        placeholder="https://example.com"
+        autocomplete="off"
+      />
+      <label class="promo-panel-check" for="promo-allow-others-draw">
+        <input id="promo-allow-others-draw" type="checkbox" />
+        다른 플레이어 내 오브젝트 수정(그리기) 허용
+      </label>
+      <label class="promo-panel-label">미디어(이미지/영상)</label>
+      <div class="promo-panel-actions">
+        <button id="promo-media-pick-btn" type="button">파일/갤러리 선택</button>
+        <button id="promo-media-folder-btn" type="button">폴더에서 선택</button>
+      </div>
+      <div class="promo-panel-actions">
+        <button id="promo-media-clear-btn" type="button">미디어 제거</button>
+      </div>
+      <input id="promo-media-file" class="hidden" type="file" accept="image/*,video/*" />
+      <input id="promo-media-folder" class="hidden" type="file" accept="image/*,video/*" webkitdirectory directory multiple />
+      <p id="promo-media-name">선택된 미디어 없음</p>
+      <div class="promo-panel-actions">
+        <button id="promo-place-btn" type="button">앞에 배치+저장</button>
+        <button id="promo-save-btn" type="button">설정만 저장</button>
+      </div>
+      <div class="promo-panel-actions">
+        <button id="promo-remove-btn" type="button">내 오브젝트 삭제</button>
+      </div>
+      <p id="promo-panel-status" aria-live="polite">서버 연결 후 사용 가능</p>
+    </div>
+
     <div id="chat-ui" aria-label="채팅">
       <div id="chat-header">
         <strong id="chat-title">채팅</strong>
@@ -300,6 +340,11 @@
 
     <div id="surface-paint-prompt" class="hidden" aria-live="polite">
       <kbd>F</kbd> 면 그리기
+    </div>
+
+    <div id="promo-link-prompt" class="hidden" aria-live="polite">
+      <span id="promo-link-prompt-text"><kbd>R</kbd> 사이트 열기</span>
+      <button id="promo-open-link-btn" type="button">열기</button>
     </div>
 
     <div id="surface-painter" class="hidden" aria-modal="true" role="dialog" aria-label="표면 그리기">

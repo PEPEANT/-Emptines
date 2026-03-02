@@ -5037,6 +5037,12 @@ export class GameRuntime {
     const existing = String(this.surfacePaintState.get(normalizedId) ?? "");
     this.clearSurfacePainterCanvas(existing);
     this.surfacePainterEl.classList.remove("hidden");
+    // Block action buttons briefly to prevent tap-through from the opener button
+    const _spActions = document.getElementById("surface-painter-actions");
+    if (_spActions) {
+      _spActions.style.pointerEvents = "none";
+      setTimeout(() => { _spActions.style.pointerEvents = ""; }, 450);
+    }
     this.syncMobileUiState();
   }
 
