@@ -121,11 +121,16 @@
       </details>
 
       <details class="host-section">
-        <summary class="host-section-head">발판 에디터</summary>
+        <summary class="host-section-head">발판 · 줄 에디터</summary>
         <div class="host-section-body">
           <div class="host-control-label">G: 플라이 토글 &nbsp;·&nbsp; 클릭: 배치 &nbsp;·&nbsp; Z: 되돌리기</div>
-          <div class="host-control-label">스크롤: 배치 거리 조절</div>
+          <div class="host-control-label">스크롤: 배치 거리 / 줄 길이 조절</div>
+          <div class="host-custom-row" id="editor-mode-row">
+            <button id="editor-mode-platform" class="editor-mode-btn active" type="button">발판</button>
+            <button id="editor-mode-rope" class="editor-mode-btn" type="button">줄</button>
+          </div>
           <span id="platform-editor-count" class="host-editor-count">발판: 0개</span>
+          <span id="rope-editor-count" class="host-editor-count">줄: 0개</span>
           <div class="host-custom-row">
             <button id="platform-editor-save" type="button">저장</button>
             <button id="platform-editor-clear" type="button">전체 삭제</button>
@@ -221,6 +226,10 @@
 
     <div id="platform-editor" class="hidden" aria-label="발판 에디터 활성">
       ✈ 플라이 모드 ON &nbsp;·&nbsp; 클릭: 배치 &nbsp;·&nbsp; Z: 되돌리기 &nbsp;·&nbsp; 스크롤: 거리
+    </div>
+
+    <div id="rope-climb-prompt" class="hidden" aria-live="polite">
+      <kbd>F</kbd> 줄 타기
     </div>
 
     <div id="chalk-pickup-prompt" class="hidden" aria-live="polite">

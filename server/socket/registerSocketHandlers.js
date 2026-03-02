@@ -48,6 +48,12 @@ export function registerSocketHandlers({
       socket.emit("platform:state", { platforms: roomService.serializePlatforms(room) });
     };
 
+    const emitRopeState = () => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) return;
+      socket.emit("rope:state", { ropes: roomService.serializeRopes(room) });
+    };
+
     const emitPortalOpenCatchup = () => {
       const room = roomService.getRoomBySocket(socket);
       if (!room) {
@@ -91,6 +97,7 @@ export function registerSocketHandlers({
     emitLeftBillboardState();
     emitPortalOpenCatchup();
     emitPlatformState();
+    emitRopeState();
     roomService.emitRoomList(socket);
 
     socket.on("chat:send", ({ name, text }) => {
@@ -582,6 +589,29 @@ export function registerSocketHandlers({
 
     socket.on("platform:state:request", () => {
       emitPlatformState();
+    });
+
+    socket.on("rope:state:set", (payload = {}, ackFn) => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        ack(ackFn, { ok: false, error: "room not found" });
+        return;
+      }
+      if (!roomService.isHost(room, socket.id)) {
+        ack(ackFn, { ok: false, error: "host only" });
+        return;
+      }
+      const result = roomService.setRopes(room, payload?.ropes);
+      if (!result.ok) {
+        ack(ackFn, result);
+        return;
+      }
+      roomService.emitRopeUpdate(room);
+      ack(ackFn, { ok: true });
+    });
+
+    socket.on("rope:state:request", () => {
+      emitRopeState();
     });
 
     socket.on("disconnecting", () => {

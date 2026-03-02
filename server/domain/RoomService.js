@@ -185,6 +185,7 @@ function createPersistentRoom(code, defaultPortalTargetUrl) {
     sharedMusic: createSharedMusicState(),
     surfacePaint: new Map(),
     platforms: [],
+    ropes: [],
     players: new Map(),
     persistent: true,
     createdAt: Date.now()
@@ -428,6 +429,31 @@ export class RoomService {
         d: Math.max(0.1, Math.min(50, Number(p.d) || 3)),
       }));
     room.platforms = sanitized;
+    return { ok: true };
+  }
+
+  serializeRopes(room) {
+    return Array.isArray(room?.ropes) ? room.ropes : [];
+  }
+
+  emitRopeUpdate(room) {
+    this.io.to(room.code).emit("rope:state", { ropes: this.serializeRopes(room) });
+  }
+
+  setRopes(room, rawRopes) {
+    if (!room) return { ok: false, error: "room not found" };
+    const MAX_ROPES = 200;
+    const MAX_NUM = 2000;
+    const sanitized = (Array.isArray(rawRopes) ? rawRopes : [])
+      .slice(0, MAX_ROPES)
+      .filter(r => r && typeof r === "object")
+      .map(r => ({
+        x: Math.max(-MAX_NUM, Math.min(MAX_NUM, Number(r.x) || 0)),
+        y: Math.max(-MAX_NUM, Math.min(MAX_NUM, Number(r.y) || 0)),
+        z: Math.max(-MAX_NUM, Math.min(MAX_NUM, Number(r.z) || 0)),
+        height: Math.max(0.5, Math.min(50, Number(r.height) || 4)),
+      }));
+    room.ropes = sanitized;
     return { ok: true };
   }
 

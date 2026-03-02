@@ -302,6 +302,53 @@ canvas {
   letter-spacing: 0.06em;
 }
 
+#editor-mode-row {
+  gap: 4px;
+}
+
+.editor-mode-btn {
+  flex: 1;
+  padding: 4px 0;
+  font: 700 0.65rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(148,196,230,0.25);
+  border-radius: 5px;
+  color: #7abadc;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.editor-mode-btn.active {
+  background: rgba(0,229,204,0.18);
+  border-color: #00e5cc;
+  color: #00e5cc;
+}
+
+#rope-climb-prompt {
+  position: fixed;
+  bottom: 110px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(8, 22, 35, 0.82);
+  color: #e0f0ff;
+  font: 600 0.82rem/1.4 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  padding: 6px 14px;
+  border-radius: 7px;
+  border: 1px solid rgba(212, 169, 106, 0.5);
+  pointer-events: none;
+  z-index: 80;
+}
+
+#rope-climb-prompt kbd {
+  display: inline-block;
+  background: rgba(212, 169, 106, 0.22);
+  border: 1px solid rgba(212, 169, 106, 0.6);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 0.78rem;
+  margin-right: 4px;
+}
+
 #host-schedule-controls {
   display: grid;
   gap: 6px;

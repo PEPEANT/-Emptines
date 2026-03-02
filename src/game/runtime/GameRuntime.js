@@ -191,6 +191,7 @@ export class GameRuntime {
     this.surfacePaintUpdatedAt = new Map();
     this.cityWindowTextureCache = new Map();
     this.cityAdBillboardTexture = null;
+    this.futureCityBackdropTextureCache = new Map();
 
     this.jumpPlatforms = [];
     this.jumpPlatformMeshes = [];
@@ -198,6 +199,12 @@ export class GameRuntime {
     this.platformEditorPreviewMesh = null;
     this.platformEditorSize = { w: 3, h: 0.3, d: 3 };
     this.platformEditorDist = 4;
+    this.jumpRopes = [];
+    this.jumpRopeMeshes = [];
+    this.climbingRope = null;
+    this.editorMode = "platform";
+    this.ropeEditorHeight = 4;
+    this.ropeEditorPreviewMesh = null;
     this.surfacePaintRaycaster = new THREE.Raycaster();
     this.surfacePaintAimPoint = new THREE.Vector2(0, 0);
     this.surfacePaintTarget = null;
@@ -452,6 +459,10 @@ export class GameRuntime {
     this.platformEditorSaveBtnEl = document.getElementById("platform-editor-save");
     this.platformEditorClearBtnEl = document.getElementById("platform-editor-clear");
     this.platformEditorCountEl = document.getElementById("platform-editor-count");
+    this.ropeEditorCountEl = document.getElementById("rope-editor-count");
+    this.ropeClimbPromptEl = document.getElementById("rope-climb-prompt");
+    this.editorModePlatformBtnEl = document.getElementById("editor-mode-platform");
+    this.editorModeRopeBtnEl = document.getElementById("editor-mode-rope");
 
     const hubFlowConfig = this.worldContent?.hubFlow ?? {};
     const bridgeConfig = hubFlowConfig?.bridge ?? {};
@@ -560,7 +571,7 @@ export class GameRuntime {
     this.npcGreetingScreen = null;
     this.npcGreetingVideoEl = null;
     this.npcGreetingVideoTexture = null;
-    this.npcGreetingPlayed = this.hasSeenNpcGreetingInSession();
+    this.npcGreetingPlayed = false;
     this.npcWelcomeBubbleLabel = null;
     this.mirrorGateGroup = null;
     this.mirrorGatePanel = null;
@@ -633,6 +644,7 @@ export class GameRuntime {
     });
     this.updateRoomPlayerSnapshot([]);
     this.loadSavedPlatforms();
+    this.loadSavedRopes();
 
     this.loop();
   }
@@ -785,6 +797,12 @@ export class GameRuntime {
     this.plazaBillboardAdTexture = null;
     this.plazaBillboardLeftScreenMaterial = null;
     this.plazaBillboardRightScreenMaterial = null;
+    if (this.futureCityBackdropTextureCache.size > 0) {
+      for (const texture of this.futureCityBackdropTextureCache.values()) {
+        texture?.dispose?.();
+      }
+      this.futureCityBackdropTextureCache.clear();
+    }
 
     if (this.npcGreetingVideoEl) {
       this.npcGreetingVideoEl.onended = null;
@@ -799,7 +817,7 @@ export class GameRuntime {
       this.npcGreetingVideoTexture = null;
     }
     this.npcGreetingScreen = null;
-    this.npcGreetingPlayed = this.hasSeenNpcGreetingInSession();
+    this.npcGreetingPlayed = false;
     if (this.npcWelcomeBubbleLabel) {
       this.disposeTextLabel(this.npcWelcomeBubbleLabel);
       this.npcWelcomeBubbleLabel = null;
@@ -933,6 +951,7 @@ export class GameRuntime {
 
     const cityGroup = new THREE.Group();
     cityGroup.position.set(this.citySpawn.x, 0, this.citySpawn.z + 4);
+    this.addFutureCityBackdrop(group, bridgeDirection);
 
     const plaza = new THREE.Mesh(
       new THREE.CylinderGeometry(34, 34, 0.22, this.mobileEnabled ? 26 : 42),
@@ -1024,10 +1043,30 @@ export class GameRuntime {
     sideFloorRight.receiveShadow = true;
     cityGroup.add(sideFloorRight);
 
-    const mapToSideDistrict = (
+    const cityZoneConfig = {
+      A: { centerX: -60, objectEnabled: false },
+      B: { centerX: 60, objectEnabled: true }
+    };
+
+    const zoneABorder = new THREE.Mesh(
+      new THREE.BoxGeometry(0.32, 0.12, 28),
+      new THREE.MeshStandardMaterial({
+        color: 0x5c6d80,
+        roughness: 0.84,
+        metalness: 0.08,
+        emissive: 0x273748,
+        emissiveIntensity: 0.16
+      })
+    );
+    zoneABorder.position.set(0, 0.13, 0);
+    zoneABorder.receiveShadow = true;
+    cityGroup.add(zoneABorder);
+
+    const mapToCityZone = (
       rawX,
       rawZ,
       {
+        zone = "B",
         xScale = 0.3,
         zScale = 0.44,
         xClamp = 11.2,
@@ -1037,10 +1076,9 @@ export class GameRuntime {
     ) => {
       const sourceX = Number(rawX) || 0;
       const sourceZ = Number(rawZ) || 0;
-      const sideSign = sourceX < 0 ? -1 : 1;
-      const sideCenterX = sideSign < 0 ? -60 : 60;
+      const targetZone = zone === "A" ? cityZoneConfig.A : cityZoneConfig.B;
       const mappedX =
-        sideCenterX + THREE.MathUtils.clamp(sourceX * xScale, -xClamp, xClamp);
+        targetZone.centerX + THREE.MathUtils.clamp(Math.abs(sourceX) * xScale, -xClamp, xClamp);
       const mappedZ = THREE.MathUtils.clamp(sourceZ * zScale + zOffset, -zClamp, zClamp);
       return { x: mappedX, z: mappedZ };
     };
@@ -1094,12 +1132,16 @@ export class GameRuntime {
     ];
     for (let ti = 0; ti < towerPositions.length; ti++) {
       const [x, h, z] = towerPositions[ti];
+      // Zone A (left) is intentionally kept empty for clearer A/B calls.
+      if (!cityZoneConfig.B.objectEnabled || x <= 0 || ti % 2 !== 0) {
+        continue;
+      }
       const tower = this.createPaintableBoxMesh(
         new THREE.BoxGeometry(4.6, h, 4.6),
         towerMats[ti % 3],
         `city_tower_${ti}`
       );
-      const mapped = mapToSideDistrict(x, z, { xScale: 0.27, zScale: 0.42 });
+      const mapped = mapToCityZone(x, z, { zone: "B", xScale: 0.27, zScale: 0.42 });
       tower.position.set(mapped.x, h * 0.5, mapped.z);
       tower.castShadow = false;
       tower.receiveShadow = true;
@@ -1270,7 +1312,7 @@ export class GameRuntime {
       emissive: 0x20262d,
       emissiveIntensity: 0.09
     });
-    const plazaPaintableCount = this.mobileEnabled ? 10 : 18;
+    const plazaPaintableCount = this.mobileEnabled ? 4 : 8;
     const plazaPaintableRadius = 17.8;
     for (let index = 0; index < plazaPaintableCount; index += 1) {
       const angle = (index / plazaPaintableCount) * Math.PI * 2 + Math.PI * 0.125;
@@ -1278,12 +1320,16 @@ export class GameRuntime {
       const height = index % 2 === 0 ? 3.4 : 2.9;
       const rawX = Math.cos(angle) * plazaPaintableRadius;
       const rawZ = Math.sin(angle) * plazaPaintableRadius;
+      if (!cityZoneConfig.B.objectEnabled || rawX < 0) {
+        continue;
+      }
       const kiosk = this.createPaintableBoxMesh(
         new THREE.BoxGeometry(footprint, height, footprint),
         plazaPaintMat,
         `city_kiosk_${index}`
       );
-      const mapped = mapToSideDistrict(rawX, rawZ, {
+      const mapped = mapToCityZone(rawX, rawZ, {
+        zone: "B",
         xScale: 0.3,
         zScale: 0.4,
         zOffset: index % 2 === 0 ? -2.2 : 2.2
@@ -1301,7 +1347,7 @@ export class GameRuntime {
       emissive: 0x1e252c,
       emissiveIntensity: 0.1
     });
-    const districtPaintableCount = this.mobileEnabled ? 6 : 14;
+    const districtPaintableCount = this.mobileEnabled ? 3 : 6;
     const districtPaintableRadius = 29.5;
     for (let index = 0; index < districtPaintableCount; index += 1) {
       const angle = (index / districtPaintableCount) * Math.PI * 2 + Math.PI * 0.18;
@@ -1310,12 +1356,16 @@ export class GameRuntime {
       const height = 4.2 + (index % 4) * 0.9;
       const rawX = Math.cos(angle) * districtPaintableRadius;
       const rawZ = Math.sin(angle) * districtPaintableRadius;
+      if (!cityZoneConfig.B.objectEnabled || rawX < 0) {
+        continue;
+      }
       const block = this.createPaintableBoxMesh(
         new THREE.BoxGeometry(footprint, height, depth),
         districtPaintMat,
         `city_block_${index}`
       );
-      const mapped = mapToSideDistrict(rawX, rawZ, {
+      const mapped = mapToCityZone(rawX, rawZ, {
+        zone: "B",
         xScale: 0.24,
         zScale: 0.32,
         zOffset: index % 2 === 0 ? -3.8 : 3.8
@@ -1333,7 +1383,7 @@ export class GameRuntime {
       emissive: 0x1b232b,
       emissiveIntensity: 0.1
     });
-    const outerDistrictCount = this.mobileEnabled ? 4 : 12;
+    const outerDistrictCount = this.mobileEnabled ? 2 : 4;
     const outerDistrictRadius = 41;
     for (let index = 0; index < outerDistrictCount; index += 1) {
       const angle = (index / outerDistrictCount) * Math.PI * 2 + Math.PI * 0.07;
@@ -1342,12 +1392,16 @@ export class GameRuntime {
       const height = 6.2 + (index % 5) * 1.1;
       const rawX = Math.cos(angle) * outerDistrictRadius;
       const rawZ = Math.sin(angle) * outerDistrictRadius;
+      if (!cityZoneConfig.B.objectEnabled || rawX < 0) {
+        continue;
+      }
       const block = this.createPaintableBoxMesh(
         new THREE.BoxGeometry(width, height, depth),
         outerDistrictPaintMat,
         `city_outer_block_${index}`
       );
-      const mapped = mapToSideDistrict(rawX, rawZ, {
+      const mapped = mapToCityZone(rawX, rawZ, {
+        zone: "B",
         xScale: 0.18,
         zScale: 0.26,
         zOffset: index % 2 === 0 ? -5.4 : 5.4
@@ -1510,9 +1564,13 @@ export class GameRuntime {
     bridgeTempleGate.position.set(0, 0, 0.12);
     mirrorGate.add(bridgeTempleGate);
 
-    const spawnTempleGate = this.createKoreanTempleGateMesh();
-    spawnTempleGate.position.set(this.bridgeSpawn.x, 0, this.bridgeSpawn.z + 0.6);
-    spawnTempleGate.rotation.y = bridgeYaw;
+    const bridgeFarEndTempleGate = this.createKoreanTempleGateMesh();
+    bridgeFarEndTempleGate.position.set(
+      this.bridgeApproachSpawn.x + bridgeDirection.x * 4.8,
+      0,
+      this.bridgeApproachSpawn.z + bridgeDirection.z * 4.8
+    );
+    bridgeFarEndTempleGate.rotation.y = bridgeYaw;
 
     const cityEntryTempleGate = this.createKoreanTempleGateMesh();
     cityEntryTempleGate.position.set(this.bridgeCityEntry.x, 0, this.bridgeCityEntry.z + 2.2);
@@ -1646,7 +1704,7 @@ export class GameRuntime {
       cityGroup,
       npcGuide,
       mirrorGate,
-      spawnTempleGate,
+      bridgeFarEndTempleGate,
       cityEntryTempleGate,
       boundaryMarker,
       portalGroup
@@ -2721,6 +2779,269 @@ export class GameRuntime {
     this.chalkTableChalkGroup = chalkGroup;
 
     cityGroup.add(tableGroup);
+  }
+
+  addFutureCityBackdrop(rootGroup, forwardDirection) {
+    if (!rootGroup) {
+      return;
+    }
+    const baseTexture = this.getFutureCityBackdropTexture("base");
+    const glowTexture = this.getFutureCityBackdropTexture("glow");
+    if (!baseTexture) {
+      return;
+    }
+
+    const forward = (forwardDirection instanceof THREE.Vector3
+      ? forwardDirection.clone()
+      : new THREE.Vector3(0, 0, 1));
+    forward.y = 0;
+    if (forward.lengthSq() < 0.0001) {
+      forward.set(0, 0, 1);
+    } else {
+      forward.normalize();
+    }
+    const right = new THREE.Vector3(forward.z, 0, -forward.x).normalize();
+    const spawnBase = this.bridgeApproachSpawn?.clone?.() ?? new THREE.Vector3(0, 0, -98);
+    spawnBase.y = 0;
+
+    const centerDistance = this.mobileEnabled ? 228 : 248;
+    const center = spawnBase.clone().addScaledVector(forward, centerDistance);
+    const skylineHeight = this.mobileEnabled ? 92 : 118;
+    const skylineY = this.mobileEnabled ? 64 : 72;
+    const baseYaw = Math.atan2(forward.x, forward.z) + Math.PI;
+
+    const segments = [
+      {
+        width: this.mobileEnabled ? 320 : 420,
+        xOffset: 0,
+        zOffset: 0,
+        yawOffset: 0,
+        opacity: 0.88
+      },
+      {
+        width: this.mobileEnabled ? 250 : 330,
+        xOffset: this.mobileEnabled ? -190 : -270,
+        zOffset: 18,
+        yawOffset: 0.24,
+        opacity: 0.8
+      },
+      {
+        width: this.mobileEnabled ? 250 : 330,
+        xOffset: this.mobileEnabled ? 190 : 270,
+        zOffset: 18,
+        yawOffset: -0.24,
+        opacity: 0.8
+      }
+    ];
+
+    const backdropGroup = new THREE.Group();
+    backdropGroup.name = "future_city_backdrop";
+
+    for (const segment of segments) {
+      const segmentCenter = center
+        .clone()
+        .addScaledVector(right, segment.xOffset)
+        .addScaledVector(forward, segment.zOffset);
+
+      const basePlane = new THREE.Mesh(
+        new THREE.PlaneGeometry(segment.width, skylineHeight),
+        new THREE.MeshBasicMaterial({
+          map: baseTexture,
+          transparent: true,
+          opacity: segment.opacity,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+          fog: false,
+          toneMapped: false
+        })
+      );
+      basePlane.position.set(segmentCenter.x, skylineY, segmentCenter.z);
+      basePlane.rotation.y = baseYaw + segment.yawOffset;
+      basePlane.frustumCulled = false;
+      basePlane.renderOrder = 2;
+
+      if (glowTexture) {
+        const glowPlane = new THREE.Mesh(
+          new THREE.PlaneGeometry(segment.width * 1.03, skylineHeight * 1.04),
+          new THREE.MeshBasicMaterial({
+            map: glowTexture,
+            transparent: true,
+            opacity: segment.opacity * 0.72,
+            side: THREE.DoubleSide,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            fog: false,
+            toneMapped: false
+          })
+        );
+        glowPlane.position.copy(basePlane.position);
+        glowPlane.position.y += 0.2;
+        glowPlane.rotation.copy(basePlane.rotation);
+        glowPlane.frustumCulled = false;
+        glowPlane.renderOrder = 3;
+        backdropGroup.add(glowPlane);
+      }
+
+      backdropGroup.add(basePlane);
+    }
+
+    const floorGlow = new THREE.Mesh(
+      new THREE.CircleGeometry(this.mobileEnabled ? 128 : 162, this.mobileEnabled ? 28 : 44),
+      new THREE.MeshBasicMaterial({
+        color: 0x45dbff,
+        transparent: true,
+        opacity: 0.08,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        fog: false,
+        toneMapped: false
+      })
+    );
+    floorGlow.rotation.x = -Math.PI / 2;
+    floorGlow.position.copy(center);
+    floorGlow.position.y = 0.07;
+    floorGlow.position.addScaledVector(forward, -16);
+    floorGlow.frustumCulled = false;
+    floorGlow.renderOrder = 1;
+
+    backdropGroup.add(floorGlow);
+    rootGroup.add(backdropGroup);
+  }
+
+  getFutureCityBackdropTexture(layer = "base") {
+    const normalizedLayer = String(layer ?? "base").trim().toLowerCase();
+    const targetLayer = normalizedLayer === "glow" ? "glow" : "base";
+    const resolutionKey = this.mobileEnabled ? "mobile" : "desktop";
+    const cacheKey = `${targetLayer}|${resolutionKey}`;
+    const cached = this.futureCityBackdropTextureCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = this.mobileEnabled ? 1024 : 2048;
+    canvas.height = this.mobileEnabled ? 512 : 768;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return null;
+    }
+
+    const width = canvas.width;
+    const height = canvas.height;
+    const horizonY = Math.round(height * 0.72);
+
+    const rand = (x, y = 0, z = 0) => {
+      const value = Math.sin(x * 127.1 + y * 311.7 + z * 74.7) * 43758.5453123;
+      return value - Math.floor(value);
+    };
+
+    if (targetLayer === "base") {
+      const skyGlow = context.createLinearGradient(0, Math.round(height * 0.4), 0, height);
+      skyGlow.addColorStop(0, "rgba(24, 54, 86, 0)");
+      skyGlow.addColorStop(0.56, "rgba(11, 24, 42, 0.34)");
+      skyGlow.addColorStop(1, "rgba(5, 12, 24, 0.78)");
+      context.fillStyle = skyGlow;
+      context.fillRect(0, 0, width, height);
+    } else {
+      const haze = context.createLinearGradient(0, Math.round(height * 0.46), 0, height);
+      haze.addColorStop(0, "rgba(35, 198, 255, 0)");
+      haze.addColorStop(0.7, "rgba(27, 160, 224, 0.2)");
+      haze.addColorStop(1, "rgba(33, 255, 187, 0.34)");
+      context.fillStyle = haze;
+      context.fillRect(0, 0, width, height);
+    }
+
+    let cursorX = -32;
+    let index = 0;
+    while (cursorX < width + 32) {
+      const towerWidth = 28 + rand(index, 0.2, 0.9) * (this.mobileEnabled ? 34 : 56);
+      const towerHeight = height * (0.18 + rand(index, 1.2, 1.9) * 0.52);
+      const x = Math.round(cursorX);
+      const y = Math.round(horizonY - towerHeight);
+      const w = Math.max(14, Math.round(towerWidth));
+      const h = Math.max(36, Math.round(towerHeight));
+      if (targetLayer === "base") {
+        const towerGradient = context.createLinearGradient(x, y, x, y + h);
+        towerGradient.addColorStop(0, "rgba(41, 64, 92, 0.86)");
+        towerGradient.addColorStop(1, "rgba(11, 18, 34, 0.98)");
+        context.fillStyle = towerGradient;
+        context.fillRect(x, y, w, h);
+
+        context.fillStyle = "rgba(146, 203, 255, 0.1)";
+        context.fillRect(x + 1, y + 1, Math.max(2, Math.round(w * 0.14)), h - 2);
+      }
+
+      const windowStepX = this.mobileEnabled ? 7 : 8;
+      const windowStepY = this.mobileEnabled ? 8 : 9;
+      const windowWidth = this.mobileEnabled ? 2 : 3;
+      const lightThreshold = targetLayer === "base" ? 0.86 : 0.78;
+      for (let wx = x + 4; wx < x + w - 4; wx += windowStepX) {
+        for (let wy = y + 5; wy < y + h - 4; wy += windowStepY) {
+          const n = rand(wx * 0.061, wy * 0.037, index * 0.17);
+          if (n <= lightThreshold) {
+            continue;
+          }
+          const alpha = targetLayer === "base"
+            ? 0.18 + rand(wx * 0.03, wy * 0.04, 1.2) * 0.2
+            : 0.22 + rand(wx * 0.03, wy * 0.04, 2.4) * 0.34;
+          context.fillStyle = targetLayer === "base"
+            ? `rgba(164, 220, 255, ${alpha.toFixed(3)})`
+            : `rgba(112, 255, 214, ${alpha.toFixed(3)})`;
+          context.fillRect(wx, wy, windowWidth, 2);
+        }
+      }
+
+      if (targetLayer === "glow" && rand(index, 2.6, 9.2) > 0.68) {
+        const spireHeight = Math.round(h * (0.09 + rand(index, 6.1, 4.2) * 0.22));
+        const spireX = x + Math.round(w * 0.5);
+        context.fillStyle = "rgba(94, 241, 255, 0.34)";
+        context.fillRect(spireX, y - spireHeight, 2, spireHeight + 1);
+      }
+
+      index += 1;
+      cursorX += w + 6 + rand(index, 3.4, 1.6) * 16;
+    }
+
+    if (targetLayer === "glow") {
+      context.lineCap = "round";
+      for (let lane = 0; lane < 6; lane += 1) {
+        const laneY = horizonY - 88 - lane * 14;
+        const startX = -40 - lane * 20;
+        const endX = width + 40 + lane * 22;
+        context.strokeStyle = lane % 2 === 0
+          ? "rgba(95, 236, 255, 0.2)"
+          : "rgba(95, 255, 186, 0.17)";
+        context.lineWidth = lane % 2 === 0 ? 2.2 : 1.8;
+        context.beginPath();
+        context.moveTo(startX, laneY + Math.sin(lane * 0.8) * 4);
+        context.quadraticCurveTo(
+          width * 0.5,
+          laneY - 20 + Math.sin(lane * 1.3) * 8,
+          endX,
+          laneY + Math.cos(lane * 0.7) * 5
+        );
+        context.stroke();
+      }
+    }
+
+    const horizonFog = context.createLinearGradient(0, horizonY - 20, 0, height);
+    horizonFog.addColorStop(0, "rgba(80, 198, 255, 0)");
+    horizonFog.addColorStop(0.62, targetLayer === "base" ? "rgba(22, 44, 66, 0.32)" : "rgba(53, 210, 255, 0.18)");
+    horizonFog.addColorStop(1, targetLayer === "base" ? "rgba(8, 15, 26, 0.66)" : "rgba(27, 245, 169, 0.22)");
+    context.fillStyle = horizonFog;
+    context.fillRect(0, horizonY - 20, width, height - horizonY + 20);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.anisotropy = Math.min(8, this.renderer?.capabilities?.getMaxAnisotropy?.() || 1);
+    texture.needsUpdate = true;
+    this.futureCityBackdropTextureCache.set(cacheKey, texture);
+    return texture;
   }
 
   getCityWindowPalette(style = "slate") {
@@ -4733,7 +5054,7 @@ export class GameRuntime {
     if (this.npcGreetingVideoEl) {
       return;
     }
-    this.markNpcGreetingSeenInSession();
+    this.npcGreetingPlayed = true;
 
     const screenMaterial =
       this.npcGreetingScreen && !Array.isArray(this.npcGreetingScreen.material)
@@ -7256,6 +7577,7 @@ export class GameRuntime {
 
       if (event.code === "KeyF" && this.canUseGameplayControls()) {
         event.preventDefault();
+        if (this.tryClimbRope()) return;
         if (this.tryOpenSurfacePainterFromInteraction()) {
           return;
         }
@@ -7279,7 +7601,11 @@ export class GameRuntime {
 
       if (event.code === "KeyZ" && this.flyModeActive) {
         event.preventDefault();
-        this.undoLastPlatform();
+        if (this.editorMode === "rope") {
+          this.undoLastRope();
+        } else {
+          this.undoLastPlatform();
+        }
         return;
       }
 
@@ -7294,10 +7620,17 @@ export class GameRuntime {
       }
 
       this.keys.add(event.code);
-      if (event.code === "Space" && this.onGround) {
-        this.verticalVelocity = GAME_CONSTANTS.JUMP_FORCE;
-        this.onGround = false;
-        this.pendingJumpInput = true;
+      if (event.code === "Space") {
+        if (this.climbingRope) {
+          this.climbingRope = null;
+          this.verticalVelocity = GAME_CONSTANTS.JUMP_FORCE * 0.6;
+          return;
+        }
+        if (this.onGround) {
+          this.verticalVelocity = GAME_CONSTANTS.JUMP_FORCE;
+          this.onGround = false;
+          this.pendingJumpInput = true;
+        }
       }
     });
 
@@ -7344,7 +7677,11 @@ export class GameRuntime {
     });
     this.renderer.domElement.addEventListener("mousedown", (event) => {
       if (event.button === 0 && this.flyModeActive && this.pointerLocked) {
-        this.placePlatformAtPreview();
+        if (this.editorMode === "rope") {
+          this.placeRopeAtPreview();
+        } else {
+          this.placePlatformAtPreview();
+        }
         return;
       }
       if (!this.pointerLocked) {
@@ -7369,7 +7706,15 @@ export class GameRuntime {
     this.renderer.domElement.addEventListener("wheel", (event) => {
       if (!this.flyModeActive || !this.pointerLocked) return;
       event.preventDefault();
-      this.platformEditorDist = Math.max(2, Math.min(12, this.platformEditorDist - event.deltaY * 0.005));
+      if (this.editorMode === "rope") {
+        this.ropeEditorHeight = Math.max(1, Math.min(20, this.ropeEditorHeight - event.deltaY * 0.005));
+        if (this.ropeEditorPreviewMesh) {
+          this.ropeEditorPreviewMesh.geometry.dispose();
+          this.ropeEditorPreviewMesh.geometry = new THREE.CylinderGeometry(0.07, 0.07, this.ropeEditorHeight, 8);
+        }
+      } else {
+        this.platformEditorDist = Math.max(2, Math.min(12, this.platformEditorDist - event.deltaY * 0.005));
+      }
     }, { passive: false });
     this.renderer.domElement.addEventListener(
       "touchstart",
@@ -7902,6 +8247,7 @@ export class GameRuntime {
 
     this.platformEditorSaveBtnEl?.addEventListener("click", () => {
       this.savePlatforms();
+      this.saveRopes();
     });
     this.platformEditorClearBtnEl?.addEventListener("click", () => {
       for (const mesh of this.jumpPlatformMeshes) {
@@ -7911,8 +8257,24 @@ export class GameRuntime {
       }
       this.jumpPlatforms = [];
       this.jumpPlatformMeshes = [];
+      for (const mesh of this.jumpRopeMeshes) {
+        this.scene.remove(mesh);
+        mesh.geometry.dispose();
+        mesh.material.dispose();
+      }
+      this.jumpRopes = [];
+      this.jumpRopeMeshes = [];
+      this.climbingRope = null;
       this.savePlatforms();
+      this.saveRopes();
       this.updatePlatformEditorCount();
+      this.updateRopeEditorCount();
+    });
+    this.editorModePlatformBtnEl?.addEventListener("click", () => {
+      this.setEditorMode("platform");
+    });
+    this.editorModeRopeBtnEl?.addEventListener("click", () => {
+      this.setEditorMode("rope");
     });
   }
 
@@ -8544,6 +8906,9 @@ export class GameRuntime {
     socket.on("platform:state", (payload = {}) => {
       this.applyPlatformState(payload?.platforms ?? []);
     });
+    socket.on("rope:state", (payload = {}) => {
+      this.applyRopeState(payload?.ropes ?? []);
+    });
   }
 
   startNetworkPing() {
@@ -9047,6 +9412,7 @@ export class GameRuntime {
     this.updateDynamicResolution(delta);
     this.updateHud(delta);
     this.updatePlatformEditor();
+    this.updateRopeProximity();
   }
 
   getMovementIntent() {
@@ -9080,6 +9446,10 @@ export class GameRuntime {
   }
 
   updateMovement(delta) {
+    if (this.climbingRope) {
+      this.updateClimbing(delta);
+      return;
+    }
     const movement = this.getMovementIntent();
     const movementEnabled = movement.movementEnabled;
     const keyForward = movement.forward;
@@ -10033,6 +10403,7 @@ export class GameRuntime {
   // ── Platform Editor ──────────────────────────────────────────────────────
 
   toggleFlyMode() {
+    this.climbingRope = null;
     this.flyModeActive = !this.flyModeActive;
     if (this.flyModeActive) {
       if (!this.platformEditorPreviewMesh) {
@@ -10051,18 +10422,25 @@ export class GameRuntime {
         this.platformEditorPreviewMesh = new THREE.Mesh(geo, mat);
         this.scene.add(this.platformEditorPreviewMesh);
       }
-      this.platformEditorPreviewMesh.visible = true;
+      this.platformEditorPreviewMesh.visible = this.editorMode === "platform";
+      if (this.ropeEditorPreviewMesh) this.ropeEditorPreviewMesh.visible = this.editorMode === "rope";
       this.platformEditorEl?.classList.remove("hidden");
     } else {
-      if (this.platformEditorPreviewMesh) {
-        this.platformEditorPreviewMesh.visible = false;
-      }
+      if (this.platformEditorPreviewMesh) this.platformEditorPreviewMesh.visible = false;
+      if (this.ropeEditorPreviewMesh) this.ropeEditorPreviewMesh.visible = false;
       this.platformEditorEl?.classList.add("hidden");
     }
   }
 
   updatePlatformEditor() {
-    if (!this.flyModeActive || !this.platformEditorPreviewMesh) return;
+    if (!this.flyModeActive) return;
+    if (this.editorMode === "rope") {
+      if (this.platformEditorPreviewMesh) this.platformEditorPreviewMesh.visible = false;
+      this.updateRopeEditorPreview();
+      return;
+    }
+    if (this.ropeEditorPreviewMesh) this.ropeEditorPreviewMesh.visible = false;
+    if (!this.platformEditorPreviewMesh) return;
     // Use horizontal-only direction so platform doesn't float to ceiling when looking up
     const dir = new THREE.Vector3();
     this.camera.getWorldDirection(dir);
@@ -10180,6 +10558,224 @@ export class GameRuntime {
   updatePlatformEditorCount() {
     if (this.platformEditorCountEl) {
       this.platformEditorCountEl.textContent = `발판: ${this.jumpPlatforms.length}개`;
+    }
+  }
+
+  // ── Rope Editor ───────────────────────────────────────────────────────
+
+  setEditorMode(mode) {
+    this.editorMode = mode;
+    this.editorModePlatformBtnEl?.classList.toggle("active", mode === "platform");
+    this.editorModeRopeBtnEl?.classList.toggle("active", mode === "rope");
+    if (this.flyModeActive) {
+      if (this.platformEditorPreviewMesh) this.platformEditorPreviewMesh.visible = mode === "platform";
+      if (this.ropeEditorPreviewMesh) this.ropeEditorPreviewMesh.visible = mode === "rope";
+    }
+  }
+
+  updateRopeEditorPreview() {
+    if (!this.flyModeActive) return;
+    if (!this.ropeEditorPreviewMesh) {
+      const geo = new THREE.CylinderGeometry(0.07, 0.07, this.ropeEditorHeight, 8);
+      const mat = new THREE.MeshStandardMaterial({
+        color: 0xd4a96a,
+        emissive: 0xd4a96a,
+        emissiveIntensity: 0.5,
+        opacity: 0.55,
+        transparent: true,
+      });
+      this.ropeEditorPreviewMesh = new THREE.Mesh(geo, mat);
+      this.scene.add(this.ropeEditorPreviewMesh);
+    }
+    this.ropeEditorPreviewMesh.visible = true;
+    // Position: horizontal direction in front of player, bottom at foot level
+    const dir = new THREE.Vector3();
+    this.camera.getWorldDirection(dir);
+    dir.y = 0;
+    if (dir.lengthSq() < 0.001) dir.set(0, 0, -1);
+    dir.normalize();
+    const footY = this.playerPosition.y - GAME_CONSTANTS.PLAYER_HEIGHT;
+    const px = Math.round((this.playerPosition.x + dir.x * this.platformEditorDist) * 2) / 2;
+    const pz = Math.round((this.playerPosition.z + dir.z * this.platformEditorDist) * 2) / 2;
+    this.ropeEditorPreviewMesh.position.set(px, footY + this.ropeEditorHeight / 2, pz);
+    this.ropeEditorPreviewMesh.rotation.set(0, 0, 0);
+  }
+
+  placeRopeAtPreview() {
+    if (!this.ropeEditorPreviewMesh) return;
+    const pos = this.ropeEditorPreviewMesh.position;
+    const r = {
+      x: pos.x,
+      y: pos.y - this.ropeEditorHeight / 2,
+      z: pos.z,
+      height: this.ropeEditorHeight,
+    };
+    this.spawnRopeMesh(r);
+    this.jumpRopes.push(r);
+    this.updateRopeEditorCount();
+  }
+
+  undoLastRope() {
+    if (this.jumpRopes.length === 0) return;
+    this.jumpRopes.pop();
+    const mesh = this.jumpRopeMeshes.pop();
+    if (mesh) {
+      this.scene.remove(mesh);
+      mesh.geometry.dispose();
+      mesh.material.dispose();
+    }
+    if (this.climbingRope && !this.jumpRopes.includes(this.climbingRope)) {
+      this.climbingRope = null;
+    }
+    this.updateRopeEditorCount();
+  }
+
+  spawnRopeMesh(r) {
+    const geo = new THREE.CylinderGeometry(0.07, 0.07, r.height, 8);
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0xc8a464,
+      emissive: 0x7a5c28,
+      emissiveIntensity: 0.2,
+      roughness: 0.85,
+      metalness: 0.0,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    // Bottom of rope at r.y, center at r.y + height/2
+    mesh.position.set(r.x, r.y + r.height / 2, r.z);
+    mesh.castShadow = true;
+    this.scene.add(mesh);
+    this.jumpRopeMeshes.push(mesh);
+  }
+
+  updateRopeProximity() {
+    if (this.flyModeActive || !this.canUseGameplayControls()) {
+      this.ropeClimbPromptEl?.classList.add("hidden");
+      return;
+    }
+    const nearRope = this.getNearestClimbableRope();
+    if (nearRope && !this.climbingRope) {
+      this.ropeClimbPromptEl?.classList.remove("hidden");
+    } else {
+      this.ropeClimbPromptEl?.classList.add("hidden");
+    }
+  }
+
+  getNearestClimbableRope() {
+    const px = this.playerPosition.x;
+    const py = this.playerPosition.y - GAME_CONSTANTS.PLAYER_HEIGHT;
+    const pz = this.playerPosition.z;
+    for (const r of this.jumpRopes) {
+      const dx = Math.abs(px - r.x);
+      const dz = Math.abs(pz - r.z);
+      if (dx > 0.9 || dz > 0.9) continue;
+      if (py < r.y - 0.5 || py > r.y + r.height + 0.5) continue;
+      return r;
+    }
+    return null;
+  }
+
+  tryClimbRope() {
+    // If already climbing, F = dismount
+    if (this.climbingRope) {
+      this.climbingRope = null;
+      return true;
+    }
+    const rope = this.getNearestClimbableRope();
+    if (!rope) return false;
+    this.climbingRope = rope;
+    this.verticalVelocity = 0;
+    this.onGround = false;
+    // Snap X,Z to rope center
+    this.playerPosition.x = rope.x;
+    this.playerPosition.z = rope.z;
+    return true;
+  }
+
+  updateClimbing(delta) {
+    const r = this.climbingRope;
+    if (!r || !this.jumpRopes.includes(r)) {
+      this.climbingRope = null;
+      return;
+    }
+    const climbSpeed = 5.5;
+    const movement = this.getMovementIntent();
+    // W = 위, S = 아래
+    const upInput = movement.forward;
+    this.playerPosition.y += upInput * climbSpeed * delta;
+    // Clamp to rope bounds
+    const ropeBottom = r.y + GAME_CONSTANTS.PLAYER_HEIGHT;
+    const ropeTop = r.y + r.height + GAME_CONSTANTS.PLAYER_HEIGHT;
+    if (this.playerPosition.y <= ropeBottom) {
+      this.playerPosition.y = ropeBottom;
+      this.climbingRope = null;
+      this.onGround = true;
+      this.verticalVelocity = 0;
+    } else if (this.playerPosition.y >= ropeTop) {
+      this.playerPosition.y = ropeTop;
+      this.climbingRope = null;
+      this.onGround = false;
+    }
+    // Lock X,Z to rope
+    this.playerPosition.x = r.x;
+    this.playerPosition.z = r.z;
+    this.verticalVelocity = 0;
+    this.camera.position.copy(this.playerPosition);
+    this.camera.rotation.y = this.yaw;
+    this.camera.rotation.x = this.pitch;
+    this.updateBoundaryGuard(delta);
+  }
+
+  loadSavedRopes() {
+    if (this.socket && this.networkConnected) return;
+    try {
+      const saved = localStorage.getItem("jumpRopes_v1");
+      if (!saved) return;
+      const ropes = JSON.parse(saved);
+      if (!Array.isArray(ropes)) return;
+      for (const r of ropes) {
+        if (typeof r.x !== "number") continue;
+        this.spawnRopeMesh(r);
+        this.jumpRopes.push(r);
+      }
+      this.updateRopeEditorCount();
+    } catch {
+      // ignore
+    }
+  }
+
+  applyRopeState(rawRopes) {
+    for (const mesh of this.jumpRopeMeshes) {
+      this.scene.remove(mesh);
+      mesh.geometry.dispose();
+      mesh.material.dispose();
+    }
+    this.jumpRopes = [];
+    this.jumpRopeMeshes = [];
+    this.climbingRope = null;
+    const ropes = Array.isArray(rawRopes) ? rawRopes : [];
+    for (const r of ropes) {
+      if (typeof r.x !== "number") continue;
+      this.spawnRopeMesh(r);
+      this.jumpRopes.push(r);
+    }
+    this.updateRopeEditorCount();
+    try {
+      localStorage.setItem("jumpRopes_v1", JSON.stringify(this.jumpRopes));
+    } catch { /* ignore */ }
+  }
+
+  saveRopes() {
+    try {
+      localStorage.setItem("jumpRopes_v1", JSON.stringify(this.jumpRopes));
+    } catch { /* ignore */ }
+    if (this.socket && this.networkConnected) {
+      this.socket.emit("rope:state:set", { ropes: this.jumpRopes });
+    }
+  }
+
+  updateRopeEditorCount() {
+    if (this.ropeEditorCountEl) {
+      this.ropeEditorCountEl.textContent = `줄: ${this.jumpRopes.length}개`;
     }
   }
 }
