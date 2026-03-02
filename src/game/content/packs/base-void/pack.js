@@ -195,7 +195,7 @@ export const BASE_VOID_PACK = {
       }
     },
     postProcessing: {
-      exposure: 0.58,
+      exposure: 0.82,
       bloom: {
         enabled: false,
         mobileEnabled: false,
