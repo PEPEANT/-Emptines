@@ -5674,7 +5674,10 @@ export class GameRuntime {
 
   createPortalTimeBillboard() {
     const board = new THREE.Group();
-    board.position.set(0, 7.4, 0);
+    const billboardBaseY = 7.1;
+    const schedulePanelY = 2.55;
+    const topAdPanelY = 7.8;
+    board.position.set(0, billboardBaseY, 0);
     board.rotation.y = Math.PI;
 
     const glowBack = new THREE.Mesh(
@@ -5689,7 +5692,7 @@ export class GameRuntime {
         toneMapped: false
       })
     );
-    glowBack.position.set(0, 4.4, 0.02);
+    glowBack.position.set(0, schedulePanelY, 0.02);
     glowBack.renderOrder = 13;
 
     const canvas = document.createElement("canvas");
@@ -5711,12 +5714,24 @@ export class GameRuntime {
         side: THREE.DoubleSide
       })
     );
-    screen.position.set(0, 4.4, 0.08);
+    screen.position.set(0, schedulePanelY, 0.08);
     screen.renderOrder = 14;
 
-    const portalTopAdBaseWidth = 12.5;
+    const portalTopAdMaxWidth = 14.5;
+    const portalTopAdMaxHeight = 7.2;
     const portalTopAdDefaultAspect = 16 / 9;
-    const portalTopAdDefaultHeight = portalTopAdBaseWidth / portalTopAdDefaultAspect;
+    const getTopAdSize = (rawAspect) => {
+      const safeAspect =
+        Number.isFinite(rawAspect) && rawAspect > 0.2 ? rawAspect : portalTopAdDefaultAspect;
+      let width = portalTopAdMaxWidth;
+      let height = width / safeAspect;
+      if (height > portalTopAdMaxHeight) {
+        height = portalTopAdMaxHeight;
+        width = height * safeAspect;
+      }
+      return { width, height };
+    };
+    const topAdDefaultSize = getTopAdSize(portalTopAdDefaultAspect);
     let topAdGlow = null;
     let topAdBorder = null;
     let topAdScreen = null;
@@ -5724,15 +5739,13 @@ export class GameRuntime {
       if (!topAdGlow || !topAdBorder || !topAdScreen) {
         return;
       }
-      const safeAspect =
-        Number.isFinite(rawAspect) && rawAspect > 0.2 ? rawAspect : portalTopAdDefaultAspect;
-      const nextHeight = portalTopAdBaseWidth / safeAspect;
+      const nextSize = getTopAdSize(rawAspect);
       topAdGlow.geometry.dispose();
-      topAdGlow.geometry = new THREE.PlaneGeometry(portalTopAdBaseWidth + 0.82, nextHeight + 0.74);
+      topAdGlow.geometry = new THREE.PlaneGeometry(nextSize.width + 0.82, nextSize.height + 0.74);
       topAdBorder.geometry.dispose();
-      topAdBorder.geometry = new THREE.PlaneGeometry(portalTopAdBaseWidth + 0.24, nextHeight + 0.24);
+      topAdBorder.geometry = new THREE.PlaneGeometry(nextSize.width + 0.24, nextSize.height + 0.24);
       topAdScreen.geometry.dispose();
-      topAdScreen.geometry = new THREE.PlaneGeometry(portalTopAdBaseWidth, nextHeight);
+      topAdScreen.geometry = new THREE.PlaneGeometry(nextSize.width, nextSize.height);
     };
     const topAdTexture = this.textureLoader.load(PORTAL_TOP_AD_IMAGE_URL, (loadedTexture) => {
       const image = loadedTexture?.image;
@@ -5746,13 +5759,16 @@ export class GameRuntime {
       }
       updateTopAdGeometry(width / height);
     });
+    const maxAnisotropy = Math.max(1, this.renderer?.capabilities?.getMaxAnisotropy?.() || 1);
     topAdTexture.colorSpace = THREE.SRGBColorSpace;
-    topAdTexture.minFilter = THREE.LinearFilter;
+    topAdTexture.minFilter = THREE.LinearMipmapLinearFilter;
     topAdTexture.magFilter = THREE.LinearFilter;
-    topAdTexture.generateMipmaps = false;
+    topAdTexture.generateMipmaps = true;
+    topAdTexture.anisotropy = this.mobileEnabled ? Math.min(2, maxAnisotropy) : Math.min(8, maxAnisotropy);
+    topAdTexture.needsUpdate = true;
 
     topAdGlow = new THREE.Mesh(
-      new THREE.PlaneGeometry(portalTopAdBaseWidth + 0.82, portalTopAdDefaultHeight + 0.74),
+      new THREE.PlaneGeometry(topAdDefaultSize.width + 0.82, topAdDefaultSize.height + 0.74),
       new THREE.MeshBasicMaterial({
         color: 0x4fc8ff,
         transparent: true,
@@ -5763,11 +5779,11 @@ export class GameRuntime {
         toneMapped: false
       })
     );
-    topAdGlow.position.set(0, 8.35, 0.02);
+    topAdGlow.position.set(0, topAdPanelY, 0.02);
     topAdGlow.renderOrder = 15;
 
     topAdBorder = new THREE.Mesh(
-      new THREE.PlaneGeometry(portalTopAdBaseWidth + 0.24, portalTopAdDefaultHeight + 0.24),
+      new THREE.PlaneGeometry(topAdDefaultSize.width + 0.24, topAdDefaultSize.height + 0.24),
       new THREE.MeshBasicMaterial({
         color: 0x0c1825,
         transparent: true,
@@ -5776,11 +5792,11 @@ export class GameRuntime {
         side: THREE.DoubleSide
       })
     );
-    topAdBorder.position.set(0, 8.35, 0.07);
+    topAdBorder.position.set(0, topAdPanelY, 0.07);
     topAdBorder.renderOrder = 16;
 
     topAdScreen = new THREE.Mesh(
-      new THREE.PlaneGeometry(portalTopAdBaseWidth, portalTopAdDefaultHeight),
+      new THREE.PlaneGeometry(topAdDefaultSize.width, topAdDefaultSize.height),
       new THREE.MeshBasicMaterial({
         map: topAdTexture,
         transparent: true,
@@ -5788,7 +5804,7 @@ export class GameRuntime {
         side: THREE.DoubleSide
       })
     );
-    topAdScreen.position.set(0, 8.35, 0.09);
+    topAdScreen.position.set(0, topAdPanelY, 0.09);
     topAdScreen.renderOrder = 17;
 
     const topAdImage = topAdTexture?.image;
