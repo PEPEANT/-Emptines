@@ -1,0 +1,6 @@
+﻿Source: Neon Town
+Author: leonkin
+Website: https://opengameart.org/content/neon-town
+Download: https://opengameart.org/sites/default/files/NeonTown.zip
+License: CC0 1.0 (Public Domain)
+Notes: GLB files are used for distant future-city building dressing.
