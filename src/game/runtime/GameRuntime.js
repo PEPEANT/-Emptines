@@ -34,7 +34,9 @@ function parseSeconds(raw, fallback, min = 0.1) {
 }
 
 const INTRO_BOOT_VIDEO_URL = new URL("../../../mp4/grok-video.0.mp4", import.meta.url).href;
-const NPC_GREETING_VIDEO_URL = new URL("../../../mp4/grok-video.webm", import.meta.url).href;
+const NPC_GREETING_INTRO_VIDEO_URL = new URL("../../../mp4/chroma_02.webm", import.meta.url).href;
+const NPC_GREETING_FOLLOWUP_VIDEO_URL = new URL("../../../mp4/grok-video.webm", import.meta.url).href;
+const SPAWN_PORTAL_VEIL_REVEAL_VIDEO_URL = new URL("../../../mp4/grok-video00.mp4", import.meta.url).href;
 const ENTRY_BGM_URL = new URL("../../../mp3/TSUKUYOMI.mp3", import.meta.url).href;
 const AD_BILLBOARD_IMAGE_URL = new URL("../../../png/AD.41415786.1.png", import.meta.url).href;
 const FUTURE_CITY_FIXED_BILLBOARD_IMAGE_URLS = Object.freeze([
@@ -227,6 +229,18 @@ export class GameRuntime {
     this.objEditorMouseNdc = new THREE.Vector2(0, 0);
     this.objEditorDragHitPoint = new THREE.Vector3();
     this.objEditorDragTargetWorld = new THREE.Vector3();
+    this.securityTestState = {
+      enabled: false,
+      updatedAt: 0
+    };
+    this.securityTestSetInFlight = false;
+    this.securityTestLabelGroup = null;
+    this.securityTestObjectLabels = new Map();
+    this.securityTestBounds = new THREE.Box3();
+    this.securityTestBoundsCenter = new THREE.Vector3();
+    this.securityTestBoundsSize = new THREE.Vector3();
+    this.securityTestLabelRefreshClock = 0;
+    this.securityTestLabelRefreshInterval = 0.24;
 
     this.jumpPlatforms = [];
     this.jumpPlatformMeshes = [];
@@ -398,6 +412,8 @@ export class GameRuntime {
     this.chatLogMaxEntries = RUNTIME_TUNING.CHAT_LOG_MAX_ENTRIES;
     this.chatTitleEl = document.getElementById("chat-title");
     this.chatLogEl = document.getElementById("chat-log");
+    this.chatLiveFeedEl = document.getElementById("chat-live-feed");
+    this.chatLiveLogEl = document.getElementById("chat-live-log");
     this.chatControlsEl = document.getElementById("chat-controls");
     this.chatToggleBtnEl = document.getElementById("chat-toggle");
     this.hostChatToggleBtnEl = document.getElementById("host-chat-toggle");
@@ -442,6 +458,7 @@ export class GameRuntime {
     );
     this.hostPlayRightVideoBtnEl = document.getElementById("host-right-play");
     this.hostResetRightVideoBtnEl = document.getElementById("host-right-reset");
+    this.hostSecurityTestToggleBtnEl = document.getElementById("host-security-test-toggle");
     this.hostMusicSetInFlight = false;
     this.playerRosterVisible = false;
     this.roomPlayerSnapshot = [];
@@ -461,6 +478,8 @@ export class GameRuntime {
     this.chatOpen = false;
     this.lastLocalChatEcho = "";
     this.lastLocalChatEchoAt = 0;
+    this.chatLiveOpen = true;
+    this.chatLiveMaxEntries = Math.max(6, Math.min(18, this.chatLogMaxEntries));
     this.chatMessageSeq = 0;
     this.lastChatSendAt = 0;
     this.chatSendMinIntervalMs = 140;
@@ -617,11 +636,12 @@ export class GameRuntime {
     this.portalBillboardGroup = null;
     this.spawnPortalVeilGroup = null;
     this.spawnPortalVeilWorldZ = this.bridgeNpcPosition.z;
-    this.spawnPortalVeilCanvas = null;
-    this.spawnPortalVeilContext = null;
+    this.spawnPortalVeilMaterial = null;
+    this.spawnPortalVeilBaseTexture = null;
     this.spawnPortalVeilTexture = null;
-    this.spawnPortalVeilFogLayers = [];
-    this.spawnPortalVeilFogTickMs = 0;
+    this.spawnPortalVeilVideoEl = null;
+    this.spawnPortalVeilVideoTexture = null;
+    this.spawnPortalVeilRevealStarted = false;
     this.aZonePortalGroup = null;
     this.aZonePortalRing = null;
     this.aZonePortalCore = null;
@@ -642,6 +662,7 @@ export class GameRuntime {
     this.npcGreetingVideoEl = null;
     this.npcGreetingVideoTexture = null;
     this.npcGreetingPlayed = false;
+    this.npcGreetingMidpointTriggered = false;
     this.npcWelcomeBubbleLabel = null;
     this.mirrorGateGroup = null;
     this.mirrorGatePanel = null;
@@ -690,6 +711,7 @@ export class GameRuntime {
     this.updateFullscreenToggleState();
     this.setupToolState();
     this.setChatOpen(false);
+    this.setChatLiveOpen(true);
     // Keep gates closed on initial boot until an explicit interaction opens them.
     this.hideNicknameGate();
     this.hideNpcChoiceGate();
@@ -720,6 +742,7 @@ export class GameRuntime {
     this.loadSavedPlatforms();
     this.loadSavedRopes();
     this.loadSavedObjectPositions();
+    this.refreshSecurityTestObjectLabels();
 
     this.loop();
   }
@@ -886,12 +909,14 @@ export class GameRuntime {
     }
     this.staticWorldColliders.length = 0;
     this.movableObjects.length = 0;
+    this.clearSecurityTestObjectLabels();
     this.objEditorDragging = false;
     this.clearObjEditorSelection();
 
     if (this.npcGreetingVideoEl) {
       this.npcGreetingVideoEl.onended = null;
       this.npcGreetingVideoEl.onerror = null;
+      this.npcGreetingVideoEl.ontimeupdate = null;
       this.npcGreetingVideoEl.pause();
       this.npcGreetingVideoEl.removeAttribute("src");
       this.npcGreetingVideoEl.load();
@@ -903,6 +928,7 @@ export class GameRuntime {
     }
     this.npcGreetingScreen = null;
     this.npcGreetingPlayed = false;
+    this.npcGreetingMidpointTriggered = false;
     if (this.npcWelcomeBubbleLabel) {
       this.disposeTextLabel(this.npcWelcomeBubbleLabel);
       this.npcWelcomeBubbleLabel = null;
@@ -911,19 +937,37 @@ export class GameRuntime {
       this.portalBillboardTexture.dispose?.();
       this.portalBillboardTexture = null;
     }
+    const spawnPortalVeilTexturesToDispose = new Set();
     if (this.spawnPortalVeilTexture) {
-      this.spawnPortalVeilTexture.dispose?.();
-      this.spawnPortalVeilTexture = null;
+      spawnPortalVeilTexturesToDispose.add(this.spawnPortalVeilTexture);
     }
+    if (this.spawnPortalVeilVideoTexture) {
+      spawnPortalVeilTexturesToDispose.add(this.spawnPortalVeilVideoTexture);
+    }
+    if (this.spawnPortalVeilBaseTexture) {
+      spawnPortalVeilTexturesToDispose.add(this.spawnPortalVeilBaseTexture);
+    }
+    if (this.spawnPortalVeilVideoEl) {
+      this.spawnPortalVeilVideoEl.onended = null;
+      this.spawnPortalVeilVideoEl.onerror = null;
+      this.spawnPortalVeilVideoEl.pause();
+      this.spawnPortalVeilVideoEl.removeAttribute("src");
+      this.spawnPortalVeilVideoEl.load();
+      this.spawnPortalVeilVideoEl = null;
+    }
+    for (const texture of spawnPortalVeilTexturesToDispose) {
+      texture?.dispose?.();
+    }
+    this.spawnPortalVeilTexture = null;
+    this.spawnPortalVeilVideoTexture = null;
+    this.spawnPortalVeilBaseTexture = null;
     this.portalBillboardCanvas = null;
     this.portalBillboardContext = null;
     this.portalBillboardGroup = null;
     this.spawnPortalVeilGroup = null;
+    this.spawnPortalVeilMaterial = null;
     this.spawnPortalVeilWorldZ = this.bridgeNpcPosition.z;
-    this.spawnPortalVeilCanvas = null;
-    this.spawnPortalVeilContext = null;
-    this.spawnPortalVeilFogLayers = [];
-    this.spawnPortalVeilFogTickMs = 0;
+    this.spawnPortalVeilRevealStarted = false;
     this.aZonePortalGroup = null;
     this.aZonePortalRing = null;
     this.aZonePortalCore = null;
@@ -956,12 +1000,13 @@ export class GameRuntime {
     this.portalReplicaCoreGlow = null;
     this.portalBillboardGroup = null;
     this.spawnPortalVeilGroup = null;
+    this.spawnPortalVeilMaterial = null;
     this.spawnPortalVeilWorldZ = this.bridgeNpcPosition.z;
-    this.spawnPortalVeilCanvas = null;
-    this.spawnPortalVeilContext = null;
+    this.spawnPortalVeilBaseTexture = null;
     this.spawnPortalVeilTexture = null;
-    this.spawnPortalVeilFogLayers = [];
-    this.spawnPortalVeilFogTickMs = 0;
+    this.spawnPortalVeilVideoEl = null;
+    this.spawnPortalVeilVideoTexture = null;
+    this.spawnPortalVeilRevealStarted = false;
     this.aZonePortalGroup = null;
     this.aZonePortalRing = null;
     this.aZonePortalCore = null;
@@ -2053,18 +2098,19 @@ export class GameRuntime {
     const veilWidth = this.mobileEnabled ? 84 : 122;
     const veilHeight = this.mobileEnabled ? 48 : 70;
     const veilTexture = this.createSpawnPortalVeilTexture();
+    const veilMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      map: veilTexture,
+      roughness: 0.62,
+      metalness: 0.1,
+      emissive: 0x000000,
+      emissiveIntensity: 0,
+      depthWrite: true,
+      side: THREE.DoubleSide
+    });
     const veilCore = new THREE.Mesh(
       new THREE.PlaneGeometry(veilWidth, veilHeight),
-      new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        map: veilTexture,
-        roughness: 0.62,
-        metalness: 0.1,
-        emissive: 0x102d46,
-        emissiveIntensity: 0.32,
-        depthWrite: true,
-        side: THREE.DoubleSide
-      })
+      veilMaterial
     );
     veilCore.renderOrder = 18;
     spawnPortalVeil.add(veilCore);
@@ -2395,8 +2441,10 @@ export class GameRuntime {
     this.portalReplicaCoreGlow = null;
     this.portalBillboardGroup = portalBillboard;
     this.spawnPortalVeilGroup = spawnPortalVeil;
+    this.spawnPortalVeilMaterial = veilMaterial;
     this.spawnPortalVeilWorldZ = npcGuide.position.z + npcTempleGate.position.z;
-    this.updateSpawnPortalVeilTexture(true);
+    this.spawnPortalVeilRevealStarted = false;
+    this.npcGreetingMidpointTriggered = false;
     this.aZonePortalGroup = aZonePortalGroup;
     this.aZonePortalRing = aZonePortalRing;
     this.aZonePortalCore = aZonePortalCore;
@@ -2421,6 +2469,7 @@ export class GameRuntime {
     );
     this.scene.add(group);
     this.loadSavedObjectPositions();
+    this.refreshSecurityTestObjectLabels();
     this.setMirrorGateVisible(this.flowStage === "bridge_mirror");
     this.updateBridgeBoundaryMarker(0);
     this.updatePortalVisual();
@@ -5879,7 +5928,6 @@ export class GameRuntime {
     this.requestAuthoritativeStateSync();
     this.hud.setStatus(this.getStatusText());
     this.syncGameplayUiForFlow();
-    this.ensureEntryMusicPlayback();
     this.playNpcGreeting();
   }
 
@@ -6000,6 +6048,7 @@ export class GameRuntime {
       this.closeSurfacePainter();
     }
     this.syncMobileUiState();
+    this.syncChatLiveUi();
     this.syncHostControls();
   }
 
@@ -6055,6 +6104,7 @@ export class GameRuntime {
 
   syncMobileUiState() {
     if (!this.mobileUiEl) {
+      this.syncChatLiveUi();
       return;
     }
     const portraitBlocked = this.isMobilePortraitBlocked();
@@ -6086,6 +6136,7 @@ export class GameRuntime {
     if (!visible) {
       this.resetMobileControlInputState();
     }
+    this.syncChatLiveUi();
   }
 
   resetMobileMoveInput() {
@@ -6219,12 +6270,145 @@ export class GameRuntime {
     }
   }
 
+  disposeNpcGreetingVideoPlayback({ disposeTexture = true } = {}) {
+    if (this.npcGreetingVideoEl) {
+      this.npcGreetingVideoEl.onended = null;
+      this.npcGreetingVideoEl.onerror = null;
+      this.npcGreetingVideoEl.ontimeupdate = null;
+      this.npcGreetingVideoEl.pause();
+      this.npcGreetingVideoEl.removeAttribute("src");
+      this.npcGreetingVideoEl.load();
+      this.npcGreetingVideoEl = null;
+    }
+    if (disposeTexture && this.npcGreetingVideoTexture) {
+      this.npcGreetingVideoTexture.dispose();
+      this.npcGreetingVideoTexture = null;
+    }
+  }
+
+  playNpcGreetingVideoOnScreen(
+    sourceUrl,
+    { freezeOnEnd = false, triggerHalfwayOnEnd = false, onHalfway = null, onEnded = null } = {}
+  ) {
+    const normalizedSource = String(sourceUrl ?? "").trim();
+    if (!normalizedSource) {
+      return false;
+    }
+
+    const screenMaterial =
+      this.npcGreetingScreen && !Array.isArray(this.npcGreetingScreen.material)
+        ? this.npcGreetingScreen.material
+        : null;
+    if (!screenMaterial) {
+      return false;
+    }
+
+    this.disposeNpcGreetingVideoPlayback();
+
+    const video = document.createElement("video");
+    video.preload = "auto";
+    video.playsInline = true;
+    video.muted = false;
+    video.volume = 1;
+    video.loop = false;
+    video.crossOrigin = "anonymous";
+    video.disablePictureInPicture = true;
+    video.setAttribute("playsinline", "true");
+    video.setAttribute("webkit-playsinline", "true");
+    video.setAttribute("disableremoteplayback", "true");
+    video.src = normalizedSource;
+    video.currentTime = 0;
+
+    const texture = new THREE.VideoTexture(video);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.generateMipmaps = false;
+
+    screenMaterial.map = texture;
+    screenMaterial.color.setHex(0xffffff);
+    screenMaterial.opacity = 1;
+    screenMaterial.needsUpdate = true;
+    this.npcGreetingScreen.visible = true;
+
+    this.npcGreetingVideoEl = video;
+    this.npcGreetingVideoTexture = texture;
+
+    let halfwayTriggered = false;
+    const runHalfway = () => {
+      if (halfwayTriggered) {
+        return;
+      }
+      halfwayTriggered = true;
+      onHalfway?.();
+    };
+
+    const finishPlayback = ({ triggerHalfway = false } = {}) => {
+      if (this.npcGreetingVideoEl !== video) {
+        return;
+      }
+      if (triggerHalfway) {
+        runHalfway();
+      }
+      video.onended = null;
+      video.onerror = null;
+      video.ontimeupdate = null;
+      if (freezeOnEnd) {
+        this.freezeVideoOnLastFrame(video, texture);
+      } else {
+        video.pause();
+      }
+      onEnded?.();
+    };
+
+    video.ontimeupdate = () => {
+      if (halfwayTriggered) {
+        return;
+      }
+      if (Number.isFinite(video.duration) && video.duration > 0 && video.currentTime >= video.duration * 0.5) {
+        runHalfway();
+      }
+    };
+
+    video.onended = () => {
+      finishPlayback({ triggerHalfway: triggerHalfwayOnEnd });
+    };
+    video.onerror = () => {
+      finishPlayback({ triggerHalfway: false });
+    };
+
+    video.play().catch(() => {
+      // Fallback for strict autoplay policies: retry muted before giving up.
+      video.muted = true;
+      video.currentTime = 0;
+      video.play().then(
+        () => {},
+        () => {
+          finishPlayback({ triggerHalfway: false });
+        }
+      );
+    });
+
+    return true;
+  }
+
+  triggerNpcGreetingMidpointEffects() {
+    if (this.npcGreetingMidpointTriggered) {
+      return;
+    }
+    this.npcGreetingMidpointTriggered = true;
+    this.ensureEntryMusicPlayback();
+    this.startSpawnPortalVeilRevealVideo();
+  }
+
   playNpcGreeting() {
     if (!this.hubFlowEnabled || this.npcGreetingPlayed || !this.npcGreetingScreen) {
       return;
     }
-    const sourceUrl = String(NPC_GREETING_VIDEO_URL ?? "").trim();
-    if (!sourceUrl) {
+
+    const introSourceUrl = String(NPC_GREETING_INTRO_VIDEO_URL ?? "").trim();
+    const followupSourceUrl = String(NPC_GREETING_FOLLOWUP_VIDEO_URL ?? "").trim();
+    if (!introSourceUrl && !followupSourceUrl) {
       this.markNpcGreetingSeenInSession();
       return;
     }
@@ -6232,21 +6416,102 @@ export class GameRuntime {
     if (this.npcGreetingVideoEl) {
       return;
     }
-    this.npcGreetingPlayed = true;
+    this.markNpcGreetingSeenInSession();
+    this.npcGreetingMidpointTriggered = false;
 
-    const screenMaterial =
-      this.npcGreetingScreen && !Array.isArray(this.npcGreetingScreen.material)
-        ? this.npcGreetingScreen.material
-        : null;
-    if (!screenMaterial) {
+    const playFollowup = () => {
+      if (!followupSourceUrl) {
+        return;
+      }
+      this.playNpcGreetingVideoOnScreen(followupSourceUrl, { freezeOnEnd: true });
+    };
+
+    if (!introSourceUrl) {
+      this.triggerNpcGreetingMidpointEffects();
+      playFollowup();
+      return;
+    }
+
+    const started = this.playNpcGreetingVideoOnScreen(introSourceUrl, {
+      freezeOnEnd: false,
+      triggerHalfwayOnEnd: true,
+      onHalfway: () => {
+        this.triggerNpcGreetingMidpointEffects();
+      },
+      onEnded: () => {
+        this.triggerNpcGreetingMidpointEffects();
+        playFollowup();
+      }
+    });
+
+    if (!started) {
+      this.triggerNpcGreetingMidpointEffects();
+      playFollowup();
+    }
+  }
+
+  createSpawnPortalVeilTexture() {
+    const canvas = document.createElement("canvas");
+    canvas.width = this.mobileEnabled ? 1024 : 1536;
+    canvas.height = this.mobileEnabled ? 640 : 900;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return null;
+    }
+
+    context.fillStyle = "#000000";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.generateMipmaps = false;
+    texture.needsUpdate = true;
+    this.spawnPortalVeilBaseTexture = texture;
+    this.spawnPortalVeilTexture = texture;
+    return texture;
+  }
+
+  freezeVideoOnLastFrame(video, texture = null) {
+    if (!video) {
+      return;
+    }
+    try {
+      if (Number.isFinite(video.duration) && video.duration > 0) {
+        video.currentTime = Math.max(0, video.duration - 0.04);
+        if (texture) {
+          texture.needsUpdate = true;
+        }
+      }
+    } catch {
+      // ignore seek failures on ended media
+    }
+    video.pause();
+  }
+
+  startSpawnPortalVeilRevealVideo() {
+    if (this.spawnPortalVeilRevealStarted) {
+      return;
+    }
+    this.spawnPortalVeilRevealStarted = true;
+
+    const sourceUrl = String(SPAWN_PORTAL_VEIL_REVEAL_VIDEO_URL ?? "").trim();
+    if (!sourceUrl || !this.spawnPortalVeilMaterial) {
+      return;
+    }
+
+    if (this.spawnPortalVeilVideoEl) {
       return;
     }
 
     const video = document.createElement("video");
     video.preload = "auto";
     video.playsInline = true;
-    video.muted = false;
-    video.volume = 1;
+    video.muted = true;
+    video.volume = 0;
     video.loop = false;
     video.crossOrigin = "anonymous";
     video.disablePictureInPicture = true;
@@ -6262,44 +6527,27 @@ export class GameRuntime {
     texture.magFilter = THREE.LinearFilter;
     texture.generateMipmaps = false;
 
+    this.spawnPortalVeilVideoEl = video;
+    this.spawnPortalVeilVideoTexture = texture;
+    this.spawnPortalVeilTexture = texture;
+    this.spawnPortalVeilMaterial.map = texture;
+    this.spawnPortalVeilMaterial.color.setHex(0xffffff);
+    this.spawnPortalVeilMaterial.emissive.setHex(0x0f1f32);
+    this.spawnPortalVeilMaterial.emissiveIntensity = 0.26;
+    this.spawnPortalVeilMaterial.needsUpdate = true;
+
     const finishPlayback = () => {
-      if (this.npcGreetingVideoEl !== video) {
+      if (this.spawnPortalVeilVideoEl !== video) {
         return;
       }
       video.onended = null;
       video.onerror = null;
-      try {
-        if (Number.isFinite(video.duration) && video.duration > 0) {
-          video.currentTime = Math.max(0, video.duration - 0.04);
-        }
-      } catch {
-        // ignore seek failures on ended media
-      }
-      video.pause();
-
-      if (this.npcGreetingScreen && !Array.isArray(this.npcGreetingScreen.material)) {
-        const mat = this.npcGreetingScreen.material;
-        mat.map = texture;
-        mat.color.setHex(0xffffff);
-        mat.opacity = 1;
-        mat.needsUpdate = true;
-        this.npcGreetingScreen.visible = true;
-      }
+      this.freezeVideoOnLastFrame(video, texture);
     };
 
-    screenMaterial.map = texture;
-    screenMaterial.color.setHex(0xffffff);
-    screenMaterial.opacity = 1;
-    screenMaterial.needsUpdate = true;
-    this.npcGreetingScreen.visible = true;
-
-    this.npcGreetingVideoEl = video;
-    this.npcGreetingVideoTexture = texture;
     video.onended = finishPlayback;
     video.onerror = finishPlayback;
     video.play().catch(() => {
-      // Fallback for strict autoplay policies: retry muted before giving up.
-      video.muted = true;
       video.currentTime = 0;
       video.play().then(
         () => {},
@@ -6310,139 +6558,10 @@ export class GameRuntime {
     });
   }
 
-  createSpawnPortalVeilTexture() {
-    const canvas = document.createElement("canvas");
-    canvas.width = this.mobileEnabled ? 1024 : 1536;
-    canvas.height = this.mobileEnabled ? 640 : 900;
-    const context = canvas.getContext("2d");
-    if (!context) {
-      return null;
+  updateSpawnPortalVeilTexture() {
+    if (this.spawnPortalVeilTexture) {
+      this.spawnPortalVeilTexture.needsUpdate = true;
     }
-
-    const fogLayerCount = this.mobileEnabled ? 8 : 12;
-    const fogLayers = [];
-    for (let index = 0; index < fogLayerCount; index += 1) {
-      const seeded = Math.sin((index + 1) * 12.9898) * 43758.5453;
-      const seeded2 = Math.sin((index + 1) * 78.233) * 43758.5453;
-      const seeded3 = Math.sin((index + 1) * 39.425) * 43758.5453;
-      const rndA = seeded - Math.floor(seeded);
-      const rndB = seeded2 - Math.floor(seeded2);
-      const rndC = seeded3 - Math.floor(seeded3);
-      fogLayers.push({
-        baseX: 0.08 + rndA * 0.84,
-        baseY: 0.12 + rndB * 0.76,
-        radius: (this.mobileEnabled ? 130 : 170) + rndC * (this.mobileEnabled ? 140 : 210),
-        driftX: (this.mobileEnabled ? 22 : 32) + rndB * (this.mobileEnabled ? 26 : 42),
-        driftY: (this.mobileEnabled ? 10 : 18) + rndA * (this.mobileEnabled ? 14 : 24),
-        speed: 0.16 + rndC * 0.4,
-        phase: rndA * Math.PI * 2,
-        alpha: 0.22 + rndB * 0.28
-      });
-    }
-
-    this.spawnPortalVeilCanvas = canvas;
-    this.spawnPortalVeilContext = context;
-    this.spawnPortalVeilFogLayers = fogLayers;
-    this.spawnPortalVeilFogTickMs = 0;
-
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.wrapS = THREE.ClampToEdgeWrapping;
-    texture.wrapT = THREE.ClampToEdgeWrapping;
-    texture.minFilter = THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    texture.generateMipmaps = false;
-    texture.needsUpdate = true;
-    this.spawnPortalVeilTexture = texture;
-    this.updateSpawnPortalVeilTexture(true);
-    return texture;
-  }
-
-  updateSpawnPortalVeilTexture(force = false) {
-    const context = this.spawnPortalVeilContext;
-    const canvas = this.spawnPortalVeilCanvas;
-    const texture = this.spawnPortalVeilTexture;
-    if (!context || !canvas || !texture) {
-      return;
-    }
-
-    const nowMs = performance.now();
-    if (!force && nowMs - this.spawnPortalVeilFogTickMs < 33) {
-      return;
-    }
-    this.spawnPortalVeilFogTickMs = nowMs;
-    const nowSec = nowMs * 0.001;
-    const width = canvas.width;
-    const height = canvas.height;
-
-    context.clearRect(0, 0, width, height);
-
-    const base = context.createLinearGradient(0, 0, 0, height);
-    base.addColorStop(0, "#020a18");
-    base.addColorStop(0.38, "#07203d");
-    base.addColorStop(1, "#041128");
-    context.fillStyle = base;
-    context.fillRect(0, 0, width, height);
-
-    const edgeGlow = context.createRadialGradient(
-      width * 0.5,
-      height * 0.5,
-      height * 0.08,
-      width * 0.5,
-      height * 0.5,
-      height * 0.78
-    );
-    edgeGlow.addColorStop(0, "rgba(82, 177, 255, 0.24)");
-    edgeGlow.addColorStop(0.66, "rgba(15, 44, 88, 0.54)");
-    edgeGlow.addColorStop(1, "rgba(3, 10, 20, 0.92)");
-    context.fillStyle = edgeGlow;
-    context.fillRect(0, 0, width, height);
-
-    context.save();
-    context.globalCompositeOperation = "screen";
-    context.filter = this.mobileEnabled ? "blur(20px)" : "blur(28px)";
-    for (const layer of this.spawnPortalVeilFogLayers) {
-      const driftX = Math.sin(nowSec * layer.speed + layer.phase) * layer.driftX;
-      const driftY = Math.cos(nowSec * layer.speed * 0.74 + layer.phase * 0.61) * layer.driftY;
-      const x = layer.baseX * width + driftX;
-      const y = layer.baseY * height + driftY;
-      const radius = layer.radius * (0.9 + 0.12 * Math.sin(nowSec * (layer.speed * 0.72) + layer.phase));
-      const fog = context.createRadialGradient(x, y, radius * 0.06, x, y, radius);
-      fog.addColorStop(0, `rgba(198, 236, 255, ${layer.alpha * 0.44})`);
-      fog.addColorStop(0.42, `rgba(132, 201, 255, ${layer.alpha * 0.3})`);
-      fog.addColorStop(0.82, `rgba(74, 132, 212, ${layer.alpha * 0.2})`);
-      fog.addColorStop(1, "rgba(0, 0, 0, 0)");
-      context.fillStyle = fog;
-      context.fillRect(x - radius, y - radius, radius * 2, radius * 2);
-    }
-    context.restore();
-
-    const centralMist = context.createRadialGradient(
-      width * 0.5,
-      height * 0.5,
-      height * 0.05,
-      width * 0.5,
-      height * 0.5,
-      height * 0.66
-    );
-    centralMist.addColorStop(0, "rgba(157, 224, 255, 0.3)");
-    centralMist.addColorStop(0.5, "rgba(99, 168, 255, 0.22)");
-    centralMist.addColorStop(1, "rgba(8, 26, 52, 0)");
-    context.fillStyle = centralMist;
-    context.fillRect(0, 0, width, height);
-
-    context.save();
-    context.globalCompositeOperation = "soft-light";
-    const bandY = height * (0.48 + Math.sin(nowSec * 0.24) * 0.04);
-    const mistBand = context.createLinearGradient(0, bandY - height * 0.16, 0, bandY + height * 0.16);
-    mistBand.addColorStop(0, "rgba(11, 28, 55, 0)");
-    mistBand.addColorStop(0.5, "rgba(182, 232, 255, 0.24)");
-    mistBand.addColorStop(1, "rgba(11, 28, 55, 0)");
-    context.fillStyle = mistBand;
-    context.fillRect(0, bandY - height * 0.2, width, height * 0.4);
-    context.restore();
-
-    texture.needsUpdate = true;
   }
 
   getNpcDistance() {
@@ -6561,14 +6680,19 @@ export class GameRuntime {
 
   hasHostPrivilege() {
     const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
-    return this.isRoomHost || localHostMode;
+    const roomHostMatch = Boolean(
+      this.localPlayerId &&
+      this.roomHostId &&
+      String(this.localPlayerId) === String(this.roomHostId)
+    );
+    return this.isRoomHost || roomHostMatch || localHostMode;
   }
 
   canUseObjectEditor() {
     if (!this.hasHostPrivilege()) {
       return false;
     }
-    return this.canUseGameplayControls();
+    return this.canMovePlayer();
   }
 
   canUseChatControls() {
@@ -6857,8 +6981,7 @@ export class GameRuntime {
       return;
     }
 
-    const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
-    const hasHostPrivilege = this.isRoomHost || localHostMode;
+    const hasHostPrivilege = this.hasHostPrivilege();
     this.portalPhase = "cooldown";
     this.portalPhaseClock = 0;
     this.setFlowHeadline("도시 라이브", hasHostPrivilege ? "호스팅" : "");
@@ -7404,8 +7527,7 @@ export class GameRuntime {
   }
 
   syncHostControls() {
-    const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
-    const hasHostPrivilege = this.isRoomHost || localHostMode;
+    const hasHostPrivilege = this.hasHostPrivilege();
     const visible = this.hubFlowEnabled && hasHostPrivilege;
     const canHostUseChat = this.canUseHostChatShortcut();
     const chatEnabled = this.canUseChatControls();
@@ -7413,6 +7535,7 @@ export class GameRuntime {
     if (!chatEnabled && this.chatOpen) {
       this.setChatOpen(false);
     }
+    this.syncChatLiveUi();
     if (this.hostChatToggleBtnEl) {
       const showHostChatToggle = canHostUseChat && !this.mobileEnabled && !this.chatOpen;
       this.hostChatToggleBtnEl.classList.toggle("hidden", !showHostChatToggle);
@@ -7446,7 +7569,8 @@ export class GameRuntime {
       this.portalTargetSetInFlight ||
       this.leftBillboardSetInFlight ||
       this.rightBillboardResetInFlight ||
-      this.hostMusicSetInFlight;
+      this.hostMusicSetInFlight ||
+      this.securityTestSetInFlight;
 
     this.hostControlsEl.classList.toggle("hidden", !visible || !this.hostControlsOpen);
     if (this.hostOpenPortalBtnEl) {
@@ -7489,6 +7613,15 @@ export class GameRuntime {
     }
     if (this.hostResetRightVideoBtnEl) {
       this.hostResetRightVideoBtnEl.disabled = controlsBusy;
+    }
+    if (this.hostSecurityTestToggleBtnEl) {
+      const enabled = Boolean(this.securityTestState?.enabled);
+      const nextLabel = enabled ? "보안 테스트: ON" : "보안 테스트: OFF";
+      if (this.hostSecurityTestToggleBtnEl.textContent !== nextLabel) {
+        this.hostSecurityTestToggleBtnEl.textContent = nextLabel;
+      }
+      this.hostSecurityTestToggleBtnEl.setAttribute("aria-pressed", enabled ? "true" : "false");
+      this.hostSecurityTestToggleBtnEl.disabled = controlsBusy;
     }
     if (this.hostLeftImageFileInputEl) {
       this.hostLeftImageFileInputEl.disabled = controlsBusy;
@@ -7808,6 +7941,70 @@ export class GameRuntime {
 
       this.handlePortalForceClose(response, { announce: false });
       this.appendChatLine("", "포탈을 닫았습니다.", "system");
+    });
+  }
+
+  normalizeSecurityTestState(raw = {}) {
+    return {
+      enabled: Boolean(raw?.enabled ?? raw?.active),
+      updatedAt: Math.max(0, Math.trunc(Number(raw?.updatedAt) || Date.now()))
+    };
+  }
+
+  applySecurityTestState(raw = {}, { announce = false } = {}) {
+    const next = this.normalizeSecurityTestState(raw);
+    const previous = this.normalizeSecurityTestState(this.securityTestState);
+    this.securityTestState = next;
+    this.refreshSecurityTestObjectLabels();
+    this.securityTestLabelRefreshClock = 0;
+
+    if (announce && previous.enabled !== next.enabled) {
+      const label = next.enabled ? "ON" : "OFF";
+      this.appendChatLine("", `보안 테스트 모드: ${label}`, "system");
+    }
+    this.syncHostControls();
+  }
+
+  requestHostSecurityTestToggle(forceEnabled = null) {
+    const nextEnabled =
+      typeof forceEnabled === "boolean" ? forceEnabled : !Boolean(this.securityTestState?.enabled);
+
+    const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
+    if (!this.socket || !this.networkConnected) {
+      if (!localHostMode) {
+        this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
+        return;
+      }
+      this.applySecurityTestState(
+        {
+          enabled: nextEnabled,
+          updatedAt: Date.now()
+        },
+        { announce: true }
+      );
+      return;
+    }
+
+    if (!this.hasHostPrivilege()) {
+      this.appendChatLine("", "보안 테스트 토글은 방장만 가능합니다.", "system");
+      return;
+    }
+    if (this.securityTestSetInFlight) {
+      return;
+    }
+
+    this.securityTestSetInFlight = true;
+    this.syncHostControls();
+    this.socket.emit("security:test:set", { enabled: nextEnabled }, (response = {}) => {
+      this.securityTestSetInFlight = false;
+      this.syncHostControls();
+      if (!response?.ok) {
+        const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
+        this.appendChatLine("", `보안 테스트 변경 실패: ${reason}`, "system");
+        return;
+      }
+
+      this.applySecurityTestState(response?.state ?? { enabled: nextEnabled }, { announce: true });
     });
   }
 
@@ -9002,7 +9199,7 @@ export class GameRuntime {
         return;
       }
 
-      if (event.code === "KeyG" && this.canUseGameplayControls() && (this.isRoomHost || !this.socketEndpoint)) {
+      if (event.code === "KeyG" && this.canUseGameplayControls() && this.hasHostPrivilege()) {
         event.preventDefault();
         this.toggleFlyMode();
         return;
@@ -9560,6 +9757,11 @@ export class GameRuntime {
         this.requestRightBillboardReset({ announceErrors: true });
       });
     }
+    if (this.hostSecurityTestToggleBtnEl) {
+      this.hostSecurityTestToggleBtnEl.addEventListener("click", () => {
+        this.requestHostSecurityTestToggle(!this.securityTestState.enabled);
+      });
+    }
     if (this.hostLeftImageFileInputEl) {
       this.hostLeftImageFileInputEl.addEventListener("change", () => {
         const file = this.hostLeftImageFileInputEl?.files?.[0];
@@ -9852,6 +10054,12 @@ export class GameRuntime {
     if (!this.chatLogEl) {
       this.chatLogEl = document.getElementById("chat-log");
     }
+    if (!this.chatLiveFeedEl) {
+      this.chatLiveFeedEl = document.getElementById("chat-live-feed");
+    }
+    if (!this.chatLiveLogEl) {
+      this.chatLiveLogEl = document.getElementById("chat-live-log");
+    }
     if (!this.chatTitleEl) {
       this.chatTitleEl = document.getElementById("chat-title");
     }
@@ -9953,6 +10161,9 @@ export class GameRuntime {
     if (!this.hostResetRightVideoBtnEl) {
       this.hostResetRightVideoBtnEl = document.getElementById("host-right-reset");
     }
+    if (!this.hostSecurityTestToggleBtnEl) {
+      this.hostSecurityTestToggleBtnEl = document.getElementById("host-security-test-toggle");
+    }
     if (!this.hostLeftImageFileInputEl) {
       this.hostLeftImageFileInputEl = document.getElementById("host-left-image-file");
     }
@@ -10051,6 +10262,57 @@ export class GameRuntime {
     );
   }
 
+  setChatLiveOpen(open) {
+    this.chatLiveOpen = Boolean(open);
+    this.syncChatLiveUi();
+  }
+
+  updateChatLiveAnchorPosition() {
+    if (!this.chatLiveFeedEl || typeof window === "undefined") {
+      return;
+    }
+    const viewportHeight = Math.max(1, Number(window.innerHeight) || 1);
+    const isVisibleRect = (element) => {
+      if (!element || element.classList?.contains?.("hidden")) {
+        return null;
+      }
+      const rect = element.getBoundingClientRect?.();
+      if (!rect || !Number.isFinite(rect.top) || rect.height <= 0) {
+        return null;
+      }
+      return rect;
+    };
+
+    let anchorRect = null;
+    if (this.mobileEnabled) {
+      anchorRect = isVisibleRect(this.mobileUiEl);
+    } else {
+      anchorRect = isVisibleRect(this.chatUiEl);
+    }
+
+    if (anchorRect) {
+      const anchoredBottom = Math.max(18, Math.round(viewportHeight - anchorRect.top + 8));
+      this.chatLiveFeedEl.style.bottom = `${anchoredBottom}px`;
+      return;
+    }
+    this.chatLiveFeedEl.style.bottom = this.mobileEnabled ? "174px" : "148px";
+  }
+
+  syncChatLiveUi() {
+    this.resolveUiElements();
+    if (!this.chatLiveFeedEl) {
+      return;
+    }
+    const portraitBlocked = this.isMobilePortraitBlocked();
+    const canShowChat = this.canUseChatControls();
+    const hideForMobileFullscreenChat = this.mobileEnabled && this.chatOpen;
+    const visible = canShowChat && !portraitBlocked && !hideForMobileFullscreenChat;
+    this.chatLiveFeedEl.classList.toggle("hidden", !visible);
+    if (visible) {
+      this.updateChatLiveAnchorPosition();
+    }
+  }
+
   setChatOpen(open) {
     if (open && !this.canUseChatControls()) {
       return;
@@ -10070,7 +10332,7 @@ export class GameRuntime {
       document.body.classList.toggle("chat-mobile-open", this.mobileEnabled && this.chatOpen);
     }
     if (this.chatTitleEl) {
-      this.chatTitleEl.textContent = this.chatOpen ? "실시간 채팅" : "채팅";
+      this.chatTitleEl.textContent = "채팅";
     }
     if (this.chatToggleBtnEl) {
       const label = this.chatOpen ? "닫기" : "채팅";
@@ -10099,6 +10361,7 @@ export class GameRuntime {
       this.chalkLastStamp = null;
     }
     this.syncMobileUiState();
+    this.syncChatLiveUi();
   }
 
   normalizeGraphicsQuality(rawQuality) {
@@ -10394,6 +10657,7 @@ export class GameRuntime {
       this.leftBillboardSetInFlight = false;
       this.rightBillboardResetInFlight = false;
       this.hostMusicSetInFlight = false;
+      this.securityTestSetInFlight = false;
       this.authoritativeStateSyncInFlight = false;
       this.remoteSyncClock = 0;
       this.lastSentInput = null;
@@ -10409,6 +10673,7 @@ export class GameRuntime {
       this.updateRoomPlayerSnapshot([]);
       this.setPlayerRosterVisible(false);
       this.applySharedMusicState({ mode: "idle" }, { announce: false });
+      this.applySecurityTestState({ enabled: false }, { announce: false });
       this.syncHostControls();
       this.hud.setStatus(this.getStatusText());
       this.hud.setPlayers(0);
@@ -10426,6 +10691,7 @@ export class GameRuntime {
       this.leftBillboardSetInFlight = false;
       this.rightBillboardResetInFlight = false;
       this.hostMusicSetInFlight = false;
+      this.securityTestSetInFlight = false;
       this.authoritativeStateSyncInFlight = false;
       this.remoteSyncClock = 0;
       this.lastSentInput = null;
@@ -10439,6 +10705,7 @@ export class GameRuntime {
       this.updateRoomPlayerSnapshot([]);
       this.setPlayerRosterVisible(false);
       this.applySharedMusicState({ mode: "idle" }, { announce: false });
+      this.applySecurityTestState({ enabled: false }, { announce: false });
       this.syncHostControls();
       this.stopNetworkPing();
       this.hud.setStatus(this.getStatusText());
@@ -10668,6 +10935,9 @@ export class GameRuntime {
     if (room?.rightBillboard && typeof room.rightBillboard === "object") {
       // No force: same-video state won't restart playback when another player joins
       this.applyRightBillboardState(room.rightBillboard);
+    }
+    if (room?.securityTest && typeof room.securityTest === "object") {
+      this.applySecurityTestState(room.securityTest, { announce: false });
     }
 
     const players = Array.isArray(room?.players) ? room.players : [];
@@ -11041,6 +11311,13 @@ export class GameRuntime {
     this.updateHud(delta);
     this.updatePlatformEditor();
     this.updateRopeProximity();
+    if (this.securityTestState?.enabled) {
+      this.securityTestLabelRefreshClock += delta;
+      if (this.securityTestLabelRefreshClock >= this.securityTestLabelRefreshInterval) {
+        this.securityTestLabelRefreshClock = 0;
+        this.updateSecurityTestObjectLabelPositions();
+      }
+    }
   }
 
   getMovementIntent() {
@@ -11465,23 +11742,29 @@ export class GameRuntime {
 
   appendChatLine(name, text, type = "remote") {
     this.resolveUiElements();
-    if (!this.chatLogEl) {
+    const hasMainLog = Boolean(this.chatLogEl);
+    const hasLiveLog = Boolean(this.chatLiveLogEl);
+    if (!hasMainLog && !hasLiveLog) {
       return false;
     }
 
-    const nearBottom =
-      this.chatLogEl.scrollHeight - this.chatLogEl.scrollTop - this.chatLogEl.clientHeight < 20;
+    const nearBottom = hasMainLog
+      ? this.chatLogEl.scrollHeight - this.chatLogEl.scrollTop - this.chatLogEl.clientHeight < 20
+      : false;
 
-    const line = document.createElement("p");
-    line.className = `chat-line ${type}`;
+    const createLineElement = () => {
+      const line = document.createElement("p");
+      line.className = `chat-line ${type}`;
 
-    if (type === "system") {
-      line.textContent = String(text ?? "").trim();
-    } else {
+      if (type === "system") {
+        line.textContent = String(text ?? "").trim();
+        return line;
+      }
+
       const safeName = this.formatPlayerName(name);
       const safeText = String(text ?? "").trim();
       if (!safeText) {
-        return false;
+        return null;
       }
 
       const nameEl = document.createElement("span");
@@ -11492,16 +11775,37 @@ export class GameRuntime {
       textEl.textContent = safeText;
 
       line.append(nameEl, textEl);
+      return line;
+    };
+
+    const mainLine = createLineElement();
+    if (!mainLine) {
+      return false;
     }
 
-    this.chatLogEl.appendChild(line);
-    while (this.chatLogEl.childElementCount > this.chatLogMaxEntries) {
-      this.chatLogEl.firstElementChild?.remove();
+    let appended = false;
+    if (hasMainLog) {
+      this.chatLogEl.appendChild(mainLine);
+      while (this.chatLogEl.childElementCount > this.chatLogMaxEntries) {
+        this.chatLogEl.firstElementChild?.remove();
+      }
+      if (nearBottom || type === "self" || !this.chatOpen) {
+        this.chatLogEl.scrollTop = this.chatLogEl.scrollHeight;
+      }
+      appended = true;
     }
-    if (nearBottom || type === "self" || !this.chatOpen) {
-      this.chatLogEl.scrollTop = this.chatLogEl.scrollHeight;
+
+    if (hasLiveLog) {
+      const liveLine = mainLine.cloneNode(true);
+      this.chatLiveLogEl.appendChild(liveLine);
+      while (this.chatLiveLogEl.childElementCount > this.chatLiveMaxEntries) {
+        this.chatLiveLogEl.firstElementChild?.remove();
+      }
+      this.chatLiveLogEl.scrollTop = this.chatLiveLogEl.scrollHeight;
+      appended = true;
     }
-    return true;
+
+    return appended;
   }
 
   sendChatMessage() {
@@ -12181,6 +12485,127 @@ export class GameRuntime {
     this.updateFullscreenToggleState();
     this.syncGraphicsControlsUi();
     this.syncMobileUiState();
+    this.updateChatLiveAnchorPosition();
+  }
+
+  ensureSecurityTestLabelGroup() {
+    if (this.securityTestLabelGroup?.parent) {
+      return this.securityTestLabelGroup;
+    }
+    const group = this.securityTestLabelGroup ?? new THREE.Group();
+    group.name = "security_test_labels";
+    group.visible = true;
+    this.securityTestLabelGroup = group;
+    this.scene.add(group);
+    return group;
+  }
+
+  clearSecurityTestObjectLabels() {
+    for (const entry of this.securityTestObjectLabels.values()) {
+      const label = entry?.label;
+      if (!label) {
+        continue;
+      }
+      label.parent?.remove?.(label);
+      this.disposeTextLabel(label);
+    }
+    this.securityTestObjectLabels.clear();
+    if (this.securityTestLabelGroup) {
+      this.securityTestLabelGroup.parent?.remove?.(this.securityTestLabelGroup);
+      this.securityTestLabelGroup = null;
+    }
+    this.securityTestLabelRefreshClock = 0;
+  }
+
+  getSortedSecurityTestEntries() {
+    const entries = [];
+    for (const entry of this.movableObjects) {
+      if (!entry?.mesh || !entry?.id) {
+        continue;
+      }
+      entries.push(entry);
+    }
+    entries.sort((a, b) =>
+      String(a.id).localeCompare(String(b.id), undefined, {
+        numeric: true,
+        sensitivity: "base"
+      })
+    );
+    return entries;
+  }
+
+  updateSecurityTestLabelForEntry(entry, label = null) {
+    const mesh = entry?.mesh;
+    const targetLabel = label ?? this.securityTestObjectLabels.get(entry?.id)?.label;
+    if (!mesh || !targetLabel) {
+      return;
+    }
+    mesh.updateMatrixWorld(true);
+    this.securityTestBounds.setFromObject(mesh);
+    if (this.securityTestBounds.isEmpty()) {
+      targetLabel.visible = false;
+      return;
+    }
+    const center = this.securityTestBounds.getCenter(this.securityTestBoundsCenter);
+    const size = this.securityTestBounds.getSize(this.securityTestBoundsSize);
+    const yOffset = Math.max(0.8, size.y * 0.22);
+    targetLabel.position.set(center.x, this.securityTestBounds.max.y + yOffset, center.z);
+    targetLabel.visible = true;
+  }
+
+  refreshSecurityTestObjectLabels() {
+    const enabled = Boolean(this.securityTestState?.enabled);
+    if (!enabled) {
+      this.clearSecurityTestObjectLabels();
+      return;
+    }
+
+    const labelGroup = this.ensureSecurityTestLabelGroup();
+    const sortedEntries = this.getSortedSecurityTestEntries();
+    const nextMap = new Map();
+    for (let index = 0; index < sortedEntries.length; index += 1) {
+      const entry = sortedEntries[index];
+      const key = String(entry.id);
+      const labelText = `A${index + 1}`;
+      const existing = this.securityTestObjectLabels.get(key);
+      const label = existing?.label ?? this.createTextLabel(labelText, "name");
+      if (!existing?.label) {
+        label.renderOrder = 65;
+        label.material.depthTest = false;
+        label.material.depthWrite = false;
+        label.material.toneMapped = false;
+      }
+      if (label.parent !== labelGroup) {
+        labelGroup.add(label);
+      }
+      this.setTextLabel(label, labelText, "name");
+      this.updateSecurityTestLabelForEntry(entry, label);
+      nextMap.set(key, { entry, label });
+    }
+
+    for (const [key, prev] of this.securityTestObjectLabels.entries()) {
+      if (nextMap.has(key)) {
+        continue;
+      }
+      const label = prev?.label;
+      if (!label) {
+        continue;
+      }
+      label.parent?.remove?.(label);
+      this.disposeTextLabel(label);
+    }
+
+    this.securityTestObjectLabels = nextMap;
+    this.securityTestLabelRefreshClock = 0;
+  }
+
+  updateSecurityTestObjectLabelPositions() {
+    if (!this.securityTestObjectLabels.size) {
+      return;
+    }
+    for (const value of this.securityTestObjectLabels.values()) {
+      this.updateSecurityTestLabelForEntry(value?.entry, value?.label ?? null);
+    }
   }
 
   registerMovableObject(mesh, id, colliderIndex) {
@@ -12204,6 +12629,9 @@ export class GameRuntime {
       _savedEmissiveIntensity: null
     };
     this.movableObjects.push(entry);
+    if (this.securityTestState?.enabled) {
+      this.refreshSecurityTestObjectLabels();
+    }
     return entry;
   }
 
@@ -12459,6 +12887,7 @@ export class GameRuntime {
     mesh.position.x = this.objEditorDragTargetWorld.x;
     mesh.position.z = this.objEditorDragTargetWorld.z;
     this.updateMovableObjectCollider(entry);
+    this.updateSecurityTestLabelForEntry(entry);
     this.updateObjEditorInfoEl(entry);
     return true;
   }
@@ -12471,6 +12900,7 @@ export class GameRuntime {
     const nextY = (Number(entry.mesh.position.y) || 0) + (Number(deltaY) || 0);
     entry.mesh.position.y = THREE.MathUtils.clamp(nextY, -10, 260);
     this.updateMovableObjectCollider(entry);
+    this.updateSecurityTestLabelForEntry(entry);
     this.updateObjEditorInfoEl(entry);
     this.saveObjectPositions();
     return true;
@@ -12525,6 +12955,7 @@ export class GameRuntime {
         }
         entry.mesh.position.set(x, y, z);
         this.updateMovableObjectCollider(entry);
+        this.updateSecurityTestLabelForEntry(entry);
       }
       this.updateObjEditorInfoEl(this.objEditorSelected);
     } catch {

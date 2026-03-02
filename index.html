@@ -117,6 +117,9 @@
             <button id="host-right-play" type="button">재생</button>
           </div>
           <button id="host-right-reset" type="button">광고 초기화</button>
+          <button id="host-security-test-toggle" type="button" aria-pressed="false">
+            보안 테스트: OFF
+          </button>
         </div>
       </details>
 
@@ -226,6 +229,9 @@
         />
         <button id="chat-send" type="button">보내기</button>
       </div>
+    </div>
+    <div id="chat-live-feed" aria-live="polite">
+      <div id="chat-live-log" role="log" aria-live="polite" aria-relevant="additions text"></div>
     </div>
 
     <div id="portal-transition" aria-hidden="true">
