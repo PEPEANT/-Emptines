@@ -38,7 +38,6 @@ const NPC_GREETING_VIDEO_URL = new URL("../../../mp4/grok-video.webm", import.me
 const ENTRY_BGM_URL = new URL("../../../mp3/TSUKUYOMI.mp3", import.meta.url).href;
 const AD_BILLBOARD_IMAGE_URL = new URL("../../../png/AD.41415786.1.png", import.meta.url).href;
 const FUTURE_CITY_FIXED_BILLBOARD_IMAGE_URLS = Object.freeze([
-  new URL("../../../png/AD.41415786.1.png", import.meta.url).href,
   new URL("../../../png/claude.jpg", import.meta.url).href,
   new URL("../../../png/DC.png", import.meta.url).href,
   new URL("../../../png/Gemini.png", import.meta.url).href,
@@ -83,6 +82,8 @@ const RIGHT_BILLBOARD_VIDEO_ID_LOOKUP = Object.freeze(
 const MAX_LEFT_BILLBOARD_IMAGE_CHARS = 4_200_000;
 const DEFAULT_PORTAL_TARGET_URL =
   "http://localhost:5173/?server=http://localhost:3001&name=PLAYER";
+const A_ZONE_FIXED_PORTAL_TARGET_URL = "https://reclaim-fps.vercel.app/";
+const A_ZONE_FIXED_PORTAL_IMAGE_URL = new URL("../../../png/REC_FPS.png", import.meta.url).href;
 const BOX_FACE_KEYS = ["px", "nx", "py", "ny", "pz", "nz"];
 const NPC_GREETING_SESSION_KEY = "emptines_npc_greeting_seen_v1";
 const CITY_AD_BILLBOARD_BASE_PREFIX = "city_ad_board_";
@@ -559,6 +560,12 @@ export class GameRuntime {
     this.portalWarningSeconds = parseSeconds(portalConfig?.warningSeconds, 16, 4);
     this.portalOpenSeconds = parseSeconds(portalConfig?.openSeconds, 24, 5);
     this.portalTargetUrl = this.resolvePortalTargetUrl(portalConfig?.targetUrl ?? "");
+    this.aZonePortalTargetUrl = this.normalizePortalTargetUrl(
+      A_ZONE_FIXED_PORTAL_TARGET_URL,
+      A_ZONE_FIXED_PORTAL_TARGET_URL
+    );
+    this.aZonePortalFloorPosition = new THREE.Vector3(-60, 0.08, 0);
+    this.aZonePortalRadius = Math.max(2.2, this.portalRadius * 0.88);
     this.portalPhase = this.hubFlowEnabled ? "cooldown" : "idle";
     this.portalPhaseClock = this.portalCooldownSeconds;
     this.portalTransitioning = false;
@@ -581,6 +588,11 @@ export class GameRuntime {
     this.portalReplicaCore = null;
     this.portalReplicaCoreGlow = null;
     this.portalBillboardGroup = null;
+    this.aZonePortalGroup = null;
+    this.aZonePortalRing = null;
+    this.aZonePortalCore = null;
+    this.aZonePortalCoreGlow = null;
+    this.aZonePortalBillboardGroup = null;
     this.portalBillboardCanvas = null;
     this.portalBillboardContext = null;
     this.portalBillboardTexture = null;
@@ -860,6 +872,11 @@ export class GameRuntime {
     this.portalBillboardCanvas = null;
     this.portalBillboardContext = null;
     this.portalBillboardGroup = null;
+    this.aZonePortalGroup = null;
+    this.aZonePortalRing = null;
+    this.aZonePortalCore = null;
+    this.aZonePortalCoreGlow = null;
+    this.aZonePortalBillboardGroup = null;
     this.portalCoreGlow = null;
     this.portalReplicaCoreGlow = null;
     this.npcTemplePortalCore = null;
@@ -886,6 +903,11 @@ export class GameRuntime {
     this.portalReplicaCore = null;
     this.portalReplicaCoreGlow = null;
     this.portalBillboardGroup = null;
+    this.aZonePortalGroup = null;
+    this.aZonePortalRing = null;
+    this.aZonePortalCore = null;
+    this.aZonePortalCoreGlow = null;
+    this.aZonePortalBillboardGroup = null;
     this.npcGuideGroup = null;
     this.npcTemplePortalCore = null;
     this.npcTemplePortalGlow = null;
@@ -1074,9 +1096,10 @@ export class GameRuntime {
     sideFloorRight.receiveShadow = true;
     cityGroup.add(sideFloorRight);
 
+    // Keep both side districts clear until explicitly repopulated.
     const cityZoneConfig = {
       A: { centerX: -60, objectEnabled: false },
-      B: { centerX: 60, objectEnabled: true }
+      B: { centerX: 60, objectEnabled: false }
     };
 
     const zoneABorder = new THREE.Mesh(
@@ -1108,11 +1131,13 @@ export class GameRuntime {
       const sourceX = Number(rawX) || 0;
       const sourceZ = Number(rawZ) || 0;
       const targetZone = zone === "A" ? cityZoneConfig.A : cityZoneConfig.B;
-      const mappedX =
-        targetZone.centerX + THREE.MathUtils.clamp(Math.abs(sourceX) * xScale, -xClamp, xClamp);
+      const sideSign = zone === "A" ? -1 : 1;
+      const spreadX = THREE.MathUtils.clamp(Math.abs(sourceX) * xScale, 0, xClamp);
+      const mappedX = targetZone.centerX + spreadX * sideSign;
       const mappedZ = THREE.MathUtils.clamp(sourceZ * zScale + zOffset, -zClamp, zClamp);
       return { x: mappedX, z: mappedZ };
     };
+    const resolveCityZoneFromX = (value) => ((Number(value) || 0) < 0 ? "A" : "B");
     const cityGroupWorldX = cityGroup.position.x;
     const cityGroupWorldZ = cityGroup.position.z;
     const registerCityBuildingCollider = (localX, localZ, width, depth, minY = -2, maxY = 180) => {
@@ -1124,6 +1149,52 @@ export class GameRuntime {
         minY,
         maxY
       );
+    };
+    const occupiedCityRects = [];
+    const reserveCityRect = (localX, localZ, width, depth, padding = 1.1) => {
+      const halfW = Math.max(0.2, (Number(width) || 0) * 0.5 + Math.max(0, Number(padding) || 0));
+      const halfD = Math.max(0.2, (Number(depth) || 0) * 0.5 + Math.max(0, Number(padding) || 0));
+      occupiedCityRects.push({
+        minX: (Number(localX) || 0) - halfW,
+        maxX: (Number(localX) || 0) + halfW,
+        minZ: (Number(localZ) || 0) - halfD,
+        maxZ: (Number(localZ) || 0) + halfD
+      });
+    };
+    const canPlaceCityRect = (localX, localZ, width, depth, padding = 1.1) => {
+      const halfW = Math.max(0.2, (Number(width) || 0) * 0.5 + Math.max(0, Number(padding) || 0));
+      const halfD = Math.max(0.2, (Number(depth) || 0) * 0.5 + Math.max(0, Number(padding) || 0));
+      const probe = {
+        minX: (Number(localX) || 0) - halfW,
+        maxX: (Number(localX) || 0) + halfW,
+        minZ: (Number(localZ) || 0) - halfD,
+        maxZ: (Number(localZ) || 0) + halfD
+      };
+      for (const existing of occupiedCityRects) {
+        const separated =
+          probe.maxX <= existing.minX ||
+          probe.minX >= existing.maxX ||
+          probe.maxZ <= existing.minZ ||
+          probe.minZ >= existing.maxZ;
+        if (!separated) {
+          return false;
+        }
+      }
+      return true;
+    };
+    const tryReserveCityRect = (localX, localZ, width, depth, padding = 1.1) => {
+      if (!canPlaceCityRect(localX, localZ, width, depth, padding)) {
+        return false;
+      }
+      reserveCityRect(localX, localZ, width, depth, padding);
+      return true;
+    };
+    const bridgeEntryLocalX = this.bridgeCityEntry.x - cityGroupWorldX;
+    const bridgeEntryLocalZ = this.bridgeCityEntry.z - cityGroupWorldZ;
+    const isFarFromBridgeGate = (localX, localZ, minDistance = 16) => {
+      const dx = (Number(localX) || 0) - bridgeEntryLocalX;
+      const dz = (Number(localZ) || 0) - bridgeEntryLocalZ;
+      return Math.hypot(dx, dz) >= Math.max(2, Number(minDistance) || 0);
     };
 
     const towerPositions = [
@@ -1175,8 +1246,8 @@ export class GameRuntime {
     ];
     for (let ti = 0; ti < towerPositions.length; ti++) {
       const [x, h, z] = towerPositions[ti];
-      // Zone A (left) is intentionally kept empty for clearer A/B calls.
-      if (!cityZoneConfig.B.objectEnabled || x <= 0 || ti % 2 !== 0) {
+      const zoneKey = resolveCityZoneFromX(x);
+      if (!cityZoneConfig[zoneKey]?.objectEnabled) {
         continue;
       }
       const tower = this.createPaintableBoxMesh(
@@ -1184,12 +1255,19 @@ export class GameRuntime {
         towerMats[ti % 3],
         `city_tower_${ti}`
       );
-      const mapped = mapToCityZone(x, z, { zone: "B", xScale: 0.27, zScale: 0.42 });
+      const mapped = mapToCityZone(x, z, {
+        zone: zoneKey,
+        xScale: 0.56,
+        zScale: 0.7,
+        xClamp: 19.5,
+        zClamp: 24
+      });
       tower.position.set(mapped.x, h * 0.5, mapped.z);
       tower.castShadow = false;
       tower.receiveShadow = true;
       cityGroup.add(tower);
       registerCityBuildingCollider(mapped.x, mapped.z, 4.8, 4.8, -2, h + 4);
+      reserveCityRect(mapped.x, mapped.z, 4.8, 4.8, 1.1);
     }
 
     const skylineMats = [
@@ -1350,7 +1428,8 @@ export class GameRuntime {
       const lowerBoardWidth = THREE.MathUtils.clamp(footprint * 1.24, 6.2, 9.8);
       const lowerBoardHeight = THREE.MathUtils.clamp(footprint * 0.82, 3.8, 5.8);
       const lowerBoardY = THREE.MathUtils.clamp(footprint * 0.62 + 2.5, 4.8, 7.2);
-      const lowerOffset = footprint * 0.72;
+      // Keep the lower ad board clearly in front of the podium edge strips.
+      const lowerOffset = THREE.MathUtils.clamp(footprint * 1.14, 9.6, 14.4);
 
       const lowerBoard = buildCityAdBoard({
         boardWidth: lowerBoardWidth,
@@ -1393,6 +1472,10 @@ export class GameRuntime {
       const [x, h, z] = towerPositions[i];
       const megaX = x * 2.7;
       const megaZ = z * 2.7;
+      const zoneKey = resolveCityZoneFromX(megaX);
+      if (!cityZoneConfig[zoneKey]?.objectEnabled) {
+        continue;
+      }
       const megaHeight = Math.max(30, h * 4.2 + (i % 3) * 4.5);
       const footprint = 8.4 + (i % 2) * 1.8;
       const podiumHeight = Math.max(6, megaHeight * 0.18);
@@ -1427,6 +1510,7 @@ export class GameRuntime {
         -2,
         totalTowerHeight + 6
       );
+      reserveCityRect(megaX, megaZ, footprint * 1.24, footprint * 1.22, 1.8);
 
       const megaTower = new THREE.Mesh(
         new THREE.BoxGeometry(footprint, shaftHeight, footprint * 0.97),
@@ -1507,13 +1591,13 @@ export class GameRuntime {
     }
 
     const plazaPaintMat = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      roughness: 0.64,
+      color: 0xb9c2cc,
+      roughness: 0.66,
       metalness: 0.08,
-      emissive: 0x20262d,
-      emissiveIntensity: 0.09
+      emissive: 0x1c252f,
+      emissiveIntensity: 0.1
     });
-    const plazaPaintableCount = this.mobileEnabled ? 4 : 8;
+    const plazaPaintableCount = this.mobileEnabled ? 7 : 14;
     const plazaPaintableRadius = 17.8;
     for (let index = 0; index < plazaPaintableCount; index += 1) {
       const angle = (index / plazaPaintableCount) * Math.PI * 2 + Math.PI * 0.125;
@@ -1521,7 +1605,8 @@ export class GameRuntime {
       const height = index % 2 === 0 ? 3.4 : 2.9;
       const rawX = Math.cos(angle) * plazaPaintableRadius;
       const rawZ = Math.sin(angle) * plazaPaintableRadius;
-      if (!cityZoneConfig.B.objectEnabled || rawX < 0) {
+      const zoneKey = resolveCityZoneFromX(rawX);
+      if (!cityZoneConfig[zoneKey]?.objectEnabled) {
         continue;
       }
       const kiosk = this.createPaintableBoxMesh(
@@ -1530,11 +1615,16 @@ export class GameRuntime {
         `city_kiosk_${index}`
       );
       const mapped = mapToCityZone(rawX, rawZ, {
-        zone: "B",
-        xScale: 0.3,
-        zScale: 0.4,
-        zOffset: index % 2 === 0 ? -2.2 : 2.2
+        zone: zoneKey,
+        xScale: 0.62,
+        zScale: 0.68,
+        xClamp: 22,
+        zClamp: 18,
+        zOffset: index % 2 === 0 ? -3.8 : 3.8
       });
+      if (!tryReserveCityRect(mapped.x, mapped.z, footprint + 0.5, footprint + 0.5, 1.15)) {
+        continue;
+      }
       kiosk.position.set(mapped.x, height * 0.5, mapped.z);
       kiosk.castShadow = false;
       kiosk.receiveShadow = true;
@@ -1543,13 +1633,13 @@ export class GameRuntime {
     }
 
     const districtPaintMat = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      roughness: 0.66,
+      color: 0xacb6c2,
+      roughness: 0.68,
       metalness: 0.08,
-      emissive: 0x1e252c,
+      emissive: 0x1d2731,
       emissiveIntensity: 0.1
     });
-    const districtPaintableCount = this.mobileEnabled ? 3 : 6;
+    const districtPaintableCount = this.mobileEnabled ? 6 : 12;
     const districtPaintableRadius = 29.5;
     for (let index = 0; index < districtPaintableCount; index += 1) {
       const angle = (index / districtPaintableCount) * Math.PI * 2 + Math.PI * 0.18;
@@ -1558,7 +1648,8 @@ export class GameRuntime {
       const height = 4.2 + (index % 4) * 0.9;
       const rawX = Math.cos(angle) * districtPaintableRadius;
       const rawZ = Math.sin(angle) * districtPaintableRadius;
-      if (!cityZoneConfig.B.objectEnabled || rawX < 0) {
+      const zoneKey = resolveCityZoneFromX(rawX);
+      if (!cityZoneConfig[zoneKey]?.objectEnabled) {
         continue;
       }
       const block = this.createPaintableBoxMesh(
@@ -1567,11 +1658,16 @@ export class GameRuntime {
         `city_block_${index}`
       );
       const mapped = mapToCityZone(rawX, rawZ, {
-        zone: "B",
-        xScale: 0.24,
-        zScale: 0.32,
-        zOffset: index % 2 === 0 ? -3.8 : 3.8
+        zone: zoneKey,
+        xScale: 0.72,
+        zScale: 0.72,
+        xClamp: 24,
+        zClamp: 24,
+        zOffset: index % 2 === 0 ? -5.6 : 5.6
       });
+      if (!tryReserveCityRect(mapped.x, mapped.z, footprint + 0.6, depth + 0.6, 1.2)) {
+        continue;
+      }
       block.position.set(mapped.x, height * 0.5, mapped.z);
       block.castShadow = false;
       block.receiveShadow = true;
@@ -1580,13 +1676,13 @@ export class GameRuntime {
     }
 
     const outerDistrictPaintMat = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      roughness: 0.68,
-      metalness: 0.06,
-      emissive: 0x1b232b,
+      color: 0x9ea9b5,
+      roughness: 0.7,
+      metalness: 0.07,
+      emissive: 0x1a232d,
       emissiveIntensity: 0.1
     });
-    const outerDistrictCount = this.mobileEnabled ? 2 : 4;
+    const outerDistrictCount = this.mobileEnabled ? 5 : 10;
     const outerDistrictRadius = 41;
     for (let index = 0; index < outerDistrictCount; index += 1) {
       const angle = (index / outerDistrictCount) * Math.PI * 2 + Math.PI * 0.07;
@@ -1595,7 +1691,8 @@ export class GameRuntime {
       const height = 6.2 + (index % 5) * 1.1;
       const rawX = Math.cos(angle) * outerDistrictRadius;
       const rawZ = Math.sin(angle) * outerDistrictRadius;
-      if (!cityZoneConfig.B.objectEnabled || rawX < 0) {
+      const zoneKey = resolveCityZoneFromX(rawX);
+      if (!cityZoneConfig[zoneKey]?.objectEnabled) {
         continue;
       }
       const block = this.createPaintableBoxMesh(
@@ -1604,16 +1701,72 @@ export class GameRuntime {
         `city_outer_block_${index}`
       );
       const mapped = mapToCityZone(rawX, rawZ, {
-        zone: "B",
-        xScale: 0.18,
-        zScale: 0.26,
-        zOffset: index % 2 === 0 ? -5.4 : 5.4
+        zone: zoneKey,
+        xScale: 0.82,
+        zScale: 0.84,
+        xClamp: 26,
+        zClamp: 28,
+        zOffset: index % 2 === 0 ? -8.2 : 8.2
       });
+      if (!tryReserveCityRect(mapped.x, mapped.z, width + 0.7, depth + 0.7, 1.35)) {
+        continue;
+      }
       block.position.set(mapped.x, height * 0.5, mapped.z);
       block.castShadow = false;
       block.receiveShadow = true;
       cityGroup.add(block);
       registerCityBuildingCollider(mapped.x, mapped.z, width + 0.7, depth + 0.7, -2, height + 4);
+    }
+
+    const bridgeDistrictPaintMat = new THREE.MeshStandardMaterial({
+      color: 0xaeb8c3,
+      roughness: 0.68,
+      metalness: 0.08,
+      emissive: 0x1b242e,
+      emissiveIntensity: 0.11
+    });
+    const bridgeDistrictCandidates = this.mobileEnabled
+      ? [
+          [-86, -34, 3.9, 4.8, 5.6],
+          [-72, -29, 3.5, 4.2, 5.1],
+          [72, -29, 3.5, 4.2, 5.1],
+          [86, -34, 3.9, 4.8, 5.6]
+        ]
+      : [
+          [-94, -38, 4.4, 5.4, 6.4],
+          [-82, -32, 3.8, 4.7, 5.8],
+          [-70, -28, 3.5, 4.1, 5.2],
+          [-58, -24, 3.2, 3.9, 4.8],
+          [58, -24, 3.2, 3.9, 4.8],
+          [70, -28, 3.5, 4.1, 5.2],
+          [82, -32, 3.8, 4.7, 5.8],
+          [94, -38, 4.4, 5.4, 6.4]
+        ];
+    let bridgeDistrictIndex = 0;
+    for (const candidate of bridgeDistrictCandidates) {
+      const [localX, localZ, width, depth, height] = candidate;
+      const zoneKey = resolveCityZoneFromX(localX);
+      if (!cityZoneConfig[zoneKey]?.objectEnabled) {
+        continue;
+      }
+      if (!isFarFromBridgeGate(localX, localZ, 16.5)) {
+        continue;
+      }
+      if (!tryReserveCityRect(localX, localZ, width + 0.7, depth + 0.7, 1.35)) {
+        continue;
+      }
+
+      const bridgeBlock = this.createPaintableBoxMesh(
+        new THREE.BoxGeometry(width, height, depth),
+        bridgeDistrictPaintMat,
+        `city_bridge_block_${bridgeDistrictIndex}`
+      );
+      bridgeBlock.position.set(localX, height * 0.5, localZ);
+      bridgeBlock.castShadow = false;
+      bridgeBlock.receiveShadow = true;
+      cityGroup.add(bridgeBlock);
+      registerCityBuildingCollider(localX, localZ, width + 0.7, depth + 0.7, -2, height + 4);
+      bridgeDistrictIndex += 1;
     }
 
     const bridgePaintMat = new THREE.MeshStandardMaterial({
@@ -1841,6 +1994,129 @@ export class GameRuntime {
     const portalBillboard = this.createPortalTimeBillboard();
     portalGroup.add(portalBillboard);
 
+    const aZonePortalRadius = Math.max(2.4, Number(this.aZonePortalRadius) || this.portalRadius * 0.88);
+    const aZonePortalGroup = new THREE.Group();
+    const aZonePortalLocalX = cityZoneConfig.A.centerX;
+    const aZonePortalLocalZ = 0;
+    aZonePortalGroup.position.set(
+      cityGroup.position.x + aZonePortalLocalX,
+      0,
+      cityGroup.position.z + aZonePortalLocalZ
+    );
+    this.aZonePortalFloorPosition.set(
+      aZonePortalGroup.position.x,
+      this.portalFloorPosition.y,
+      aZonePortalGroup.position.z
+    );
+    this.aZonePortalRadius = aZonePortalRadius;
+    const aZoneFacingDirection = new THREE.Vector3(
+      this.citySpawn.x - aZonePortalGroup.position.x,
+      0,
+      this.citySpawn.z - aZonePortalGroup.position.z
+    );
+    if (aZoneFacingDirection.lengthSq() < 0.0001) {
+      aZoneFacingDirection.set(1, 0, 0);
+    } else {
+      aZoneFacingDirection.normalize();
+    }
+    aZonePortalGroup.rotation.y = Math.atan2(aZoneFacingDirection.x, aZoneFacingDirection.z);
+
+    const aZonePortalBase = new THREE.Mesh(
+      new THREE.TorusGeometry(aZonePortalRadius * 0.9, 0.22, 18, this.mobileEnabled ? 26 : 52),
+      new THREE.MeshStandardMaterial({
+        color: 0x39617b,
+        roughness: 0.26,
+        metalness: 0.42,
+        emissive: 0x18435a,
+        emissiveIntensity: 0.2
+      })
+    );
+    aZonePortalBase.rotation.x = Math.PI / 2;
+    aZonePortalBase.position.y = 0.2;
+    aZonePortalGroup.add(aZonePortalBase);
+
+    const aZonePortalRing = new THREE.Mesh(
+      new THREE.TorusGeometry(aZonePortalRadius, 0.32, 24, this.mobileEnabled ? 42 : 68),
+      new THREE.MeshStandardMaterial({
+        color: 0x35ef8d,
+        roughness: 0.14,
+        metalness: 0.38,
+        emissive: 0x00ee55,
+        emissiveIntensity: 0.82,
+        transparent: true,
+        opacity: 0.9
+      })
+    );
+    aZonePortalRing.position.y = 2.42;
+    aZonePortalGroup.add(aZonePortalRing);
+
+    const aZonePortalCore = new THREE.Mesh(
+      new THREE.CircleGeometry(aZonePortalRadius * 0.82, this.mobileEnabled ? 28 : 50),
+      new THREE.MeshBasicMaterial({
+        color: 0x00ee55,
+        transparent: true,
+        opacity: 0.65,
+        side: THREE.DoubleSide,
+        depthWrite: false
+      })
+    );
+    aZonePortalCore.position.y = 2.42;
+    const aZonePortalCoreGlow = new THREE.Mesh(
+      new THREE.CircleGeometry(aZonePortalRadius * 0.7, this.mobileEnabled ? 24 : 44),
+      new THREE.MeshBasicMaterial({
+        color: 0x00ee55,
+        transparent: true,
+        opacity: 0.42,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+      })
+    );
+    aZonePortalCoreGlow.position.y = 2.42;
+    aZonePortalCoreGlow.renderOrder = 12;
+    aZonePortalGroup.add(aZonePortalCore, aZonePortalCoreGlow);
+
+    const aZonePortalBillboard = new THREE.Group();
+    aZonePortalBillboard.position.set(0, 8.1, 0);
+    const aZoneBoardWidth = 7.8;
+    const aZoneBoardHeight = 3.4;
+    const aZoneFrame = new THREE.Mesh(
+      new THREE.BoxGeometry(aZoneBoardWidth + 0.36, aZoneBoardHeight + 0.36, 0.28),
+      new THREE.MeshStandardMaterial({
+        color: 0x0f141b,
+        roughness: 0.3,
+        metalness: 0.54,
+        emissive: 0x1c2f43,
+        emissiveIntensity: 0.24
+      })
+    );
+    aZoneFrame.position.z = -0.02;
+    aZoneFrame.castShadow = false;
+    aZoneFrame.receiveShadow = true;
+    const aZoneScreen = new THREE.Mesh(
+      new THREE.PlaneGeometry(aZoneBoardWidth, aZoneBoardHeight),
+      this.createFutureCityFixedBillboardScreenMaterial(A_ZONE_FIXED_PORTAL_IMAGE_URL, 1.08)
+    );
+    aZoneScreen.position.z = 0.16;
+    aZoneScreen.renderOrder = 14;
+    const aZoneGlow = new THREE.Mesh(
+      new THREE.PlaneGeometry(aZoneBoardWidth + 0.4, aZoneBoardHeight + 0.4),
+      new THREE.MeshBasicMaterial({
+        color: 0x6cf6ff,
+        transparent: true,
+        opacity: 0.2,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        fog: false,
+        toneMapped: false
+      })
+    );
+    aZoneGlow.position.z = 0.14;
+    aZoneGlow.renderOrder = 13;
+    aZonePortalBillboard.add(aZoneFrame, aZoneGlow, aZoneScreen);
+    aZonePortalGroup.add(aZonePortalBillboard);
+
     this.hubFlowGroup = group;
     this.portalGroup = portalGroup;
     this.portalRing = portalRing;
@@ -1851,6 +2127,11 @@ export class GameRuntime {
     this.portalReplicaCore = null;
     this.portalReplicaCoreGlow = null;
     this.portalBillboardGroup = portalBillboard;
+    this.aZonePortalGroup = aZonePortalGroup;
+    this.aZonePortalRing = aZonePortalRing;
+    this.aZonePortalCore = aZonePortalCore;
+    this.aZonePortalCoreGlow = aZonePortalCoreGlow;
+    this.aZonePortalBillboardGroup = aZonePortalBillboard;
     this.npcGuideGroup = npcGuide;
     this.mirrorGateGroup = mirrorGate;
     this.mirrorGatePanel = null;
@@ -1865,7 +2146,8 @@ export class GameRuntime {
       mirrorGate,
       bridgeFarEndTempleGate,
       cityEntryTempleGate,
-      portalGroup
+      portalGroup,
+      aZonePortalGroup
     );
     this.scene.add(group);
     this.setMirrorGateVisible(this.flowStage === "bridge_mirror");
@@ -2965,7 +3247,7 @@ export class GameRuntime {
     const centerDistance = this.mobileEnabled ? 228 : 248;
     const center = spawnBase.clone().addScaledVector(forward, centerDistance);
     const skylineHeight = this.mobileEnabled ? 92 : 118;
-    const skylineY = this.mobileEnabled ? 42 : 52;
+    const skylineY = this.mobileEnabled ? 30 : 38;
     const baseYaw = Math.atan2(forward.x, forward.z) + Math.PI;
 
     const segments = [
@@ -3240,7 +3522,8 @@ export class GameRuntime {
     const districtGroup = new THREE.Group();
     districtGroup.name = "future_city_billboard_district";
     const toPlayer = forward.clone().multiplyScalar(-1).normalize();
-    const baseCenter = center.clone().addScaledVector(forward, this.mobileEnabled ? -12 : -8);
+    const baseCenter = center.clone().addScaledVector(forward, this.mobileEnabled ? -28 : -24);
+    const topBillboardForwardOffset = this.mobileEnabled ? 9 : 14;
     const styleCycle = ["cyan", "slate", "amber"];
 
     for (let index = 0; index < assetUrls.length; index += 1) {
@@ -3355,7 +3638,11 @@ export class GameRuntime {
       const topBoardDepth = 0.18;
       const topFrameDepth = topBoardDepth + 0.06;
       const topBoardGroup = new THREE.Group();
-      topBoardGroup.position.set(anchor.x, totalHeight + topBoardHeight * 0.54 + 0.8, anchor.z);
+      topBoardGroup.position.set(
+        anchor.x + billboardDirection.x * topBillboardForwardOffset,
+        totalHeight + topBoardHeight * 0.54 + 0.8,
+        anchor.z + billboardDirection.z * topBillboardForwardOffset
+      );
       topBoardGroup.rotation.y = billboardYaw;
       topBoardGroup.rotation.x = -0.08;
 
@@ -3395,53 +3682,6 @@ export class GameRuntime {
       topGlow.renderOrder = 8;
       topBoardGroup.add(topFrame, topScreen, topGlow);
       districtGroup.add(topBoardGroup);
-
-      const lowerBoardWidth = footprint * 1.18;
-      const lowerBoardHeight = lowerBoardWidth * 0.42;
-      const lowerBoardDepth = 0.16;
-      const lowerBoardGroup = new THREE.Group();
-      lowerBoardGroup.position.set(
-        anchor.x + billboardDirection.x * footprint * 0.72,
-        podiumHeight + Math.min(shaftHeight * 0.36, 18),
-        anchor.z + billboardDirection.z * footprint * 0.72
-      );
-      lowerBoardGroup.rotation.y = billboardYaw;
-      const lowerFrame = new THREE.Mesh(
-        new THREE.BoxGeometry(lowerBoardWidth + 0.28, lowerBoardHeight + 0.28, lowerBoardDepth + 0.06),
-        new THREE.MeshStandardMaterial({
-          color: 0x101821,
-          roughness: 0.3,
-          metalness: 0.5,
-          emissive: 0x173049,
-          emissiveIntensity: 0.2
-        })
-      );
-      lowerFrame.position.z = -0.02;
-      lowerFrame.castShadow = false;
-      lowerFrame.receiveShadow = true;
-      const lowerScreen = new THREE.Mesh(
-        new THREE.PlaneGeometry(lowerBoardWidth, lowerBoardHeight),
-        this.createFutureCityFixedBillboardScreenMaterial(imageUrl, 0.9)
-      );
-      lowerScreen.position.z = lowerBoardDepth * 0.5 + 0.03;
-      lowerScreen.renderOrder = 7;
-      const lowerGlow = new THREE.Mesh(
-        new THREE.PlaneGeometry(lowerBoardWidth + 0.28, lowerBoardHeight + 0.28),
-        new THREE.MeshBasicMaterial({
-          color: 0x56e8ff,
-          transparent: true,
-          opacity: 0.16,
-          side: THREE.DoubleSide,
-          depthWrite: false,
-          blending: THREE.AdditiveBlending,
-          fog: false,
-          toneMapped: false
-        })
-      );
-      lowerGlow.position.z = lowerBoardDepth * 0.5 + 0.035;
-      lowerGlow.renderOrder = 8;
-      lowerBoardGroup.add(lowerFrame, lowerScreen, lowerGlow);
-      districtGroup.add(lowerBoardGroup);
     }
 
     parentGroup.add(districtGroup);
@@ -6016,6 +6256,10 @@ export class GameRuntime {
 
     this.updatePortalPhase(delta);
     this.updatePortalVisual();
+    if (!this.portalTransitioning && this.isPlayerInAZonePortalZone()) {
+      this.triggerPortalTransfer(this.buildAZonePortalTransferUrl());
+      return;
+    }
     if (this.portalPhase === "open" && !this.portalTransitioning && this.isPlayerInPortalZone()) {
       this.triggerPortalTransfer();
     }
@@ -6108,6 +6352,21 @@ export class GameRuntime {
     }
 
     const pulse = 0.5 + 0.5 * Math.sin(this.portalPulseClock * 6.4);
+    if (this.aZonePortalRing && this.aZonePortalCore && this.aZonePortalGroup) {
+      const aZoneRingMaterial = this.aZonePortalRing.material;
+      const aZoneCoreMaterial = this.aZonePortalCore.material;
+      const aZoneCoreGlowMaterial = this.aZonePortalCoreGlow?.material ?? null;
+      if (aZoneRingMaterial && aZoneCoreMaterial) {
+        aZoneRingMaterial.emissiveIntensity = 0.86 + pulse * 0.72;
+        aZoneRingMaterial.opacity = 0.84 + pulse * 0.14;
+        aZoneCoreMaterial.opacity = 0.65 + pulse * 0.23;
+        if (aZoneCoreGlowMaterial) {
+          aZoneCoreGlowMaterial.opacity = 0.4 + pulse * 0.26;
+        }
+        const scale = 1 + pulse * 0.06;
+        this.aZonePortalGroup.scale.set(scale, scale, scale);
+      }
+    }
     if (this.portalPhase === "open") {
       ringMaterial.emissiveIntensity = 0.9 + pulse * 0.85;
       ringMaterial.opacity = 0.9;
@@ -6232,6 +6491,14 @@ export class GameRuntime {
     // Bridge/shrine-side portals remain decorative and must never trigger transfer.
     const dx = this.playerPosition.x - this.portalFloorPosition.x;
     const dz = this.playerPosition.z - this.portalFloorPosition.z;
+    return dx * dx + dz * dz <= triggerRadiusSquared;
+  }
+
+  isPlayerInAZonePortalZone() {
+    const triggerRadius = this.aZonePortalRadius * 0.78;
+    const triggerRadiusSquared = triggerRadius * triggerRadius;
+    const dx = this.playerPosition.x - this.aZonePortalFloorPosition.x;
+    const dz = this.playerPosition.z - this.aZonePortalFloorPosition.z;
     return dx * dx + dz * dz <= triggerRadiusSquared;
   }
 
@@ -6420,12 +6687,17 @@ export class GameRuntime {
     return normalizedTarget;
   }
 
-  triggerPortalTransfer() {
+  buildAZonePortalTransferUrl() {
+    return this.normalizePortalTargetUrl(this.aZonePortalTargetUrl, "");
+  }
+
+  triggerPortalTransfer(overrideDestination = "") {
     if (this.portalTransitioning) {
       return;
     }
 
-    const destination = this.buildPortalTransferUrl();
+    const normalizedOverride = this.normalizePortalTargetUrl(overrideDestination, "");
+    const destination = normalizedOverride || this.buildPortalTransferUrl();
     if (!destination) {
       this.portalPhase = "cooldown";
       this.portalPhaseClock = this.portalCooldownSeconds;
