@@ -94,6 +94,9 @@ const OBJECT_EDITOR_MIN_LIMIT = 1;
 const OBJECT_EDITOR_MAX_LIMIT = 10000;
 const OBJECT_EDITOR_MIN_SCALE = 0.25;
 const OBJECT_EDITOR_MAX_SCALE = 8;
+const PROMO_OWNER_KEY_STORAGE_KEY = "promoOwnerKey_v1";
+const PROMO_MAX_MEDIA_BYTES = 6 * 1024 * 1024;
+const PROMO_LINK_INTERACT_RADIUS = 4.2;
 
 function resolveRuntimeAssetUrl(relativePath) {
   const normalized = String(relativePath ?? "").trim().replace(/^\/+/, "");
@@ -270,6 +273,19 @@ export class GameRuntime {
     this.editorMode = "platform";
     this.ropeEditorHeight = this.ropeEditorBaseHeight;
     this.ropeEditorPreviewMesh = null;
+    this.promoOwnerKeyStorageKey = PROMO_OWNER_KEY_STORAGE_KEY;
+    this.promoOwnerKey = this.getOrCreatePromoOwnerKey();
+    this.promoObjects = new Map();
+    this.promoObjectVisuals = new Map();
+    this.promoSetInFlight = false;
+    this.promoRemoveInFlight = false;
+    this.promoPendingMedia = {
+      dataUrl: "",
+      kind: "none",
+      name: ""
+    };
+    this.promoMediaRemoved = false;
+    this.nearestPromoLinkObject = null;
     this.surfacePaintRaycaster = new THREE.Raycaster();
     this.surfacePaintAimPoint = new THREE.Vector2(0, 0);
     this.surfacePaintTarget = null;
@@ -535,6 +551,25 @@ export class GameRuntime {
     this.surfacePainterEraserBtnEl = document.getElementById("surface-painter-eraser");
     this.surfacePainterApplyAllEl = document.getElementById("surface-painter-apply-all");
     this.surfacePainterContext = this.surfacePainterCanvasEl?.getContext?.("2d") ?? null;
+    this.promoPanelEl = document.getElementById("promo-panel");
+    this.promoScaleInputEl = document.getElementById("promo-scale");
+    this.promoScaleValueEl = document.getElementById("promo-scale-value");
+    this.promoLinkInputEl = document.getElementById("promo-link-url");
+    this.promoAllowOthersDrawEl = document.getElementById("promo-allow-others-draw");
+    this.promoMediaPickBtnEl = document.getElementById("promo-media-pick-btn");
+    this.promoMediaFolderBtnEl = document.getElementById("promo-media-folder-btn");
+    this.promoMediaClearBtnEl = document.getElementById("promo-media-clear-btn");
+    this.promoMediaFileInputEl = document.getElementById("promo-media-file");
+    this.promoMediaFolderInputEl = document.getElementById("promo-media-folder");
+    this.promoMediaNameEl = document.getElementById("promo-media-name");
+    this.promoMediaHelpEl = document.getElementById("promo-media-help");
+    this.promoPlaceBtnEl = document.getElementById("promo-place-btn");
+    this.promoSaveBtnEl = document.getElementById("promo-save-btn");
+    this.promoRemoveBtnEl = document.getElementById("promo-remove-btn");
+    this.promoStatusEl = document.getElementById("promo-panel-status");
+    this.promoLinkPromptEl = document.getElementById("promo-link-prompt");
+    this.promoLinkPromptTextEl = document.getElementById("promo-link-prompt-text");
+    this.promoOpenLinkBtnEl = document.getElementById("promo-open-link-btn");
 
     this.platformEditorEl = document.getElementById("platform-editor");
     this.platformEditorSaveBtnEl = document.getElementById("platform-editor-save");
@@ -741,6 +776,7 @@ export class GameRuntime {
     this.syncGraphicsControlsUi();
     this.loadSavedObjectEditorSettings();
     this.applyObjectEditorSettings(this.objectEditorSettings, { persistLocal: false, syncUi: true });
+    this.syncPromoPanelUi();
 
     this.setupWorld();
     this.setupHubFlowWorld();
@@ -7890,6 +7926,565 @@ export class GameRuntime {
     return true;
   }
 
+  getOrCreatePromoOwnerKey() {
+    const normalize = (rawValue) => String(rawValue ?? "").trim().replace(/[^a-zA-Z0-9:_-]/g, "");
+    let key = "";
+    try {
+      key = normalize(localStorage.getItem(this.promoOwnerKeyStorageKey));
+    } catch {
+      key = "";
+    }
+    if (!key || key.length < 8) {
+      const randomPart = Math.random().toString(36).slice(2, 14);
+      key = normalize(`pk_${Date.now().toString(36)}_${randomPart}`).slice(0, 96);
+      if (key.length < 8) {
+        key = `pk_${Date.now().toString(36)}_${randomPart}x`;
+      }
+      try {
+        localStorage.setItem(this.promoOwnerKeyStorageKey, key);
+      } catch {
+        // ignore
+      }
+    }
+    return key;
+  }
+
+  normalizePromoLinkUrl(rawValue) {
+    const text = String(rawValue ?? "").trim().slice(0, 2048);
+    if (!text) {
+      return "";
+    }
+    try {
+      const parsed = new URL(text);
+      const protocol = String(parsed.protocol ?? "").toLowerCase();
+      if (protocol !== "http:" && protocol !== "https:") {
+        return "";
+      }
+      return parsed.toString();
+    } catch {
+      return "";
+    }
+  }
+
+  normalizePromoObjectEntry(rawValue) {
+    if (!rawValue || typeof rawValue !== "object") {
+      return null;
+    }
+    const ownerKey = String(rawValue.ownerKey ?? "").trim().replace(/[^a-zA-Z0-9:_-]/g, "").slice(0, 96);
+    if (!ownerKey || ownerKey.length < 8) {
+      return null;
+    }
+    const mediaDataUrl = String(rawValue.mediaDataUrl ?? "").trim();
+    const hasMediaData = /^data:(image|video)\/[a-z0-9.+-]+;base64,/i.test(mediaDataUrl);
+    const mediaKind = hasMediaData ? (/^data:image\//i.test(mediaDataUrl) ? "image" : "video") : "none";
+    return {
+      ownerKey,
+      ownerName: this.formatPlayerName(rawValue.ownerName ?? "PLAYER"),
+      x: THREE.MathUtils.clamp(Number(rawValue.x) || 0, -2000, 2000),
+      y: THREE.MathUtils.clamp(Number(rawValue.y) || 0, -100, 400),
+      z: THREE.MathUtils.clamp(Number(rawValue.z) || 0, -2000, 2000),
+      scale: THREE.MathUtils.clamp(Number(rawValue.scale) || 1, 0.35, 8),
+      linkUrl: this.normalizePromoLinkUrl(rawValue.linkUrl ?? ""),
+      mediaDataUrl: hasMediaData ? mediaDataUrl : "",
+      mediaKind,
+      allowOthersDraw: Boolean(rawValue.allowOthersDraw),
+      updatedAt: Math.max(0, Math.trunc(Number(rawValue.updatedAt) || Date.now()))
+    };
+  }
+
+  getPromoObjectSignature(entry) {
+    if (!entry) {
+      return "";
+    }
+    return [
+      entry.ownerKey,
+      entry.ownerName,
+      entry.x.toFixed(3),
+      entry.y.toFixed(3),
+      entry.z.toFixed(3),
+      entry.scale.toFixed(3),
+      entry.linkUrl,
+      entry.mediaKind,
+      entry.mediaDataUrl.slice(0, 64),
+      entry.mediaDataUrl.length,
+      entry.allowOthersDraw ? "1" : "0"
+    ].join("|");
+  }
+
+  setPromoPanelStatus(message = "") {
+    if (!this.promoStatusEl) {
+      return;
+    }
+    this.promoStatusEl.textContent = String(message ?? "").trim();
+  }
+
+  getOwnPromoObject() {
+    return this.promoObjects.get(this.promoOwnerKey) ?? null;
+  }
+
+  getNearestPromoObject(maxDistance = PROMO_LINK_INTERACT_RADIUS) {
+    const maxDistanceSq = maxDistance * maxDistance;
+    let nearest = null;
+    let nearestDistSq = Number.POSITIVE_INFINITY;
+    const px = Number(this.playerPosition.x) || 0;
+    const pz = Number(this.playerPosition.z) || 0;
+    for (const entry of this.promoObjects.values()) {
+      const dx = px - (Number(entry.x) || 0);
+      const dz = pz - (Number(entry.z) || 0);
+      const distSq = dx * dx + dz * dz;
+      if (distSq > maxDistanceSq || distSq >= nearestDistSq) {
+        continue;
+      }
+      nearest = entry;
+      nearestDistSq = distSq;
+    }
+    return nearest;
+  }
+
+  syncPromoPanelUi() {
+    this.resolveUiElements();
+    const connected = Boolean(this.socket && this.networkConnected);
+    const busy = this.promoSetInFlight || this.promoRemoveInFlight;
+    const own = this.getOwnPromoObject();
+    const scaleValue = own?.scale ?? 1;
+    const linkValue = own?.linkUrl ?? "";
+    const allowOthersDraw = own?.allowOthersDraw ?? false;
+    const prefersTouchUi =
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+    const galleryFirstMode = Boolean(this.mobileEnabled || prefersTouchUi);
+    const folderPickerSupported = Boolean(
+      this.promoMediaFolderInputEl &&
+      ("webkitdirectory" in this.promoMediaFolderInputEl ||
+        this.promoMediaFolderInputEl.hasAttribute("webkitdirectory"))
+    );
+    const showFolderPicker = folderPickerSupported && !galleryFirstMode;
+
+    if (this.promoMediaPickBtnEl) {
+      this.promoMediaPickBtnEl.textContent = galleryFirstMode ? "갤러리 선택" : "파일/갤러리 선택";
+    }
+    if (this.promoMediaFolderBtnEl) {
+      this.promoMediaFolderBtnEl.classList.toggle("hidden", !showFolderPicker);
+    }
+    if (this.promoMediaHelpEl) {
+      if (galleryFirstMode) {
+        this.promoMediaHelpEl.textContent = "모바일은 갤러리에서 선택 후 저장";
+      } else if (showFolderPicker) {
+        this.promoMediaHelpEl.textContent = "PC는 파일/폴더 선택 가능";
+      } else {
+        this.promoMediaHelpEl.textContent = "파일에서 이미지/영상 선택 후 저장";
+      }
+    }
+
+    if (this.promoScaleInputEl && document.activeElement !== this.promoScaleInputEl) {
+      this.promoScaleInputEl.value = String(scaleValue.toFixed(2));
+    }
+    if (this.promoScaleValueEl) {
+      const currentScale = Number(this.promoScaleInputEl?.value);
+      const safeScale = Number.isFinite(currentScale) ? currentScale : scaleValue;
+      this.promoScaleValueEl.textContent = `${safeScale.toFixed(2)}x`;
+    }
+    if (this.promoLinkInputEl && document.activeElement !== this.promoLinkInputEl) {
+      this.promoLinkInputEl.value = linkValue;
+    }
+    if (this.promoAllowOthersDrawEl) {
+      this.promoAllowOthersDrawEl.checked = allowOthersDraw;
+    }
+    if (this.promoMediaNameEl) {
+      if (this.promoPendingMedia?.dataUrl) {
+        this.promoMediaNameEl.textContent = `선택됨: ${this.promoPendingMedia.name || "미디어"}`;
+      } else if (this.promoMediaRemoved) {
+        this.promoMediaNameEl.textContent = "저장 시 미디어가 제거됩니다";
+      } else if (own?.mediaDataUrl) {
+        this.promoMediaNameEl.textContent =
+          own.mediaKind === "image" ? "저장된 이미지 사용 중" : "저장된 영상 사용 중";
+      } else {
+        this.promoMediaNameEl.textContent = "선택된 미디어 없음";
+      }
+    }
+
+    const disabled = !connected || busy;
+    this.promoScaleInputEl && (this.promoScaleInputEl.disabled = disabled);
+    this.promoLinkInputEl && (this.promoLinkInputEl.disabled = disabled);
+    this.promoAllowOthersDrawEl && (this.promoAllowOthersDrawEl.disabled = disabled);
+    this.promoMediaPickBtnEl && (this.promoMediaPickBtnEl.disabled = disabled);
+    this.promoMediaFolderBtnEl && (this.promoMediaFolderBtnEl.disabled = disabled || !showFolderPicker);
+    this.promoMediaClearBtnEl && (this.promoMediaClearBtnEl.disabled = disabled);
+    this.promoPlaceBtnEl && (this.promoPlaceBtnEl.disabled = disabled);
+    this.promoSaveBtnEl && (this.promoSaveBtnEl.disabled = disabled);
+    this.promoRemoveBtnEl && (this.promoRemoveBtnEl.disabled = disabled);
+
+    if (!connected) {
+      this.setPromoPanelStatus("서버 연결 후 사용 가능");
+    } else if (busy) {
+      this.setPromoPanelStatus("홍보 오브젝트 동기화 중...");
+    } else if (own) {
+      this.setPromoPanelStatus("내 오브젝트 배치됨");
+    } else {
+      this.setPromoPanelStatus("내 오브젝트 없음 · 앞에 배치+저장으로 생성");
+    }
+  }
+
+  async loadPromoMediaFromFile(file) {
+    if (!file) {
+      return;
+    }
+    const type = String(file.type ?? "").toLowerCase();
+    const isImage = type.startsWith("image/");
+    const isVideo = type.startsWith("video/");
+    if (!isImage && !isVideo) {
+      this.appendChatLine("", "이미지/영상 파일만 지원합니다.", "system");
+      return;
+    }
+    if (Number(file.size) > PROMO_MAX_MEDIA_BYTES) {
+      this.appendChatLine("", "미디어 파일이 너무 큽니다. 6MB 이하로 선택하세요.", "system");
+      return;
+    }
+
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result ?? ""));
+      reader.onerror = () => reject(new Error("file_read_failed"));
+      reader.readAsDataURL(file);
+    }).catch(() => "");
+
+    if (!dataUrl || !/^data:(image|video)\/[a-z0-9.+-]+;base64,/i.test(dataUrl)) {
+      this.appendChatLine("", "미디어 파일을 읽지 못했습니다.", "system");
+      return;
+    }
+    this.promoPendingMedia = {
+      dataUrl,
+      kind: isImage ? "image" : "video",
+      name: String(file.name ?? "").trim()
+    };
+    this.promoMediaRemoved = false;
+    this.syncPromoPanelUi();
+  }
+
+  clearPromoPendingMedia() {
+    this.promoPendingMedia = {
+      dataUrl: "",
+      kind: "none",
+      name: ""
+    };
+    this.promoMediaRemoved = true;
+    this.syncPromoPanelUi();
+  }
+
+  getPromoPlacementPosition() {
+    const dir = new THREE.Vector3();
+    this.camera.getWorldDirection(dir);
+    dir.y = 0;
+    if (dir.lengthSq() < 0.001) {
+      dir.set(0, 0, -1);
+    }
+    dir.normalize();
+    const pos = this.playerPosition.clone().addScaledVector(dir, 4.8);
+    return {
+      x: Math.round(pos.x * 2) / 2,
+      y: Math.round((this.playerPosition.y - GAME_CONSTANTS.PLAYER_HEIGHT) * 2) / 2,
+      z: Math.round(pos.z * 2) / 2
+    };
+  }
+
+  requestPromoState() {
+    if (!(this.socket && this.networkConnected)) {
+      return;
+    }
+    this.socket.emit("promo:state:request");
+  }
+
+  requestPromoUpsert({ placeInFront = false } = {}) {
+    if (!(this.socket && this.networkConnected)) {
+      this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
+      return;
+    }
+    if (this.promoSetInFlight) {
+      return;
+    }
+
+    const own = this.getOwnPromoObject();
+    const position = placeInFront || !own
+      ? this.getPromoPlacementPosition()
+      : {
+          x: own.x,
+          y: own.y,
+          z: own.z
+        };
+    const scaleRaw = Number(this.promoScaleInputEl?.value);
+    const scale = THREE.MathUtils.clamp(Number.isFinite(scaleRaw) ? scaleRaw : own?.scale ?? 1, 0.35, 8);
+    const linkUrl = this.normalizePromoLinkUrl(this.promoLinkInputEl?.value ?? own?.linkUrl ?? "");
+    const allowOthersDraw = Boolean(this.promoAllowOthersDrawEl?.checked ?? own?.allowOthersDraw ?? false);
+
+    let mediaDataUrl = "";
+    if (this.promoMediaRemoved) {
+      mediaDataUrl = "";
+    } else if (this.promoPendingMedia?.dataUrl) {
+      mediaDataUrl = this.promoPendingMedia.dataUrl;
+    } else if (own?.mediaDataUrl) {
+      mediaDataUrl = own.mediaDataUrl;
+    }
+
+    this.promoSetInFlight = true;
+    this.syncPromoPanelUi();
+    this.socket.emit(
+      "promo:upsert",
+      {
+        x: position.x,
+        y: position.y,
+        z: position.z,
+        scale,
+        linkUrl,
+        mediaDataUrl,
+        allowOthersDraw
+      },
+      (response = {}) => {
+        this.promoSetInFlight = false;
+        if (!response?.ok) {
+          this.appendChatLine("", `홍보 오브젝트 저장 실패: ${String(response?.error ?? "unknown")}`, "system");
+          this.syncPromoPanelUi();
+          return;
+        }
+        this.promoPendingMedia = {
+          dataUrl: "",
+          kind: "none",
+          name: ""
+        };
+        this.promoMediaRemoved = false;
+        this.requestPromoState();
+        this.syncPromoPanelUi();
+      }
+    );
+  }
+
+  requestPromoRemove() {
+    if (!(this.socket && this.networkConnected)) {
+      this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
+      return;
+    }
+    if (this.promoRemoveInFlight) {
+      return;
+    }
+    this.promoRemoveInFlight = true;
+    this.syncPromoPanelUi();
+    this.socket.emit("promo:remove", {}, (response = {}) => {
+      this.promoRemoveInFlight = false;
+      if (!response?.ok) {
+        this.appendChatLine("", `홍보 오브젝트 삭제 실패: ${String(response?.error ?? "unknown")}`, "system");
+        this.syncPromoPanelUi();
+        return;
+      }
+      this.promoPendingMedia = {
+        dataUrl: "",
+        kind: "none",
+        name: ""
+      };
+      this.promoMediaRemoved = false;
+      this.requestPromoState();
+      this.syncPromoPanelUi();
+    });
+  }
+
+  disposePromoObjectVisual(ownerKey) {
+    const key = String(ownerKey ?? "").trim();
+    if (!key) {
+      return;
+    }
+    const visual = this.promoObjectVisuals.get(key);
+    if (!visual) {
+      return;
+    }
+    if (visual.videoEl) {
+      try {
+        visual.videoEl.pause();
+        visual.videoEl.src = "";
+        visual.videoEl.load();
+      } catch {
+        // ignore
+      }
+    }
+    if (visual.videoTexture) {
+      visual.videoTexture.dispose();
+    }
+    if (visual.imageTexture) {
+      visual.imageTexture.dispose();
+    }
+    this.scene.remove(visual.group);
+    disposeMeshTree(visual.group);
+    this.promoObjectVisuals.delete(key);
+  }
+
+  clearPromoObjectVisuals() {
+    for (const ownerKey of this.promoObjectVisuals.keys()) {
+      this.disposePromoObjectVisual(ownerKey);
+    }
+  }
+
+  createPromoObjectVisual(entry) {
+    const safeScale = THREE.MathUtils.clamp(Number(entry.scale) || 1, 0.35, 8);
+    const boardWidth = 2.6 * safeScale;
+    const boardHeight = 1.5 * safeScale;
+    const boardDepth = 0.12 * safeScale;
+    const poleHeight = 1.7 * safeScale;
+
+    const group = new THREE.Group();
+    group.position.set(entry.x, entry.y, entry.z);
+
+    const pole = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.1 * safeScale, 0.14 * safeScale, poleHeight, 12),
+      new THREE.MeshStandardMaterial({
+        color: 0x60708b,
+        roughness: 0.7,
+        metalness: 0.22
+      })
+    );
+    pole.position.y = poleHeight * 0.5;
+    group.add(pole);
+
+    const frame = new THREE.Mesh(
+      new THREE.BoxGeometry(boardWidth + 0.16 * safeScale, boardHeight + 0.16 * safeScale, boardDepth),
+      new THREE.MeshStandardMaterial({
+        color: 0x1f2a38,
+        roughness: 0.52,
+        metalness: 0.28,
+        emissive: 0x09111a,
+        emissiveIntensity: 0.52
+      })
+    );
+    frame.position.y = poleHeight + boardHeight * 0.5 + 0.04 * safeScale;
+    group.add(frame);
+
+    const screenMaterial = new THREE.MeshStandardMaterial({
+      color: 0xe2f2ff,
+      emissive: 0x1b2c40,
+      emissiveIntensity: 0.4,
+      roughness: 0.3,
+      metalness: 0.02
+    });
+    const screen = new THREE.Mesh(
+      new THREE.PlaneGeometry(boardWidth, boardHeight),
+      screenMaterial
+    );
+    screen.position.set(0, frame.position.y, boardDepth * 0.52);
+    group.add(screen);
+
+    let videoEl = null;
+    let videoTexture = null;
+    let imageTexture = null;
+    if (entry.mediaDataUrl && entry.mediaKind === "video") {
+      videoEl = document.createElement("video");
+      videoEl.preload = "auto";
+      videoEl.loop = true;
+      videoEl.muted = true;
+      videoEl.playsInline = true;
+      videoEl.setAttribute("playsinline", "true");
+      videoEl.setAttribute("webkit-playsinline", "true");
+      videoEl.src = entry.mediaDataUrl;
+      videoTexture = new THREE.VideoTexture(videoEl);
+      videoTexture.colorSpace = THREE.SRGBColorSpace;
+      videoTexture.minFilter = THREE.LinearFilter;
+      videoTexture.magFilter = THREE.LinearFilter;
+      videoTexture.generateMipmaps = false;
+      screenMaterial.map = videoTexture;
+      screenMaterial.color.setHex(0xffffff);
+      screenMaterial.emissiveIntensity = 0.22;
+      videoEl.play().catch(() => {});
+    } else if (entry.mediaDataUrl && entry.mediaKind === "image") {
+      imageTexture = this.textureLoader.load(entry.mediaDataUrl);
+      imageTexture.colorSpace = THREE.SRGBColorSpace;
+      imageTexture.minFilter = THREE.LinearFilter;
+      imageTexture.magFilter = THREE.LinearFilter;
+      imageTexture.generateMipmaps = false;
+      screenMaterial.map = imageTexture;
+      screenMaterial.color.setHex(0xffffff);
+      screenMaterial.emissiveIntensity = 0.2;
+    } else {
+      screenMaterial.color.setHex(0xd9f1ff);
+      screenMaterial.emissiveIntensity = 0.26;
+    }
+    screenMaterial.needsUpdate = true;
+    return {
+      group,
+      videoEl,
+      videoTexture,
+      imageTexture
+    };
+  }
+
+  applyPromoState(rawObjects = []) {
+    const incoming = Array.isArray(rawObjects) ? rawObjects : [];
+    const nextMap = new Map();
+    for (const rawValue of incoming) {
+      const normalized = this.normalizePromoObjectEntry(rawValue);
+      if (!normalized) {
+        continue;
+      }
+      nextMap.set(normalized.ownerKey, normalized);
+    }
+
+    for (const ownerKey of this.promoObjectVisuals.keys()) {
+      if (!nextMap.has(ownerKey)) {
+        this.disposePromoObjectVisual(ownerKey);
+      }
+    }
+
+    for (const [ownerKey, nextEntry] of nextMap.entries()) {
+      const prevEntry = this.promoObjects.get(ownerKey);
+      const prevSignature = this.getPromoObjectSignature(prevEntry);
+      const nextSignature = this.getPromoObjectSignature(nextEntry);
+      if (prevSignature === nextSignature && this.promoObjectVisuals.has(ownerKey)) {
+        continue;
+      }
+      this.disposePromoObjectVisual(ownerKey);
+      const visual = this.createPromoObjectVisual(nextEntry);
+      this.scene.add(visual.group);
+      this.promoObjectVisuals.set(ownerKey, visual);
+    }
+
+    this.promoObjects = nextMap;
+    this.syncPromoPanelUi();
+    this.updatePromoLinkPrompt();
+  }
+
+  openNearestPromoLink() {
+    const target = this.nearestPromoLinkObject;
+    if (!target?.linkUrl) {
+      return false;
+    }
+    try {
+      const opened = window.open(target.linkUrl, "_blank", "noopener,noreferrer");
+      if (opened) {
+        opened.opener = null;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  updatePromoLinkPrompt() {
+    if (!this.promoLinkPromptEl) {
+      return;
+    }
+    if (this.isMobilePortraitBlocked() || this.surfacePainterOpen || !this.canMovePlayer()) {
+      this.nearestPromoLinkObject = null;
+      this.promoLinkPromptEl.classList.add("hidden");
+      return;
+    }
+    const nearest = this.getNearestPromoObject(PROMO_LINK_INTERACT_RADIUS);
+    if (!nearest?.linkUrl) {
+      this.nearestPromoLinkObject = null;
+      this.promoLinkPromptEl.classList.add("hidden");
+      return;
+    }
+    this.nearestPromoLinkObject = nearest;
+    if (this.promoOpenLinkBtnEl) {
+      this.promoOpenLinkBtnEl.textContent = `${nearest.ownerName} 링크 열기`;
+    }
+    this.promoLinkPromptEl.classList.remove("hidden");
+  }
+
   normalizePortalSchedule(raw = {}) {
     const modeRaw = String(raw?.mode ?? "idle").trim().toLowerCase();
     const mode = ["idle", "waiting", "final_countdown", "open", "open_manual"].includes(modeRaw)
@@ -9445,6 +10040,13 @@ export class GameRuntime {
         return;
       }
 
+      if (event.code === "KeyR" && this.canUseGameplayControls()) {
+        if (this.openNearestPromoLink()) {
+          event.preventDefault();
+          return;
+        }
+      }
+
       if (event.code === "KeyG" && this.canUseGameplayControls() && this.hasHostPrivilege()) {
         event.preventDefault();
         this.toggleFlyMode();
@@ -9903,6 +10505,62 @@ export class GameRuntime {
         this.tryOpenSurfacePainterFromInteraction();
       });
     }
+    if (this.promoScaleInputEl) {
+      this.promoScaleInputEl.addEventListener("input", () => {
+        const value = Number(this.promoScaleInputEl?.value);
+        if (this.promoScaleValueEl && Number.isFinite(value)) {
+          this.promoScaleValueEl.textContent = `${value.toFixed(2)}x`;
+        }
+      });
+    }
+    if (this.promoMediaPickBtnEl && this.promoMediaFileInputEl) {
+      this.promoMediaPickBtnEl.addEventListener("click", () => {
+        this.promoMediaFileInputEl.click();
+      });
+      this.promoMediaFileInputEl.addEventListener("change", () => {
+        const file = this.promoMediaFileInputEl?.files?.[0] ?? null;
+        void this.loadPromoMediaFromFile(file);
+        this.promoMediaFileInputEl.value = "";
+      });
+    }
+    if (this.promoMediaFolderBtnEl && this.promoMediaFolderInputEl) {
+      this.promoMediaFolderBtnEl.addEventListener("click", () => {
+        this.promoMediaFolderInputEl.click();
+      });
+      this.promoMediaFolderInputEl.addEventListener("change", () => {
+        const files = Array.from(this.promoMediaFolderInputEl?.files ?? []);
+        const target = files.find((file) => {
+          const type = String(file?.type ?? "").toLowerCase();
+          return type.startsWith("image/") || type.startsWith("video/");
+        }) ?? null;
+        void this.loadPromoMediaFromFile(target);
+        this.promoMediaFolderInputEl.value = "";
+      });
+    }
+    this.promoMediaClearBtnEl?.addEventListener("click", () => {
+      this.clearPromoPendingMedia();
+    });
+    this.promoPlaceBtnEl?.addEventListener("click", () => {
+      this.requestPromoUpsert({ placeInFront: true });
+    });
+    this.promoSaveBtnEl?.addEventListener("click", () => {
+      this.requestPromoUpsert({ placeInFront: false });
+    });
+    this.promoRemoveBtnEl?.addEventListener("click", () => {
+      this.requestPromoRemove();
+    });
+    if (this.promoLinkInputEl) {
+      this.promoLinkInputEl.addEventListener("keydown", (event) => {
+        if (event.code !== "Enter") {
+          return;
+        }
+        event.preventDefault();
+        this.requestPromoUpsert({ placeInFront: false });
+      });
+    }
+    this.promoOpenLinkBtnEl?.addEventListener("click", () => {
+      this.openNearestPromoLink();
+    });
 
     if (this.hostOpenPortalBtnEl) {
       this.hostOpenPortalBtnEl.addEventListener("click", () => {
@@ -10490,6 +11148,63 @@ export class GameRuntime {
     if (!this.objEditorInfoEl) {
       this.objEditorInfoEl = document.getElementById("obj-editor-info");
     }
+    if (!this.promoPanelEl) {
+      this.promoPanelEl = document.getElementById("promo-panel");
+    }
+    if (!this.promoScaleInputEl) {
+      this.promoScaleInputEl = document.getElementById("promo-scale");
+    }
+    if (!this.promoScaleValueEl) {
+      this.promoScaleValueEl = document.getElementById("promo-scale-value");
+    }
+    if (!this.promoLinkInputEl) {
+      this.promoLinkInputEl = document.getElementById("promo-link-url");
+    }
+    if (!this.promoAllowOthersDrawEl) {
+      this.promoAllowOthersDrawEl = document.getElementById("promo-allow-others-draw");
+    }
+    if (!this.promoMediaPickBtnEl) {
+      this.promoMediaPickBtnEl = document.getElementById("promo-media-pick-btn");
+    }
+    if (!this.promoMediaFolderBtnEl) {
+      this.promoMediaFolderBtnEl = document.getElementById("promo-media-folder-btn");
+    }
+    if (!this.promoMediaClearBtnEl) {
+      this.promoMediaClearBtnEl = document.getElementById("promo-media-clear-btn");
+    }
+    if (!this.promoMediaFileInputEl) {
+      this.promoMediaFileInputEl = document.getElementById("promo-media-file");
+    }
+    if (!this.promoMediaFolderInputEl) {
+      this.promoMediaFolderInputEl = document.getElementById("promo-media-folder");
+    }
+    if (!this.promoMediaNameEl) {
+      this.promoMediaNameEl = document.getElementById("promo-media-name");
+    }
+    if (!this.promoMediaHelpEl) {
+      this.promoMediaHelpEl = document.getElementById("promo-media-help");
+    }
+    if (!this.promoPlaceBtnEl) {
+      this.promoPlaceBtnEl = document.getElementById("promo-place-btn");
+    }
+    if (!this.promoSaveBtnEl) {
+      this.promoSaveBtnEl = document.getElementById("promo-save-btn");
+    }
+    if (!this.promoRemoveBtnEl) {
+      this.promoRemoveBtnEl = document.getElementById("promo-remove-btn");
+    }
+    if (!this.promoStatusEl) {
+      this.promoStatusEl = document.getElementById("promo-panel-status");
+    }
+    if (!this.promoLinkPromptEl) {
+      this.promoLinkPromptEl = document.getElementById("promo-link-prompt");
+    }
+    if (!this.promoLinkPromptTextEl) {
+      this.promoLinkPromptTextEl = document.getElementById("promo-link-prompt-text");
+    }
+    if (!this.promoOpenLinkBtnEl) {
+      this.promoOpenLinkBtnEl = document.getElementById("promo-open-link-btn");
+    }
     if (!this.platformEditorCountEl) {
       this.platformEditorCountEl = document.getElementById("platform-editor-count");
     }
@@ -10903,9 +11618,14 @@ export class GameRuntime {
       this.applySharedMusicState({ mode: "idle" }, { announce: false });
       this.portalForceOpenInFlight = false;
       this.clearRemotePlayers();
+      this.clearPromoObjectVisuals();
+      this.promoObjects.clear();
+      this.nearestPromoLinkObject = null;
       this.updateRoomPlayerSnapshot([]);
       this.setPlayerRosterVisible(false);
       this.syncHostControls();
+      this.syncPromoPanelUi();
+      this.updatePromoLinkPrompt();
       this.hud.setStatus(this.getStatusText());
       this.hud.setPlayers(0);
       this.updateSurfacePainterSaveAvailability();
@@ -10949,18 +11669,25 @@ export class GameRuntime {
       this.pendingAuthoritativeStateSync = true;
       this.authoritativeSyncGraceUntil = performance.now() + 2200;
       this.updateRoomPlayerSnapshot([]);
+      this.clearPromoObjectVisuals();
+      this.promoObjects.clear();
+      this.nearestPromoLinkObject = null;
       this.syncHostControls();
       this.hud.setStatus(this.getStatusText());
       this.syncFullscreenRestoreFlag();
       this.requestAuthoritativeStateSync();
       this.syncPlayerNameIfConnected();
       this.requestSurfacePaintSnapshot();
+      this.socket.emit("player:key:set", { key: this.promoOwnerKey }, () => {
+        this.requestPromoState();
+      });
       if (this.surfacePaintRetryQueue.size > 0) {
         this.scheduleSurfacePaintRetry(240);
       }
       this.updateSurfacePainterSaveAvailability();
       this.startNetworkPing();
       this.requestHostClaim();
+      this.syncPromoPanelUi();
     });
 
     socket.on("disconnect", () => {
@@ -10990,11 +11717,16 @@ export class GameRuntime {
       this.stopNetworkPing();
       this.authoritativeSyncGraceUntil = 0;
       this.clearRemotePlayers();
+      this.clearPromoObjectVisuals();
+      this.promoObjects.clear();
+      this.nearestPromoLinkObject = null;
       this.updateRoomPlayerSnapshot([]);
       this.setPlayerRosterVisible(false);
       this.applySharedMusicState({ mode: "idle" }, { announce: false });
       this.applySecurityTestState({ enabled: false }, { announce: false });
       this.syncHostControls();
+      this.syncPromoPanelUi();
+      this.updatePromoLinkPrompt();
       this.hud.setStatus(this.getStatusText());
       this.hud.setPlayers(0);
       this.updateSurfacePainterSaveAvailability();
@@ -11022,11 +11754,16 @@ export class GameRuntime {
       this.chatMessageSeq = 0;
       this.lastChatSendAt = 0;
       this.clearRemotePlayers();
+      this.clearPromoObjectVisuals();
+      this.promoObjects.clear();
+      this.nearestPromoLinkObject = null;
       this.updateRoomPlayerSnapshot([]);
       this.setPlayerRosterVisible(false);
       this.applySharedMusicState({ mode: "idle" }, { announce: false });
       this.applySecurityTestState({ enabled: false }, { announce: false });
       this.syncHostControls();
+      this.syncPromoPanelUi();
+      this.updatePromoLinkPrompt();
       this.stopNetworkPing();
       this.hud.setStatus(this.getStatusText());
       this.hud.setPlayers(0);
@@ -11116,6 +11853,10 @@ export class GameRuntime {
 
     socket.on("chat:message", (payload) => {
       this.handleChatMessage(payload);
+    });
+
+    socket.on("promo:state", (payload = {}) => {
+      this.applyPromoState(payload?.objects ?? payload?.promoObjects ?? []);
     });
 
     socket.on("platform:state", (payload = {}) => {
@@ -11264,6 +12005,9 @@ export class GameRuntime {
         persistLocal: true,
         syncUi: true
       });
+    }
+    if (Array.isArray(room?.promoObjects)) {
+      this.applyPromoState(room.promoObjects);
     }
 
     const players = Array.isArray(room?.players) ? room.players : [];
@@ -11637,6 +12381,7 @@ export class GameRuntime {
     this.updateHud(delta);
     this.updatePlatformEditor();
     this.updateRopeProximity();
+    this.updatePromoLinkPrompt();
     if (this.securityTestState?.enabled) {
       this.securityTestLabelRefreshClock += delta;
       if (this.securityTestLabelRefreshClock >= this.securityTestLabelRefreshInterval) {

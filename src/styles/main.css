@@ -1498,6 +1498,154 @@ canvas {
   letter-spacing: 0.03em;
 }
 
+#promo-panel {
+  position: fixed;
+  left: 14px;
+  top: 82px;
+  z-index: 34;
+  display: grid;
+  gap: 6px;
+  width: min(66vw, 400px);
+  max-height: min(40vh, 390px);
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid rgba(179, 208, 236, 0.62);
+  border-radius: 10px;
+  background: rgba(10, 21, 34, 0.82);
+  backdrop-filter: blur(5px);
+}
+
+#promo-panel-title {
+  color: #cfe7fb;
+  font: 700 0.62rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.07em;
+}
+
+.promo-panel-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.promo-panel-label {
+  color: #a7cdf1;
+  font: 700 0.58rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.05em;
+}
+
+#promo-scale {
+  width: 100%;
+}
+
+#promo-scale-value {
+  color: #dff3ff;
+  font: 700 0.58rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.04em;
+  min-width: 42px;
+  text-align: right;
+}
+
+#promo-link-url {
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid rgba(177, 210, 240, 0.64);
+  border-radius: 7px;
+  background: rgba(12, 28, 44, 0.92);
+  color: #edf6ff;
+  font: 600 0.7rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+}
+
+.promo-panel-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #d7ecff;
+  font: 700 0.62rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.04em;
+}
+
+.promo-panel-check input {
+  accent-color: #79cfff;
+}
+
+.promo-panel-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.promo-panel-actions button {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  border: 1px solid rgba(175, 208, 238, 0.62);
+  border-radius: 7px;
+  background: rgba(12, 30, 47, 0.82);
+  color: #dcedfc;
+  font: 700 0.58rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+
+.promo-panel-actions button:disabled,
+#promo-link-url:disabled,
+#promo-scale:disabled {
+  opacity: 0.62;
+  cursor: default;
+}
+
+#promo-media-name,
+#promo-media-help,
+#promo-panel-status {
+  margin: 0;
+  color: #dcefff;
+  font: 600 0.58rem/1.3 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.03em;
+}
+
+#promo-link-prompt {
+  position: fixed;
+  left: 50%;
+  bottom: 96px;
+  z-index: 82;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(6, 16, 28, 0.84);
+  color: #d8eeff;
+  font: 600 0.82rem/1.4 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.05em;
+  padding: 6px 12px;
+  border-radius: 7px;
+  border: 1px solid rgba(122, 191, 235, 0.44);
+}
+
+#promo-link-prompt-text kbd {
+  display: inline-block;
+  background: rgba(122, 191, 235, 0.24);
+  border: 1px solid rgba(122, 191, 235, 0.62);
+  border-radius: 4px;
+  padding: 1px 7px;
+  font-size: 0.78rem;
+  font-family: inherit;
+  margin-right: 6px;
+  color: #aadcff;
+}
+
+#promo-open-link-btn {
+  min-width: 54px;
+  height: 28px;
+  border: 1px solid rgba(177, 210, 240, 0.64);
+  border-radius: 7px;
+  background: rgba(12, 28, 44, 0.92);
+  color: #edf6ff;
+  font: 700 0.6rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+
 #chat-ui {
   position: fixed;
   left: 14px;
@@ -1808,6 +1956,18 @@ body.is-mobile-ui #chat-live-log .chat-line {
   color: #e8f5ff;
 }
 
+body.is-mobile-ui #promo-panel {
+  top: 10px;
+  left: 10px;
+  width: min(68vw, 300px);
+  max-height: min(52vh, 420px);
+  z-index: 42;
+}
+
+body.is-mobile-ui #promo-link-prompt {
+  bottom: 146px;
+}
+
 /* Mobile: show settings gear, hide fullscreen + graphics buttons */
 body.is-mobile-ui #settings-btn {
   display: flex;
@@ -1852,6 +2012,21 @@ body.is-mobile-ui #mobile-move-stick {
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;
     align-items: center;
+  }
+
+  body.is-mobile-ui #promo-panel {
+    left: 8px;
+    top: 8px;
+    width: min(76vw, 290px);
+    max-height: min(54vh, 400px);
+    padding: 7px;
+    gap: 5px;
+  }
+
+  body.is-mobile-ui #promo-link-prompt {
+    bottom: 134px;
+    max-width: calc(100vw - 16px);
+    padding: 6px 8px;
   }
 
   /* Mobile HUD: show only player count, no panel background */
@@ -2428,6 +2603,8 @@ body.mobile-portrait-lock #tool-ui,
 body.mobile-portrait-lock #mobile-ui,
 body.mobile-portrait-lock #chat-ui,
 body.mobile-portrait-lock #chat-live-feed,
+body.mobile-portrait-lock #promo-panel,
+body.mobile-portrait-lock #promo-link-prompt,
 body.mobile-portrait-lock #host-controls,
 body.mobile-portrait-lock #player-roster,
 body.mobile-portrait-lock #hub-flow-ui,

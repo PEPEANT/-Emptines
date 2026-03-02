@@ -34,6 +34,17 @@ const MAX_LEFT_BILLBOARD_IMAGE_CHARS = 4_200_000;
 const SURFACE_PAINT_STORE_VERSION = 1;
 const MAX_SHARED_AUDIO_DATA_URL_CHARS = 12_000_000;
 const MAX_SHARED_AUDIO_NAME_CHARS = 120;
+const DEFAULT_PLATFORM_LIMIT = 400;
+const DEFAULT_ROPE_LIMIT = 200;
+const MIN_EDITOR_LIMIT = 1;
+const MAX_EDITOR_LIMIT = 10_000;
+const MIN_EDITOR_SCALE = 0.25;
+const MAX_EDITOR_SCALE = 8;
+const PROMO_OWNER_KEY_PATTERN = /^[a-zA-Z0-9:_-]{8,96}$/;
+const MAX_PROMO_OBJECTS = 1200;
+const MAX_PROMO_NAME_CHARS = 48;
+const MAX_PROMO_URL_CHARS = 2048;
+const MAX_PROMO_MEDIA_DATA_URL_CHARS = 9_000_000;
 
 function normalizeRoomPortalTarget(rawValue, fallback = "") {
   const text = String(rawValue ?? "").trim().slice(0, 2048);
@@ -155,6 +166,106 @@ function createSharedMusicState() {
   };
 }
 
+function createSecurityTestState() {
+  return {
+    enabled: false,
+    updatedAt: Date.now()
+  };
+}
+
+function clampEditorLimit(rawValue, fallback) {
+  const parsed = Math.trunc(Number(rawValue));
+  const safe = Number.isFinite(parsed) ? parsed : Math.trunc(Number(fallback) || 0);
+  return Math.max(MIN_EDITOR_LIMIT, Math.min(MAX_EDITOR_LIMIT, safe));
+}
+
+function clampEditorScale(rawValue, fallback) {
+  const parsed = Number(rawValue);
+  const safe = Number.isFinite(parsed) ? parsed : Number(fallback) || 1;
+  return Math.max(MIN_EDITOR_SCALE, Math.min(MAX_EDITOR_SCALE, safe));
+}
+
+function createObjectEditorState() {
+  return {
+    platformLimit: DEFAULT_PLATFORM_LIMIT,
+    ropeLimit: DEFAULT_ROPE_LIMIT,
+    platformScale: 1,
+    ropeScale: 1,
+    updatedAt: Date.now()
+  };
+}
+
+function normalizeObjectEditorState(rawValue, fallback = null) {
+  const source = rawValue && typeof rawValue === "object" ? rawValue : {};
+  const base = fallback && typeof fallback === "object" ? fallback : createObjectEditorState();
+  return {
+    platformLimit: clampEditorLimit(source.platformLimit, base.platformLimit),
+    ropeLimit: clampEditorLimit(source.ropeLimit, base.ropeLimit),
+    platformScale: clampEditorScale(source.platformScale, base.platformScale),
+    ropeScale: clampEditorScale(source.ropeScale, base.ropeScale),
+    updatedAt: Math.max(
+      0,
+      Math.trunc(Number(source.updatedAt) || Number(base.updatedAt) || Date.now())
+    )
+  };
+}
+
+function normalizePromoOwnerKey(rawValue) {
+  const value = String(rawValue ?? "").trim();
+  if (!value || !PROMO_OWNER_KEY_PATTERN.test(value)) {
+    return "";
+  }
+  return value;
+}
+
+function normalizePromoName(rawValue) {
+  const collapsed = String(rawValue ?? "").trim().replace(/\s+/g, " ");
+  if (!collapsed) {
+    return "PLAYER";
+  }
+  return collapsed.slice(0, MAX_PROMO_NAME_CHARS);
+}
+
+function normalizePromoUrl(rawValue) {
+  const value = String(rawValue ?? "").trim().slice(0, MAX_PROMO_URL_CHARS);
+  if (!value) {
+    return "";
+  }
+  try {
+    const parsed = new URL(value);
+    const protocol = String(parsed.protocol ?? "").toLowerCase();
+    if (protocol !== "http:" && protocol !== "https:") {
+      return "";
+    }
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+}
+
+function normalizePromoMediaDataUrl(rawValue) {
+  const value = String(rawValue ?? "").trim();
+  if (!value || value.length > MAX_PROMO_MEDIA_DATA_URL_CHARS) {
+    return "";
+  }
+  if (!/^data:(image|video)\/[a-z0-9.+-]+;base64,/i.test(value)) {
+    return "";
+  }
+  return value;
+}
+
+function normalizePromoScale(rawValue, fallback = 1) {
+  const parsed = Number(rawValue);
+  const safe = Number.isFinite(parsed) ? parsed : Number(fallback) || 1;
+  return Math.max(0.35, Math.min(8, safe));
+}
+
+function normalizePromoAxis(rawValue, fallback = 0, min = -2000, max = 2000) {
+  const parsed = Number(rawValue);
+  const safe = Number.isFinite(parsed) ? parsed : Number(fallback) || 0;
+  return Math.max(min, Math.min(max, safe));
+}
+
 function normalizeRightBillboardVideoId(rawValue) {
   const text = String(rawValue ?? "").trim().toLowerCase();
   if (!text) {
@@ -183,7 +294,10 @@ function createPersistentRoom(code, defaultPortalTargetUrl) {
     leftBillboard: createLeftBillboardState(),
     rightBillboard: createRightBillboardState(),
     sharedMusic: createSharedMusicState(),
+    securityTest: createSecurityTestState(),
     surfacePaint: new Map(),
+    promoObjects: new Map(),
+    objectEditor: createObjectEditorState(),
     platforms: [],
     ropes: [],
     players: new Map(),
@@ -270,6 +384,9 @@ export class RoomService {
 
     const savedAt = Math.max(0, Math.trunc(Number(parsed?.savedAt) || Date.now()));
     const surfaces = Array.isArray(parsed?.surfaces) ? parsed.surfaces : [];
+    const platforms = Array.isArray(parsed?.platforms) ? parsed.platforms : [];
+    const ropes = Array.isArray(parsed?.ropes) ? parsed.ropes : [];
+    const promoObjects = Array.isArray(parsed?.promoObjects) ? parsed.promoObjects : [];
     const restored = new Map();
     for (const entry of surfaces) {
       const surfaceId = normalizeSurfaceId(entry?.surfaceId);
@@ -282,6 +399,10 @@ export class RoomService {
 
     const room = this.getDefaultRoom();
     room.surfacePaint = restored;
+    room.objectEditor = normalizeObjectEditorState(parsed?.objectEditor, room.objectEditor);
+    this.setPlatforms(room, platforms, { persist: false });
+    this.setRopes(room, ropes, { persist: false });
+    this.setPromoObjects(room, promoObjects, { persist: false });
     if (restored.size > 0) {
       this.log?.log?.(
         `[paint] Restored ${restored.size} painted surfaces from ${this.surfacePaintStorePath}`
@@ -311,11 +432,16 @@ export class RoomService {
 
     this.surfacePaintSaveInFlight = true;
     this.surfacePaintSaveQueued = false;
+    const room = this.getDefaultRoom();
     const payload = {
       version: SURFACE_PAINT_STORE_VERSION,
       savedAt: Date.now(),
       defaultRoomCode: this.defaultRoomCode,
-      surfaces: this.serializeSurfacePaint(this.getDefaultRoom())
+      surfaces: this.serializeSurfacePaint(room),
+      platforms: this.serializePlatforms(room),
+      ropes: this.serializeRopes(room),
+      promoObjects: this.serializePromoObjects(room),
+      objectEditor: this.serializeObjectEditor(room)
     };
     const tmpPath = `${this.surfacePaintStorePath}.tmp`;
 
@@ -370,6 +496,9 @@ export class RoomService {
       portalTarget: String(room.portalTarget ?? "").trim(),
       portalSchedule: this.serializePortalSchedule(room),
       rightBillboard: this.serializeRightBillboard(room),
+      securityTest: this.serializeSecurityTest(room),
+      objectEditor: this.serializeObjectEditor(room),
+      promoObjects: this.serializePromoObjects(room),
       players: Array.from(room.players.values()).map((player) => ({
         id: player.id,
         name: player.name,
@@ -405,6 +534,232 @@ export class RoomService {
     });
   }
 
+  serializeObjectEditor(room) {
+    if (!room) {
+      return createObjectEditorState();
+    }
+    room.objectEditor = normalizeObjectEditorState(room.objectEditor, room.objectEditor);
+    return room.objectEditor;
+  }
+
+  setObjectEditor(room, rawSettings, { persist = true } = {}) {
+    if (!room) {
+      return { ok: false, error: "room not found" };
+    }
+    const previous = this.serializeObjectEditor(room);
+    const next = normalizeObjectEditorState(rawSettings, previous);
+    const changed =
+      next.platformLimit !== previous.platformLimit ||
+      next.ropeLimit !== previous.ropeLimit ||
+      Math.abs(next.platformScale - previous.platformScale) > 0.0001 ||
+      Math.abs(next.ropeScale - previous.ropeScale) > 0.0001;
+    if (!changed) {
+      return {
+        ok: true,
+        changed: false,
+        settings: previous
+      };
+    }
+
+    room.objectEditor = {
+      ...next,
+      updatedAt: Date.now()
+    };
+    let platformsTrimmed = false;
+    let ropesTrimmed = false;
+    if (Array.isArray(room.platforms) && room.platforms.length > room.objectEditor.platformLimit) {
+      room.platforms = room.platforms.slice(0, room.objectEditor.platformLimit);
+      platformsTrimmed = true;
+    }
+    if (Array.isArray(room.ropes) && room.ropes.length > room.objectEditor.ropeLimit) {
+      room.ropes = room.ropes.slice(0, room.objectEditor.ropeLimit);
+      ropesTrimmed = true;
+    }
+    if (persist) {
+      this.scheduleSurfacePaintSave();
+    }
+    return {
+      ok: true,
+      changed: true,
+      settings: this.serializeObjectEditor(room),
+      platformsTrimmed,
+      ropesTrimmed
+    };
+  }
+
+  getPromoObjectsMap(room) {
+    if (!room) {
+      return null;
+    }
+    if (!(room.promoObjects instanceof Map)) {
+      room.promoObjects = new Map();
+    }
+    return room.promoObjects;
+  }
+
+  normalizePromoObject(rawValue, fallback = null) {
+    const source = rawValue && typeof rawValue === "object" ? rawValue : {};
+    const ownerKey = normalizePromoOwnerKey(source.ownerKey ?? fallback?.ownerKey ?? "");
+    if (!ownerKey) {
+      return null;
+    }
+
+    const mediaDataUrl = normalizePromoMediaDataUrl(source.mediaDataUrl ?? fallback?.mediaDataUrl ?? "");
+    let mediaKind = "none";
+    if (mediaDataUrl) {
+      mediaKind = /^data:image\//i.test(mediaDataUrl) ? "image" : "video";
+    }
+
+    return {
+      ownerKey,
+      ownerName: normalizePromoName(source.ownerName ?? fallback?.ownerName ?? "PLAYER"),
+      x: normalizePromoAxis(source.x, fallback?.x ?? 0),
+      y: normalizePromoAxis(source.y, fallback?.y ?? 0, -100, 400),
+      z: normalizePromoAxis(source.z, fallback?.z ?? 0),
+      scale: normalizePromoScale(source.scale, fallback?.scale ?? 1),
+      linkUrl: normalizePromoUrl(source.linkUrl ?? fallback?.linkUrl ?? ""),
+      mediaDataUrl,
+      mediaKind,
+      allowOthersDraw: Boolean(source.allowOthersDraw ?? fallback?.allowOthersDraw ?? false),
+      updatedAt: Math.max(
+        0,
+        Math.trunc(Number(source.updatedAt) || Number(fallback?.updatedAt) || Date.now())
+      )
+    };
+  }
+
+  serializePromoObjects(room) {
+    const map = this.getPromoObjectsMap(room);
+    if (!map) {
+      return [];
+    }
+    const list = [];
+    for (const rawValue of map.values()) {
+      const normalized = this.normalizePromoObject(rawValue);
+      if (!normalized) {
+        continue;
+      }
+      list.push(normalized);
+    }
+    list.sort((a, b) => a.updatedAt - b.updatedAt);
+    return list;
+  }
+
+  emitPromoObjectsUpdate(room) {
+    this.io.to(room.code).emit("promo:state", {
+      objects: this.serializePromoObjects(room)
+    });
+  }
+
+  setPromoObjects(room, rawList, { persist = true } = {}) {
+    if (!room) {
+      return { ok: false, error: "room not found" };
+    }
+    const map = this.getPromoObjectsMap(room);
+    map.clear();
+    const list = Array.isArray(rawList) ? rawList : [];
+    for (const entry of list) {
+      const normalized = this.normalizePromoObject(entry);
+      if (!normalized) {
+        continue;
+      }
+      map.set(normalized.ownerKey, normalized);
+      if (map.size >= MAX_PROMO_OBJECTS) {
+        break;
+      }
+    }
+    if (persist) {
+      this.scheduleSurfacePaintSave();
+    }
+    return { ok: true };
+  }
+
+  upsertPromoObject(room, actorOwnerKey, actorName, rawPayload = {}) {
+    if (!room) {
+      return { ok: false, error: "room not found" };
+    }
+    const actorKey = normalizePromoOwnerKey(actorOwnerKey);
+    if (!actorKey) {
+      return { ok: false, error: "invalid owner key" };
+    }
+    const map = this.getPromoObjectsMap(room);
+    const targetOwnerKeyRaw = normalizePromoOwnerKey(rawPayload?.targetOwnerKey ?? "");
+    const targetOwnerKey = targetOwnerKeyRaw || actorKey;
+    const previous = map.get(targetOwnerKey) ?? null;
+
+    if (targetOwnerKey !== actorKey) {
+      if (!previous) {
+        return { ok: false, error: "target not found" };
+      }
+      if (!previous.allowOthersDraw) {
+        return { ok: false, error: "owner denied edits" };
+      }
+    }
+
+    const fallback = previous
+      ? { ...previous }
+      : {
+          ownerKey: targetOwnerKey,
+          ownerName: actorName,
+          x: 0,
+          y: 0,
+          z: 0,
+          scale: 1,
+          linkUrl: "",
+          mediaDataUrl: "",
+          allowOthersDraw: false,
+          updatedAt: Date.now()
+        };
+
+    const normalized = this.normalizePromoObject(
+      {
+        ...rawPayload,
+        ownerKey: targetOwnerKey,
+        ownerName: previous?.ownerName ?? actorName
+      },
+      fallback
+    );
+    if (!normalized) {
+      return { ok: false, error: "invalid promo payload" };
+    }
+    if (!previous && map.size >= MAX_PROMO_OBJECTS) {
+      return { ok: false, error: "promo object limit reached" };
+    }
+    normalized.updatedAt = Date.now();
+    if (targetOwnerKey === actorKey) {
+      normalized.ownerName = normalizePromoName(actorName);
+    }
+    map.set(targetOwnerKey, normalized);
+    this.scheduleSurfacePaintSave();
+    return {
+      ok: true,
+      changed: true,
+      object: normalized
+    };
+  }
+
+  removePromoObject(room, actorOwnerKey, rawTargetOwnerKey = "") {
+    if (!room) {
+      return { ok: false, error: "room not found" };
+    }
+    const actorKey = normalizePromoOwnerKey(actorOwnerKey);
+    if (!actorKey) {
+      return { ok: false, error: "invalid owner key" };
+    }
+    const map = this.getPromoObjectsMap(room);
+    const targetOwnerKey = normalizePromoOwnerKey(rawTargetOwnerKey) || actorKey;
+    const previous = map.get(targetOwnerKey);
+    if (!previous) {
+      return { ok: true, changed: false };
+    }
+    if (targetOwnerKey !== actorKey && !previous.allowOthersDraw) {
+      return { ok: false, error: "owner denied edits" };
+    }
+    map.delete(targetOwnerKey);
+    this.scheduleSurfacePaintSave();
+    return { ok: true, changed: true };
+  }
+
   serializePlatforms(room) {
     return Array.isArray(room?.platforms) ? room.platforms : [];
   }
@@ -413,22 +768,26 @@ export class RoomService {
     this.io.to(room.code).emit("platform:state", { platforms: this.serializePlatforms(room) });
   }
 
-  setPlatforms(room, rawPlatforms) {
+  setPlatforms(room, rawPlatforms, { persist = true } = {}) {
     if (!room) return { ok: false, error: "room not found" };
-    const MAX_PLATFORMS = 400;
     const MAX_NUM = 2000;
+    const editorSettings = this.serializeObjectEditor(room);
+    const maxPlatforms = clampEditorLimit(editorSettings.platformLimit, DEFAULT_PLATFORM_LIMIT);
     const sanitized = (Array.isArray(rawPlatforms) ? rawPlatforms : [])
-      .slice(0, MAX_PLATFORMS)
-      .filter(p => p && typeof p === "object")
-      .map(p => ({
+      .slice(0, maxPlatforms)
+      .filter((p) => p && typeof p === "object")
+      .map((p) => ({
         x: Math.max(-MAX_NUM, Math.min(MAX_NUM, Number(p.x) || 0)),
         y: Math.max(-MAX_NUM, Math.min(MAX_NUM, Number(p.y) || 0)),
         z: Math.max(-MAX_NUM, Math.min(MAX_NUM, Number(p.z) || 0)),
         w: Math.max(0.1, Math.min(50, Number(p.w) || 3)),
         h: Math.max(0.05, Math.min(20, Number(p.h) || 0.3)),
-        d: Math.max(0.1, Math.min(50, Number(p.d) || 3)),
+        d: Math.max(0.1, Math.min(50, Number(p.d) || 3))
       }));
     room.platforms = sanitized;
+    if (persist) {
+      this.scheduleSurfacePaintSave();
+    }
     return { ok: true };
   }
 
@@ -440,20 +799,24 @@ export class RoomService {
     this.io.to(room.code).emit("rope:state", { ropes: this.serializeRopes(room) });
   }
 
-  setRopes(room, rawRopes) {
+  setRopes(room, rawRopes, { persist = true } = {}) {
     if (!room) return { ok: false, error: "room not found" };
-    const MAX_ROPES = 200;
     const MAX_NUM = 2000;
+    const editorSettings = this.serializeObjectEditor(room);
+    const maxRopes = clampEditorLimit(editorSettings.ropeLimit, DEFAULT_ROPE_LIMIT);
     const sanitized = (Array.isArray(rawRopes) ? rawRopes : [])
-      .slice(0, MAX_ROPES)
-      .filter(r => r && typeof r === "object")
-      .map(r => ({
+      .slice(0, maxRopes)
+      .filter((r) => r && typeof r === "object")
+      .map((r) => ({
         x: Math.max(-MAX_NUM, Math.min(MAX_NUM, Number(r.x) || 0)),
         y: Math.max(-MAX_NUM, Math.min(MAX_NUM, Number(r.y) || 0)),
         z: Math.max(-MAX_NUM, Math.min(MAX_NUM, Number(r.z) || 0)),
-        height: Math.max(0.5, Math.min(50, Number(r.height) || 4)),
+        height: Math.max(0.5, Math.min(50, Number(r.height) || 4))
       }));
     room.ropes = sanitized;
+    if (persist) {
+      this.scheduleSurfacePaintSave();
+    }
     return { ok: true };
   }
 
@@ -479,6 +842,14 @@ export class RoomService {
 
   emitPortalScheduleUpdate(room) {
     this.io.to(room.code).emit("portal:schedule:update", this.serializePortalSchedule(room));
+  }
+
+  serializeSecurityTest(room) {
+    const state = room?.securityTest ?? createSecurityTestState();
+    return {
+      enabled: Boolean(state.enabled),
+      updatedAt: Math.max(0, Math.trunc(Number(state.updatedAt) || Date.now()))
+    };
   }
 
   serializeLeftBillboard(room) {
@@ -851,6 +1222,32 @@ export class RoomService {
 
     room.portalTarget = normalized;
     return { ok: true, changed: true, targetUrl: room.portalTarget };
+  }
+
+  setSecurityTestEnabled(room, rawEnabled) {
+    if (!room) {
+      return { ok: false, error: "room not found" };
+    }
+    const enabled = Boolean(rawEnabled);
+    const previous = this.serializeSecurityTest(room);
+    if (previous.enabled === enabled) {
+      return {
+        ok: true,
+        changed: false,
+        state: previous
+      };
+    }
+
+    if (!room.securityTest || typeof room.securityTest !== "object") {
+      room.securityTest = createSecurityTestState();
+    }
+    room.securityTest.enabled = enabled;
+    room.securityTest.updatedAt = Date.now();
+    return {
+      ok: true,
+      changed: true,
+      state: this.serializeSecurityTest(room)
+    };
   }
 
   setPortalScheduleDelay(room, rawDelaySeconds) {

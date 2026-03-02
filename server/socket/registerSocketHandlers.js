@@ -5,6 +5,23 @@ function randomDefaultName() {
   return `PLAYER_${Math.floor(Math.random() * 9000 + 1000)}`;
 }
 
+function sanitizeChatMessageId(rawValue) {
+  const text = String(rawValue ?? "").trim();
+  if (!text) {
+    return "";
+  }
+  const normalized = text.replace(/[^a-zA-Z0-9:_-]/g, "").slice(0, 80);
+  return normalized;
+}
+
+function sanitizeOwnerKey(rawValue) {
+  const text = String(rawValue ?? "").trim();
+  if (!text) {
+    return "";
+  }
+  return text.replace(/[^a-zA-Z0-9:_-]/g, "").slice(0, 96);
+}
+
 export function registerSocketHandlers({
   io,
   roomService,
@@ -54,6 +71,12 @@ export function registerSocketHandlers({
       socket.emit("rope:state", { ropes: roomService.serializeRopes(room) });
     };
 
+    const emitPromoState = () => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) return;
+      socket.emit("promo:state", { objects: roomService.serializePromoObjects(room) });
+    };
+
     const emitPortalOpenCatchup = () => {
       const room = roomService.getRoomBySocket(socket);
       if (!room) {
@@ -79,6 +102,7 @@ export function registerSocketHandlers({
         emitSharedMusicState();
         emitLeftBillboardState();
         emitPortalOpenCatchup();
+        emitPromoState();
       }
       ack(ackFn, result);
       return result;
@@ -87,6 +111,7 @@ export function registerSocketHandlers({
     const online = playerCounter.increment();
     socket.data.playerName = randomDefaultName();
     socket.data.roomCode = null;
+    socket.data.playerKey = "";
     worldRuntime?.onPlayerConnected(socket);
 
     log.log(`[+] player connected (${online}) ${socket.id}`);
@@ -98,14 +123,32 @@ export function registerSocketHandlers({
     emitPortalOpenCatchup();
     emitPlatformState();
     emitRopeState();
+    emitPromoState();
     roomService.emitRoomList(socket);
 
-    socket.on("chat:send", ({ name, text }) => {
+    socket.on("player:key:set", (payload = {}, ackFn) => {
+      const nextKey = sanitizeOwnerKey(payload?.key ?? payload?.ownerKey ?? "");
+      if (!nextKey || nextKey.length < 8) {
+        ack(ackFn, { ok: false, error: "invalid owner key" });
+        return;
+      }
+      socket.data.playerKey = nextKey;
+      ack(ackFn, { ok: true, key: nextKey });
+    });
+
+    socket.on("chat:send", (payload = {}) => {
+      const { name, text } = payload;
       const safeName = sanitizeName(name ?? socket.data.playerName);
       const safeText = String(text ?? "").trim().slice(0, 200);
       if (!safeText) {
         return;
       }
+      const safeMessageId = sanitizeChatMessageId(
+        payload?.clientMessageId ?? payload?.messageId ?? ""
+      );
+      const messageId =
+        safeMessageId ||
+        `srv_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
 
       const room = roomService.getRoomBySocket(socket);
       if (!room) {
@@ -135,6 +178,7 @@ export function registerSocketHandlers({
           : null;
 
       io.to(room.code).emit("chat:message", {
+        messageId,
         id: socket.id,
         name: safeName,
         text: safeText,
@@ -259,6 +303,37 @@ export function registerSocketHandlers({
         ok: true,
         changed: Boolean(claimResult.changed),
         room: roomService.serializeRoom(room)
+      });
+    });
+
+    socket.on("security:test:set", (payload = {}, ackFn) => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        ack(ackFn, { ok: false, error: "room not found" });
+        return;
+      }
+      if (!roomService.isHost(room, socket.id)) {
+        ack(ackFn, { ok: false, error: "host only" });
+        return;
+      }
+
+      const result = roomService.setSecurityTestEnabled(
+        room,
+        payload?.enabled ?? payload?.active ?? false
+      );
+      if (!result.ok) {
+        ack(ackFn, result);
+        return;
+      }
+
+      if (result.changed) {
+        roomService.emitRoomUpdate(room);
+      }
+
+      ack(ackFn, {
+        ok: true,
+        changed: Boolean(result.changed),
+        state: result.state
       });
     });
 
@@ -612,6 +687,98 @@ export function registerSocketHandlers({
 
     socket.on("rope:state:request", () => {
       emitRopeState();
+    });
+
+    socket.on("promo:state:request", () => {
+      emitPromoState();
+    });
+
+    socket.on("promo:upsert", (payload = {}, ackFn) => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        ack(ackFn, { ok: false, error: "room not found" });
+        return;
+      }
+      if (!room.players?.has?.(socket.id)) {
+        ack(ackFn, { ok: false, error: "player not in room" });
+        return;
+      }
+      const ownerKey = sanitizeOwnerKey(socket.data.playerKey ?? "");
+      if (!ownerKey || ownerKey.length < 8) {
+        ack(ackFn, { ok: false, error: "owner key required" });
+        return;
+      }
+      const player = room.players.get(socket.id);
+      const actorName = sanitizeName(player?.name ?? socket.data.playerName);
+      const result = roomService.upsertPromoObject(room, ownerKey, actorName, payload);
+      if (!result.ok) {
+        ack(ackFn, result);
+        return;
+      }
+      roomService.emitPromoObjectsUpdate(room);
+      roomService.emitRoomUpdate(room);
+      ack(ackFn, {
+        ok: true,
+        changed: Boolean(result.changed),
+        object: result.object ?? null
+      });
+    });
+
+    socket.on("promo:remove", (payload = {}, ackFn) => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        ack(ackFn, { ok: false, error: "room not found" });
+        return;
+      }
+      if (!room.players?.has?.(socket.id)) {
+        ack(ackFn, { ok: false, error: "player not in room" });
+        return;
+      }
+      const ownerKey = sanitizeOwnerKey(socket.data.playerKey ?? "");
+      if (!ownerKey || ownerKey.length < 8) {
+        ack(ackFn, { ok: false, error: "owner key required" });
+        return;
+      }
+      const result = roomService.removePromoObject(room, ownerKey, payload?.targetOwnerKey ?? "");
+      if (!result.ok) {
+        ack(ackFn, result);
+        return;
+      }
+      if (result.changed) {
+        roomService.emitPromoObjectsUpdate(room);
+        roomService.emitRoomUpdate(room);
+      }
+      ack(ackFn, {
+        ok: true,
+        changed: Boolean(result.changed)
+      });
+    });
+
+    socket.on("editor:settings:set", (payload = {}, ackFn) => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        ack(ackFn, { ok: false, error: "room not found" });
+        return;
+      }
+      if (!roomService.isHost(room, socket.id)) {
+        ack(ackFn, { ok: false, error: "host only" });
+        return;
+      }
+      const result = roomService.setObjectEditor(room, payload?.settings ?? payload);
+      if (!result.ok) {
+        ack(ackFn, result);
+        return;
+      }
+      if (result.changed) {
+        roomService.emitRoomUpdate(room);
+        roomService.emitPlatformUpdate(room);
+        roomService.emitRopeUpdate(room);
+      }
+      ack(ackFn, {
+        ok: true,
+        changed: Boolean(result.changed),
+        settings: result.settings ?? roomService.serializeObjectEditor(room)
+      });
     });
 
     socket.on("disconnecting", () => {
