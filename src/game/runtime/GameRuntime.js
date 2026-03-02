@@ -66,6 +66,7 @@ const DEFAULT_PORTAL_TARGET_URL =
   "http://localhost:5173/?server=http://localhost:3001&name=PLAYER";
 const BOX_FACE_KEYS = ["px", "nx", "py", "ny", "pz", "nz"];
 const NPC_GREETING_SESSION_KEY = "emptines_npc_greeting_seen_v1";
+const CITY_MAIN_AD_BILLBOARD_BASE_ID = "city_ad_board_main";
 
 function resolveRuntimeAssetUrl(relativePath) {
   const normalized = String(relativePath ?? "").trim().replace(/^\/+/, "");
@@ -189,6 +190,7 @@ export class GameRuntime {
     this.surfacePaintState = new Map();
     this.surfacePaintUpdatedAt = new Map();
     this.cityWindowTextureCache = new Map();
+    this.cityAdBillboardTexture = null;
 
     this.jumpPlatforms = [];
     this.jumpPlatformMeshes = [];
@@ -1107,6 +1109,14 @@ export class GameRuntime {
         emissive: 0x30a0b0, emissiveIntensity: 0.38
       }),
     ];
+    const skylineRoofMaterial = new THREE.MeshStandardMaterial({
+      color: 0x515e6d,
+      roughness: 0.76,
+      metalness: 0.16,
+      emissive: 0x1d2732,
+      emissiveIntensity: 0.16
+    });
+    let mainAdTowerAnchor = null;
     // Clone the plaza tower pattern into a larger skyline ring so it reads from mid-distance.
     for (let i = 0; i < towerPositions.length; i += 1) {
       const [x, h, z] = towerPositions[i];
@@ -1115,15 +1125,34 @@ export class GameRuntime {
       const megaHeight = Math.max(30, h * 4.2 + (i % 3) * 4.5);
       const footprint = 8.4 + (i % 2) * 1.8;
 
-      const megaTower = this.createPaintableBoxMesh(
+      const wallMaterial = skylineMats[i % skylineMats.length].clone();
+      const roofMaterial = skylineRoofMaterial.clone();
+      const megaTower = new THREE.Mesh(
         new THREE.BoxGeometry(footprint, megaHeight, footprint),
-        skylineMats[i % 3],
-        `city_mega_${i}`
+        [
+          wallMaterial, // +X
+          wallMaterial, // -X
+          roofMaterial, // +Y
+          roofMaterial, // -Y
+          wallMaterial, // +Z
+          wallMaterial  // -Z
+        ]
       );
       megaTower.position.set(megaX, megaHeight * 0.5, megaZ);
       megaTower.castShadow = false;
       megaTower.receiveShadow = true;
       cityGroup.add(megaTower);
+
+      const centerDistance = Math.hypot(megaX, megaZ);
+      if (!mainAdTowerAnchor || centerDistance < mainAdTowerAnchor.distance) {
+        mainAdTowerAnchor = {
+          x: megaX,
+          z: megaZ,
+          footprint,
+          height: megaHeight,
+          distance: centerDistance
+        };
+      }
 
       const towerCap = new THREE.Mesh(
         new THREE.CylinderGeometry(footprint * 0.26, footprint * 0.32, 1.7, this.mobileEnabled ? 9 : 14),
@@ -1133,6 +1162,77 @@ export class GameRuntime {
       towerCap.castShadow = false;
       towerCap.receiveShadow = true;
       cityGroup.add(towerCap);
+    }
+
+    if (mainAdTowerAnchor) {
+      const toCenter = new THREE.Vector3(-mainAdTowerAnchor.x, 0, -mainAdTowerAnchor.z);
+      if (toCenter.lengthSq() < 0.0001) {
+        toCenter.set(0, 0, 1);
+      } else {
+        toCenter.normalize();
+      }
+
+      const boardGroup = new THREE.Group();
+      const boardWidth = THREE.MathUtils.clamp(mainAdTowerAnchor.footprint * 1.35, 6.2, 8.8);
+      const boardHeight = THREE.MathUtils.clamp(mainAdTowerAnchor.footprint * 0.78, 3.6, 5.2);
+      const boardThickness = 0.18;
+      const frameThickness = 0.32;
+      const boardY = 4.8;
+      const boardOffset = mainAdTowerAnchor.footprint * 0.5 + boardThickness * 0.5 + 0.08;
+
+      boardGroup.position.set(
+        mainAdTowerAnchor.x + toCenter.x * boardOffset,
+        boardY,
+        mainAdTowerAnchor.z + toCenter.z * boardOffset
+      );
+      boardGroup.rotation.y = Math.atan2(toCenter.x, toCenter.z);
+
+      const frameMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(
+          boardWidth + frameThickness * 2,
+          boardHeight + frameThickness * 2,
+          boardThickness + 0.08
+        ),
+        new THREE.MeshStandardMaterial({
+          color: 0x121820,
+          roughness: 0.34,
+          metalness: 0.56,
+          emissive: 0x203247,
+          emissiveIntensity: 0.2
+        })
+      );
+      frameMesh.position.z = -0.02;
+      frameMesh.castShadow = false;
+      frameMesh.receiveShadow = true;
+
+      const screenMesh = this.createPaintableBoxMesh(
+        new THREE.BoxGeometry(boardWidth, boardHeight, boardThickness),
+        this.createCityAdBillboardMaterial(),
+        CITY_MAIN_AD_BILLBOARD_BASE_ID
+      );
+      screenMesh.position.z = 0.03;
+      screenMesh.castShadow = false;
+      screenMesh.receiveShadow = true;
+
+      const glowBorder = new THREE.Mesh(
+        new THREE.BoxGeometry(
+          boardWidth + frameThickness * 1.15,
+          boardHeight + frameThickness * 1.15,
+          0.05
+        ),
+        new THREE.MeshBasicMaterial({
+          color: 0x34d8ff,
+          transparent: true,
+          opacity: 0.42,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending
+        })
+      );
+      glowBorder.position.z = boardThickness * 0.5 + 0.04;
+      glowBorder.renderOrder = 9;
+
+      boardGroup.add(frameMesh, screenMesh, glowBorder);
+      cityGroup.add(boardGroup);
     }
 
     const plazaPaintMat = new THREE.MeshStandardMaterial({
@@ -2678,6 +2778,89 @@ export class GameRuntime {
     });
   }
 
+  getCityAdBillboardTexture() {
+    if (this.cityAdBillboardTexture) {
+      return this.cityAdBillboardTexture;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = 1024;
+    canvas.height = 512;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return null;
+    }
+
+    const gradient = context.createLinearGradient(0, 0, canvas.width, canvas.height);
+    gradient.addColorStop(0, "#061420");
+    gradient.addColorStop(0.42, "#0d2b43");
+    gradient.addColorStop(1, "#1d516f");
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    context.fillStyle = "rgba(58, 193, 255, 0.22)";
+    for (let y = 0; y < canvas.height; y += 8) {
+      context.fillRect(0, y, canvas.width, 3);
+    }
+
+    context.strokeStyle = "rgba(140, 231, 255, 0.28)";
+    context.lineWidth = 2;
+    context.strokeRect(34, 34, canvas.width - 68, canvas.height - 68);
+
+    context.fillStyle = "rgba(36, 227, 153, 0.18)";
+    context.fillRect(72, 84, 380, 96);
+    context.fillRect(72, 304, 300, 64);
+
+    context.fillStyle = "#d8f7ff";
+    context.font = "700 72px sans-serif";
+    context.fillText("EMPTINES", 84, 160);
+    context.font = "700 56px sans-serif";
+    context.fillStyle = "#70ffcb";
+    context.fillText("LIVE SCREEN", 84, 362);
+
+    context.font = "500 34px sans-serif";
+    context.fillStyle = "rgba(225, 248, 255, 0.95)";
+    context.fillText("DRAW YOUR AD", 84, 236);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.generateMipmaps = false;
+    texture.needsUpdate = true;
+    this.cityAdBillboardTexture = texture;
+    return texture;
+  }
+
+  createCityAdBillboardMaterial() {
+    return new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 0.26,
+      metalness: 0.28,
+      emissive: 0x1d4b70,
+      emissiveIntensity: 0.36,
+      map: this.getCityAdBillboardTexture()
+    });
+  }
+
+  isCityMainAdBillboardSurface(surfaceId = "") {
+    const normalized = String(surfaceId ?? "").trim().toLowerCase();
+    return normalized.startsWith(`${CITY_MAIN_AD_BILLBOARD_BASE_ID}:`);
+  }
+
+  getSurfacePainterTitle(surfaceId = "") {
+    const normalized = String(surfaceId ?? "").trim();
+    if (!normalized) {
+      return "표면 그리기";
+    }
+    if (this.isCityMainAdBillboardSurface(normalized)) {
+      return "광고판 그리기 / CITY AD BOARD";
+    }
+    return `표면 그리기 / ${normalized.toUpperCase()}`;
+  }
+
   tryPickupChalk() {
     if (!this.isChalkFeatureEnabled()) return;
     if (this.hasChalk || !this.chalkTableWorldPos) return;
@@ -2869,6 +3052,10 @@ export class GameRuntime {
         distance: intersection.distance
       };
     }
+    const adBoardTarget = this.getCityAdBillboardProximityTarget(this.mobileEnabled ? 16 : 9.4);
+    if (adBoardTarget) {
+      return adBoardTarget;
+    }
     if (this.mobileEnabled) {
       return this.getMobileSurfacePaintTargetByProximity(Math.max(distanceLimit, 16));
     }
@@ -2962,6 +3149,52 @@ export class GameRuntime {
     return bestTarget;
   }
 
+  getCityAdBillboardProximityTarget(maxDistance = 9.4) {
+    if (!this.camera || !this.paintableSurfaceMeshes.length) {
+      return null;
+    }
+
+    const cameraPos = this.camera.position;
+    let bestTarget = null;
+    let bestScore = Number.POSITIVE_INFINITY;
+    for (const mesh of this.paintableSurfaceMeshes) {
+      if (!mesh) {
+        continue;
+      }
+      const baseId = String(mesh.userData?.paintSurfaceBaseId ?? "").trim().toLowerCase();
+      if (baseId !== CITY_MAIN_AD_BILLBOARD_BASE_ID) {
+        continue;
+      }
+
+      mesh.getWorldPosition(this.surfacePaintProbeWorldPosition);
+      const dx = this.surfacePaintProbeWorldPosition.x - cameraPos.x;
+      const dy = this.surfacePaintProbeWorldPosition.y - cameraPos.y;
+      const dz = this.surfacePaintProbeWorldPosition.z - cameraPos.z;
+      const distance = Math.hypot(dx, dy * 0.25, dz);
+      if (!Number.isFinite(distance) || distance > maxDistance) {
+        continue;
+      }
+
+      const faceKey = this.resolveSurfacePaintFaceFromCamera(mesh);
+      if (!faceKey) {
+        continue;
+      }
+      const surfaceId = `${CITY_MAIN_AD_BILLBOARD_BASE_ID}:${faceKey}`;
+      if (!this.paintableSurfaceMap.has(surfaceId)) {
+        continue;
+      }
+
+      const score = distance + Math.abs(dy) * 0.03;
+      if (score >= bestScore) {
+        continue;
+      }
+      bestScore = score;
+      bestTarget = { surfaceId, distance };
+    }
+
+    return bestTarget;
+  }
+
   updateSurfacePaintPrompt(delta = 0) {
     if (!this.isSurfacePaintFeatureEnabled()) {
       this.surfacePaintTarget = null;
@@ -2998,10 +3231,25 @@ export class GameRuntime {
 
     const visible = Boolean(this.surfacePaintTarget);
     this.surfacePaintPromptEl?.classList.toggle("hidden", !visible || this.mobileEnabled);
+    if (this.surfacePaintPromptEl && visible) {
+      const targetSurfaceId = String(this.surfacePaintTarget?.surfaceId ?? "");
+      const promptText = this.isCityMainAdBillboardSurface(targetSurfaceId)
+        ? "<kbd>F</kbd> 광고판 그리기"
+        : "<kbd>F</kbd> 표면 그리기";
+      if (this.surfacePaintPromptEl.innerHTML !== promptText) {
+        this.surfacePaintPromptEl.innerHTML = promptText;
+      }
+    }
     if (this.mobilePaintBtnEl) {
       const showMobilePaintButton = this.mobileEnabled && visible;
       this.mobilePaintBtnEl.classList.toggle("hidden", !showMobilePaintButton);
       this.mobilePaintBtnEl.disabled = !showMobilePaintButton;
+      if (showMobilePaintButton) {
+        const targetSurfaceId = String(this.surfacePaintTarget?.surfaceId ?? "");
+        this.mobilePaintBtnEl.textContent = this.isCityMainAdBillboardSurface(targetSurfaceId)
+          ? "광고판 그리기"
+          : "그리기";
+      }
     }
   }
 
@@ -3189,7 +3437,7 @@ export class GameRuntime {
       this.surfacePainterApplyAllEl.checked = false;
     }
     if (this.surfacePainterTitleEl) {
-      this.surfacePainterTitleEl.textContent = `표면 그리기 / ${normalizedId.toUpperCase()}`;
+      this.surfacePainterTitleEl.textContent = this.getSurfacePainterTitle(normalizedId);
     }
 
     this.keys.clear();
