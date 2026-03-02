@@ -5622,7 +5622,22 @@ export class GameRuntime {
     this.playerPosition.copy(this.bridgeApproachSpawn);
     this.yaw = this.getLookYaw(this.bridgeApproachSpawn, this.bridgeNpcPosition);
     this.pitch = -0.03;
-    this.beginBridgeApproachFlow();
+    this.flowStage = "boot_intro";
+    this.bootIntroPending = true;
+    this.bootIntroVideoPlaying = false;
+    this.flowClock = 0;
+    this.mirrorLookClock = 0;
+    this.bridgeBoundaryDingClock = 0;
+    this.bridgeBoundaryDingTriggered = false;
+    this.portalPhase = "cooldown";
+    this.portalPhaseClock = this.portalCooldownSeconds;
+    this.bridgeNpcPlayApproved = true;
+    this.hideNpcChoiceGate();
+    this.setMirrorGateVisible(false);
+    this.setFlowHeadline("입장 확인", "임시 닉네임을 입력하고 시작하세요.");
+    this.hud.setStatus(this.getStatusText());
+    this.showNicknameGate();
+    this.lastSafePosition.copy(this.playerPosition);
   }
 
   bindHubFlowUiEvents() {
