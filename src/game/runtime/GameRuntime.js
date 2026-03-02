@@ -322,6 +322,9 @@ export class GameRuntime {
       frameCount: 0,
       cooldown: 0
     };
+    this.graphicsPanelOpen = false;
+    this.graphicsQualityStorageKey = "graphicsQuality_v1";
+    this.graphicsQuality = this.loadGraphicsQualityPreference();
 
     this.fpsState = {
       sampleTime: 0,
@@ -414,6 +417,9 @@ export class GameRuntime {
     this.mobilePaintBtnEl = document.getElementById("mobile-paint");
     this.mobileRotateOverlayEl = document.getElementById("mobile-rotate-overlay");
     this.fullscreenToggleBtnEl = document.getElementById("fullscreen-toggle");
+    this.graphicsToggleBtnEl = document.getElementById("graphics-toggle");
+    this.graphicsControlsEl = document.getElementById("graphics-controls");
+    this.graphicsQualitySelectEl = document.getElementById("graphics-quality-select");
     this.playerRosterEl = document.getElementById("player-roster");
     this.playerRosterCountEl = document.getElementById("player-roster-count");
     this.playerRosterListEl = document.getElementById("player-roster-list");
@@ -469,6 +475,10 @@ export class GameRuntime {
     this.nicknameFormEl = document.getElementById("nickname-form");
     this.nicknameInputEl = document.getElementById("nickname-input");
     this.nicknameErrorEl = document.getElementById("nickname-error");
+    this.npcChoiceGateEl = document.getElementById("npc-choice-gate");
+    this.npcChoiceNicknameBtnEl = document.getElementById("npc-choice-nickname");
+    this.npcChoiceGuideBtnEl = document.getElementById("npc-choice-guide");
+    this.npcChoicePlayBtnEl = document.getElementById("npc-choice-play");
     this.introVideoOverlayEl = document.getElementById("intro-video-overlay");
     this.introVideoEl = document.getElementById("intro-video");
     this.portalTransitionEl = document.getElementById("portal-transition");
@@ -549,6 +559,9 @@ export class GameRuntime {
     this.bridgeMirrorPosition = parseVec3(bridgeConfig?.mirrorPosition, [0, 1.72, -76]);
     this.bridgeMirrorLookSeconds = parseSeconds(bridgeConfig?.mirrorLookSeconds, 1.5, 0.4);
     this.mirrorLookClock = 0;
+    this.bridgeNpcPlayApproved = false;
+    this.bridgeNpcPromptCooldownUntil = 0;
+    this.bridgeNpcChoiceCooldownUntil = 0;
     this.bridgeCityEntry = parseVec3(
       bridgeConfig?.cityEntry,
       [0, GAME_CONSTANTS.PLAYER_HEIGHT, -18]
@@ -677,6 +690,7 @@ export class GameRuntime {
     this.updateFullscreenToggleState();
     this.setupToolState();
     this.setChatOpen(false);
+    this.syncGraphicsControlsUi();
 
     this.setupWorld();
     this.setupHubFlowWorld();
@@ -1437,7 +1451,8 @@ export class GameRuntime {
       facingDirection,
       surfaceBaseId = "",
       sharedScreenMaterials = null,
-      glowOpacity = 0.2
+      glowOpacity = 0.2,
+      parentGroup = cityGroup
     }) => {
       const boardGroup = new THREE.Group();
       boardGroup.position.copy(position);
@@ -1505,10 +1520,17 @@ export class GameRuntime {
       glowPlane.renderOrder = 10;
 
       boardGroup.add(frameMesh, screenMesh, glowPlane);
-      cityGroup.add(boardGroup);
+      parentGroup.add(boardGroup);
       return { boardGroup, screenMesh };
     };
-    const createFloatingTowerBillboard = (towerIndex, towerX, towerZ, footprint, towerHeight) => {
+    const createFloatingTowerBillboard = (
+      towerIndex,
+      towerX,
+      towerZ,
+      footprint,
+      towerHeight,
+      parentGroup = cityGroup
+    ) => {
       const toCenter = new THREE.Vector3(-towerX, 0, -towerZ);
       if (toCenter.lengthSq() < 0.0001) {
         toCenter.set(0, 0, 1);
@@ -1546,7 +1568,8 @@ export class GameRuntime {
         ),
         facingDirection: toBridge,
         surfaceBaseId,
-        glowOpacity: 0.26
+        glowOpacity: 0.26,
+        parentGroup
       });
 
       const upperBoardWidth = THREE.MathUtils.clamp(footprint * 1.2, 6.2, 9.2);
@@ -1566,7 +1589,8 @@ export class GameRuntime {
         ),
         facingDirection: toCenter,
         sharedScreenMaterials: lowerBoard.screenMesh.material,
-        glowOpacity: 0.2
+        glowOpacity: 0.2,
+        parentGroup
       });
       upperBoard.boardGroup.rotation.x = -0.12;
     };
@@ -1610,6 +1634,8 @@ export class GameRuntime {
       const wallMaterial = skylineMats[i % skylineMats.length].clone();
       const roofMaterial = skylineRoofMaterial.clone();
       const podiumMaterial = wallMaterial.clone();
+      const megaTowerGroup = new THREE.Group();
+      megaTowerGroup.name = `city_mega_tower_${i}`;
 
       const podium = new THREE.Mesh(
         new THREE.BoxGeometry(footprint * 1.22, podiumHeight, footprint * 1.2),
@@ -1625,8 +1651,8 @@ export class GameRuntime {
       podium.position.set(placedMegaX, podiumHeight * 0.5, placedMegaZ);
       podium.castShadow = false;
       podium.receiveShadow = true;
-      cityGroup.add(podium);
-      registerCityBuildingCollider(
+      megaTowerGroup.add(podium);
+      const megaColliderIndex = registerCityBuildingCollider(
         placedMegaX,
         placedMegaZ,
         footprint * 1.24,
@@ -1649,7 +1675,7 @@ export class GameRuntime {
       megaTower.position.set(placedMegaX, podiumHeight + shaftHeight * 0.5, placedMegaZ);
       megaTower.castShadow = false;
       megaTower.receiveShadow = true;
-      cityGroup.add(megaTower);
+      megaTowerGroup.add(megaTower);
 
       const upperShaft = new THREE.Mesh(
         new THREE.BoxGeometry(footprint * 0.76, crownHeight, footprint * 0.72),
@@ -1665,7 +1691,7 @@ export class GameRuntime {
       upperShaft.position.set(placedMegaX, podiumHeight + shaftHeight + crownHeight * 0.5 + 0.12, placedMegaZ);
       upperShaft.castShadow = false;
       upperShaft.receiveShadow = true;
-      cityGroup.add(upperShaft);
+      megaTowerGroup.add(upperShaft);
 
       const towerCap = new THREE.Mesh(
         new THREE.CylinderGeometry(
@@ -1679,7 +1705,7 @@ export class GameRuntime {
       towerCap.position.set(placedMegaX, totalTowerHeight + 0.86, placedMegaZ);
       towerCap.castShadow = false;
       towerCap.receiveShadow = true;
-      cityGroup.add(towerCap);
+      megaTowerGroup.add(towerCap);
 
       const edgeStripMaterial = new THREE.MeshBasicMaterial({
         color: i % 2 === 0 ? 0x6fe8ff : 0x79ffca,
@@ -1706,11 +1732,20 @@ export class GameRuntime {
           );
           edgeStrip.position.set(placedMegaX + sx * edgeOffsetX, edgeY, placedMegaZ + sz * edgeOffsetZ);
           edgeStrip.renderOrder = 6;
-          cityGroup.add(edgeStrip);
+          megaTowerGroup.add(edgeStrip);
         }
       }
 
-      createFloatingTowerBillboard(i, placedMegaX, placedMegaZ, footprint, totalTowerHeight);
+      createFloatingTowerBillboard(
+        i,
+        placedMegaX,
+        placedMegaZ,
+        footprint,
+        totalTowerHeight,
+        megaTowerGroup
+      );
+      cityGroup.add(megaTowerGroup);
+      this.registerMovableObject(megaTowerGroup, `city_mega_tower_${i}`, megaColliderIndex);
     }
 
     const plazaPaintMat = new THREE.MeshStandardMaterial({
@@ -5546,6 +5581,8 @@ export class GameRuntime {
       this.flowStage = "city_live";
       this.hubFlowUiEl?.classList.add("hidden");
       this.hideNicknameGate();
+      this.hideNpcChoiceGate();
+      this.bridgeNpcPlayApproved = true;
       this.lastSafePosition.copy(this.playerPosition);
       this.ensureEntryMusicPlayback();
       return;
@@ -5566,37 +5603,23 @@ export class GameRuntime {
       this.pendingPlayerNameSync = true;
       this.pendingAuthoritativeStateSync = true;
       this.flowStage = "city_live";
+      this.bridgeNpcPlayApproved = true;
       this.playerPosition.copy(this.citySpawn);
       this.yaw = this.getLookYaw(this.citySpawn, this.portalFloorPosition);
       this.pitch = -0.02;
       this.hubFlowUiEl?.classList.add("hidden");
       this.hideNicknameGate();
+      this.hideNpcChoiceGate();
       this.setMirrorGateVisible(false);
       this.lastSafePosition.copy(this.playerPosition);
       this.ensureEntryMusicPlayback();
       return;
     }
 
-    this.flowStage = "boot_intro";
-    this.bootIntroPending = true;
-    this.bootIntroVideoPlaying = false;
-    this.flowClock = 0;
-    this.mirrorLookClock = 0;
-    this.bridgeBoundaryDingClock = 0;
-    this.bridgeBoundaryDingTriggered = false;
-    this.portalPhase = "cooldown";
-    this.portalPhaseClock = this.portalCooldownSeconds;
     this.playerPosition.copy(this.bridgeApproachSpawn);
     this.yaw = this.getLookYaw(this.bridgeApproachSpawn, this.bridgeNpcPosition);
     this.pitch = -0.03;
-    this.setFlowHeadline(
-      "입장 확인",
-      "임시 닉네임을 입력하고 시작하세요."
-    );
-    this.hud.setStatus(this.getStatusText());
-    this.showNicknameGate();
-    this.setMirrorGateVisible(false);
-    this.lastSafePosition.copy(this.playerPosition);
+    this.beginBridgeApproachFlow();
   }
 
   bindHubFlowUiEvents() {
@@ -5609,13 +5632,89 @@ export class GameRuntime {
       event.preventDefault();
       this.confirmBridgeName();
     });
+    this.npcChoiceNicknameBtnEl?.addEventListener("click", () => {
+      this.openNpcNicknameGate();
+    });
+    this.npcChoiceGuideBtnEl?.addEventListener("click", () => {
+      this.handleNpcCityGuideChoice();
+    });
+    this.npcChoicePlayBtnEl?.addEventListener("click", () => {
+      this.handleNpcPlayChoice();
+    });
+  }
+
+  isNpcChoiceGateOpen() {
+    return Boolean(this.npcChoiceGateEl && !this.npcChoiceGateEl.classList.contains("hidden"));
+  }
+
+  showNpcChoiceGate() {
+    if (!this.hubFlowEnabled || this.flowStage !== "bridge_approach" || this.bridgeNpcPlayApproved) {
+      return;
+    }
+    if (performance.now() < this.bridgeNpcChoiceCooldownUntil) {
+      return;
+    }
+    if (!this.npcChoiceGateEl) {
+      return;
+    }
+    if (!(this.nicknameGateEl?.classList.contains("hidden") ?? true)) {
+      return;
+    }
+    this.npcChoiceGateEl.classList.remove("hidden");
+    if (document.pointerLockElement === this.renderer.domElement) {
+      document.exitPointerLock?.();
+    }
+    this.syncMobileUiState();
+  }
+
+  hideNpcChoiceGate() {
+    if (!this.npcChoiceGateEl) {
+      return;
+    }
+    this.npcChoiceGateEl.classList.add("hidden");
+    this.syncMobileUiState();
+  }
+
+  openNpcNicknameGate() {
+    if (!this.hubFlowEnabled || this.flowStage !== "bridge_approach") {
+      return;
+    }
+    this.hideNpcChoiceGate();
+    this.setFlowHeadline("입장 확인", "임시 닉네임을 입력하세요.");
+    this.showNicknameGate();
+    this.hud.setStatus(this.getStatusText());
+  }
+
+  handleNpcCityGuideChoice() {
+    if (!this.hubFlowEnabled || this.flowStage !== "bridge_approach") {
+      return;
+    }
+    this.bridgeNpcChoiceCooldownUntil = performance.now() + 1400;
+    this.hideNpcChoiceGate();
+    this.playNpcGreeting();
+    this.appendChatLine("NPC", "도시 안에서는 자유 이동, 광고판 그리기, 포탈 이동을 할 수 있습니다.", "system");
+    this.appendChatLine("NPC", "신사문은 언제든 바로 통과 가능합니다.", "system");
+    this.setChatOpen(true);
+  }
+
+  handleNpcPlayChoice() {
+    if (!this.hubFlowEnabled || this.flowStage !== "bridge_approach") {
+      return;
+    }
+    this.hideNpcChoiceGate();
+    this.appendChatLine("NPC", "나중에 놀아줄게. 지금은 신사문으로 바로 입장해도 돼.", "system");
+    this.setChatOpen(true);
   }
 
   showNicknameGate() {
     if (!this.nicknameGateEl) {
       return;
     }
+    this.hideNpcChoiceGate();
     this.nicknameGateEl.classList.remove("hidden");
+    if (document.pointerLockElement === this.renderer.domElement) {
+      document.exitPointerLock?.();
+    }
     this.setNicknameError("");
     if (this.nicknameInputEl) {
       const nextName = /^PLAYER(?:_\d+)?$/i.test(this.localPlayerName) ? "" : this.localPlayerName;
@@ -5746,12 +5845,17 @@ export class GameRuntime {
     this.bootIntroPending = false;
     this.bootIntroVideoPlaying = false;
     this.flowStage = "bridge_approach";
+    this.bridgeNpcPlayApproved = true;
+    this.bridgeNpcPromptCooldownUntil = 0;
+    this.bridgeNpcChoiceCooldownUntil = 0;
     this.flowClock = 0;
     this.keys.clear();
     this.chalkDrawingActive = false;
     this.chalkLastStamp = null;
     this.hideNicknameGate();
+    this.hideNpcChoiceGate();
     this.setMirrorGateVisible(false);
+    this.setFlowHeadline("입장 대기", "신사문은 언제든 통과 가능합니다.");
     this.lastSafePosition.copy(this.playerPosition);
     this.pendingAuthoritativeStateSync = true;
     this.requestAuthoritativeStateSync();
@@ -5824,7 +5928,9 @@ export class GameRuntime {
       return;
     }
 
-    if (!this.hubFlowEnabled || this.flowStage !== "bridge_name") {
+    const canConfirmInBridgeFlow =
+      this.flowStage === "bridge_name" || this.flowStage === "bridge_approach";
+    if (!this.hubFlowEnabled || !canConfirmInBridgeFlow) {
       return;
     }
 
@@ -5841,6 +5947,13 @@ export class GameRuntime {
     try { localStorage.setItem("emptines_nickname", nextName); } catch (_) {}
 
     this.hideNicknameGate();
+    if (this.flowStage === "bridge_approach") {
+      this.appendChatLine("NPC", `임시 닉네임을 ${nextName}(으)로 설정했어요.`, "system");
+      this.hud.setStatus(this.getStatusText());
+      this.syncGameplayUiForFlow();
+      return;
+    }
+
     this.flowStage = "bridge_mirror";
     this.mirrorLookClock = 0;
     this.flowClock = 0;
@@ -5864,8 +5977,6 @@ export class GameRuntime {
     this.chatUiEl?.classList.toggle("hidden", !chatEnabled);
     if (!chatEnabled) {
       this.setChatOpen(false);
-    } else if (!gameplayEnabled && this.canMovePlayer() && !this.chatOpen) {
-      this.setChatOpen(true);
     }
     if (!gameplayEnabled) {
       this.closeSurfacePainter();
@@ -5945,7 +6056,8 @@ export class GameRuntime {
       !this.surfacePainterOpen &&
       !this.bootIntroVideoPlaying &&
       this.flowStage !== "portal_transfer" &&
-      (this.nicknameGateEl?.classList.contains("hidden") ?? true);
+      (this.nicknameGateEl?.classList.contains("hidden") ?? true) &&
+      (this.npcChoiceGateEl?.classList.contains("hidden") ?? true);
     this.mobileUiEl.classList.toggle("hidden", !visible);
     if (this.mobilePaintBtnEl) {
       const paintEnabled = this.isSurfacePaintFeatureEnabled();
@@ -6391,6 +6503,12 @@ export class GameRuntime {
     if (this.surfacePainterOpen) {
       return false;
     }
+    if (!(this.nicknameGateEl?.classList.contains("hidden") ?? true)) {
+      return false;
+    }
+    if (!(this.npcChoiceGateEl?.classList.contains("hidden") ?? true)) {
+      return false;
+    }
     if (!this.hubFlowEnabled) {
       return true;
     }
@@ -6420,8 +6538,19 @@ export class GameRuntime {
     if (this.surfacePainterOpen) {
       return false;
     }
+    return this.hasHostPrivilege();
+  }
+
+  hasHostPrivilege() {
     const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
     return this.isRoomHost || localHostMode;
+  }
+
+  canUseObjectEditor() {
+    if (!this.hasHostPrivilege()) {
+      return false;
+    }
+    return this.canUseGameplayControls();
   }
 
   canUseChatControls() {
@@ -6586,6 +6715,7 @@ export class GameRuntime {
         this.bridgeBoundaryDingTriggered = false;
         this.bridgeBoundaryDingClock = 0;
         this.keys.clear();
+        this.hideNpcChoiceGate();
         this.setMirrorGateVisible(false);
         this.lastSafePosition.copy(this.playerPosition);
         this.setFlowHeadline("도시 라이브", "자유 이동");
@@ -7136,15 +7266,16 @@ export class GameRuntime {
     this.pendingPlayerNameSync = false;
   }
 
-  requestAuthoritativeStateSync() {
+  requestAuthoritativeStateSync(options = null) {
     if (!this.socket || !this.networkConnected || !this.localPlayerId) {
       return false;
     }
     if (this.authoritativeStateSyncInFlight) {
       return false;
     }
+    const minIntervalMs = Math.max(80, Number(options?.minIntervalMs) || 800);
     const now = performance.now();
-    if (now - this.lastAuthoritativeStateSyncAt < 800) {
+    if (now - this.lastAuthoritativeStateSyncAt < minIntervalMs) {
       return false;
     }
     this.lastAuthoritativeStateSyncAt = now;
@@ -8767,6 +8898,18 @@ export class GameRuntime {
         this.toggleFullscreenFromInteraction();
       });
     }
+    if (this.graphicsToggleBtnEl) {
+      this.graphicsToggleBtnEl.addEventListener("click", (event) => {
+        event.preventDefault();
+        this.graphicsPanelOpen = !this.graphicsPanelOpen;
+        this.syncGraphicsControlsUi();
+      });
+    }
+    if (this.graphicsQualitySelectEl) {
+      this.graphicsQualitySelectEl.addEventListener("change", () => {
+        this.setGraphicsQuality(this.graphicsQualitySelectEl.value, { persist: true });
+      });
+    }
 
     window.addEventListener("keydown", (event) => {
       if (this.isTextInputTarget(event.target)) {
@@ -8805,7 +8948,7 @@ export class GameRuntime {
         return;
       }
 
-      if (this.objEditorActive && this.flyModeActive) {
+      if (this.objEditorActive && this.flyModeActive && this.canUseObjectEditor()) {
         if (event.code === "KeyE") {
           event.preventDefault();
           this.adjustSelectedObjEditorHeight(0.25);
@@ -8916,10 +9059,33 @@ export class GameRuntime {
     });
     // Catch clicks on HUD elements that sit above the canvas
     document.addEventListener("click", (event) => {
-      if (this.isTextInputTarget(event.target)) {
+      const target = event.target;
+      const clickedGraphicsToggle = Boolean(
+        target &&
+          this.graphicsToggleBtnEl &&
+          typeof this.graphicsToggleBtnEl.contains === "function" &&
+          this.graphicsToggleBtnEl.contains(target)
+      );
+      const clickedGraphicsPanel = Boolean(
+        target &&
+          this.graphicsControlsEl &&
+          typeof this.graphicsControlsEl.contains === "function" &&
+          this.graphicsControlsEl.contains(target)
+      );
+
+      if (this.graphicsPanelOpen && !clickedGraphicsToggle && !clickedGraphicsPanel) {
+        this.graphicsPanelOpen = false;
+        this.syncGraphicsControlsUi();
+      }
+
+      if (clickedGraphicsToggle || clickedGraphicsPanel) {
         return;
       }
-      if (event.target === this.renderer.domElement) return;
+
+      if (this.isTextInputTarget(target)) {
+        return;
+      }
+      if (target === this.renderer.domElement) return;
       if (this.canDrawChalk()) return;
       if (this.chatOpen || this.nicknameGateEl?.classList.contains("hidden") === false) return;
       this.tryPointerLock();
@@ -8928,7 +9094,13 @@ export class GameRuntime {
       this.hud.setStatus(this.getStatusText());
     });
     this.renderer.domElement.addEventListener("mousedown", (event) => {
-      if (event.button === 0 && this.flyModeActive && this.editorMode === "obj" && this.objEditorActive) {
+      if (
+        event.button === 0 &&
+        this.flyModeActive &&
+        this.editorMode === "obj" &&
+        this.objEditorActive &&
+        this.canUseObjectEditor()
+      ) {
         event.preventDefault();
         this.beginObjEditorDrag(event.clientX, event.clientY);
         return;
@@ -8967,7 +9139,7 @@ export class GameRuntime {
     });
     this.renderer.domElement.addEventListener("wheel", (event) => {
       if (!this.flyModeActive) return;
-      if (this.editorMode === "obj" && this.objEditorActive) {
+      if (this.editorMode === "obj" && this.objEditorActive && this.canUseObjectEditor()) {
         event.preventDefault();
         this.platformEditorDist = Math.max(2, Math.min(18, this.platformEditorDist - event.deltaY * 0.005));
         return;
@@ -9584,6 +9756,18 @@ export class GameRuntime {
     if (!this.nicknameErrorEl) {
       this.nicknameErrorEl = document.getElementById("nickname-error");
     }
+    if (!this.npcChoiceGateEl) {
+      this.npcChoiceGateEl = document.getElementById("npc-choice-gate");
+    }
+    if (!this.npcChoiceNicknameBtnEl) {
+      this.npcChoiceNicknameBtnEl = document.getElementById("npc-choice-nickname");
+    }
+    if (!this.npcChoiceGuideBtnEl) {
+      this.npcChoiceGuideBtnEl = document.getElementById("npc-choice-guide");
+    }
+    if (!this.npcChoicePlayBtnEl) {
+      this.npcChoicePlayBtnEl = document.getElementById("npc-choice-play");
+    }
     if (!this.introVideoOverlayEl) {
       this.introVideoOverlayEl = document.getElementById("intro-video-overlay");
     }
@@ -9703,6 +9887,15 @@ export class GameRuntime {
     }
     if (!this.fullscreenToggleBtnEl) {
       this.fullscreenToggleBtnEl = document.getElementById("fullscreen-toggle");
+    }
+    if (!this.graphicsToggleBtnEl) {
+      this.graphicsToggleBtnEl = document.getElementById("graphics-toggle");
+    }
+    if (!this.graphicsControlsEl) {
+      this.graphicsControlsEl = document.getElementById("graphics-controls");
+    }
+    if (!this.graphicsQualitySelectEl) {
+      this.graphicsQualitySelectEl = document.getElementById("graphics-quality-select");
     }
     if (!this.hostControlsEl) {
       this.hostControlsEl = document.getElementById("host-controls");
@@ -9888,6 +10081,127 @@ export class GameRuntime {
       this.chalkLastStamp = null;
     }
     this.syncMobileUiState();
+  }
+
+  normalizeGraphicsQuality(rawQuality) {
+    const quality = String(rawQuality ?? "").trim().toLowerCase();
+    if (quality === "low" || quality === "high") {
+      return quality;
+    }
+    return "medium";
+  }
+
+  loadGraphicsQualityPreference() {
+    try {
+      const saved = localStorage.getItem(this.graphicsQualityStorageKey);
+      return this.normalizeGraphicsQuality(saved);
+    } catch {
+      return "medium";
+    }
+  }
+
+  saveGraphicsQualityPreference() {
+    try {
+      localStorage.setItem(this.graphicsQualityStorageKey, this.graphicsQuality);
+    } catch {
+      // ignore
+    }
+  }
+
+  applyGraphicsQualityOverrides() {
+    const quality = this.normalizeGraphicsQuality(this.graphicsQuality);
+    this.graphicsQuality = quality;
+
+    const devicePixelRatio = window.devicePixelRatio || 1;
+    let maxRatioCap = this.getDevicePixelRatioCap();
+    let dynamicEnabled = Boolean(this.dynamicResolution.enabled);
+    let minRatio = Number(this.dynamicResolution.minRatio) || GAME_CONSTANTS.DYNAMIC_RESOLUTION.desktopMinRatio;
+
+    if (quality === "low") {
+      dynamicEnabled = true;
+      minRatio = this.mobileEnabled ? 0.5 : 0.62;
+      maxRatioCap = this.mobileEnabled ? 0.95 : 1.0;
+    } else if (quality === "medium") {
+      dynamicEnabled = this.mobileEnabled;
+      minRatio = this.mobileEnabled
+        ? Math.max(minRatio, this.isLowSpecMobile ? 0.52 : 0.68)
+        : GAME_CONSTANTS.DYNAMIC_RESOLUTION.desktopMinRatio;
+      maxRatioCap = this.getDevicePixelRatioCap();
+    } else {
+      dynamicEnabled = false;
+      minRatio = this.mobileEnabled ? 0.86 : GAME_CONSTANTS.DYNAMIC_RESOLUTION.desktopMinRatio;
+      maxRatioCap = this.mobileEnabled ? 1.7 : 1.9;
+    }
+
+    this.dynamicResolution.enabled = dynamicEnabled;
+    this.dynamicResolution.minRatio = THREE.MathUtils.clamp(minRatio, 0.45, 1);
+
+    this.maxPixelRatio = Math.min(devicePixelRatio, Math.max(0.7, maxRatioCap));
+    const minPixelRatio = Math.max(
+      0.45,
+      Math.min(this.dynamicResolution.minRatio, this.maxPixelRatio)
+    );
+
+    let nextPixelRatio = this.currentPixelRatio;
+    if (quality === "high") {
+      nextPixelRatio = this.maxPixelRatio;
+    } else if (quality === "low") {
+      nextPixelRatio = minPixelRatio;
+    }
+    nextPixelRatio = THREE.MathUtils.clamp(nextPixelRatio, minPixelRatio, this.maxPixelRatio);
+
+    if (Math.abs(nextPixelRatio - this.currentPixelRatio) < 0.01) {
+      this.syncGraphicsControlsUi();
+      return;
+    }
+
+    this.currentPixelRatio = Number(nextPixelRatio.toFixed(2));
+    this.renderer.setPixelRatio(this.currentPixelRatio);
+    this.renderer.setSize(window.innerWidth, window.innerHeight, false);
+    if (this.composer) {
+      this.composer.setPixelRatio(this.currentPixelRatio);
+      this.composer.setSize(window.innerWidth, window.innerHeight);
+    }
+    this.syncGraphicsControlsUi();
+  }
+
+  setGraphicsQuality(rawQuality, { persist = true } = {}) {
+    const nextQuality = this.normalizeGraphicsQuality(rawQuality);
+    this.graphicsQuality = nextQuality;
+    if (persist) {
+      this.saveGraphicsQualityPreference();
+    }
+    this.applyDeviceRuntimeProfile();
+    this.syncGraphicsControlsUi();
+  }
+
+  syncGraphicsControlsUi() {
+    const quality = this.normalizeGraphicsQuality(this.graphicsQuality);
+    this.graphicsQuality = quality;
+    const labelMap = {
+      high: "최대",
+      medium: "기본",
+      low: "최하"
+    };
+    const buttonLabel = `그래픽: ${labelMap[quality] ?? "기본"}`;
+    const blocked = this.isMobilePortraitBlocked();
+    if (blocked && this.graphicsPanelOpen) {
+      this.graphicsPanelOpen = false;
+    }
+
+    if (this.graphicsToggleBtnEl) {
+      this.graphicsToggleBtnEl.textContent = buttonLabel;
+      this.graphicsToggleBtnEl.classList.toggle("hidden", blocked);
+      this.graphicsToggleBtnEl.setAttribute("aria-pressed", this.graphicsPanelOpen ? "true" : "false");
+    }
+    if (this.graphicsQualitySelectEl) {
+      if (this.graphicsQualitySelectEl.value !== quality) {
+        this.graphicsQualitySelectEl.value = quality;
+      }
+    }
+    if (this.graphicsControlsEl) {
+      this.graphicsControlsEl.classList.toggle("hidden", blocked || !this.graphicsPanelOpen);
+    }
   }
 
   setActiveTool(tool) {
@@ -11497,6 +11811,12 @@ export class GameRuntime {
     }
 
     this.emitInputCommand(delta);
+    const airborne = this.playerPosition.y > GAME_CONSTANTS.PLAYER_HEIGHT + 0.08;
+    if (this.flyModeActive || this.climbingRope || airborne) {
+      this.requestAuthoritativeStateSync({
+        minIntervalMs: this.flyModeActive ? 120 : 180
+      });
+    }
   }
 
   emitInputCommand(delta) {
@@ -11787,24 +12107,7 @@ export class GameRuntime {
       this.dynamicResolution.cooldown = 0;
     }
 
-    const devicePixelRatio = window.devicePixelRatio || 1;
-    this.maxPixelRatio = Math.min(devicePixelRatio, this.getDevicePixelRatioCap());
-    const minPixelRatio = Math.max(
-      0.45,
-      Math.min(this.dynamicResolution.minRatio, this.maxPixelRatio)
-    );
-    const nextPixelRatio = THREE.MathUtils.clamp(
-      this.currentPixelRatio,
-      minPixelRatio,
-      this.maxPixelRatio
-    );
-    if (Math.abs(nextPixelRatio - this.currentPixelRatio) >= 0.01) {
-      this.currentPixelRatio = Number(nextPixelRatio.toFixed(2));
-      this.renderer.setPixelRatio(this.currentPixelRatio);
-      if (this.composer) {
-        this.composer.setPixelRatio(this.currentPixelRatio);
-      }
-    }
+    this.applyGraphicsQualityOverrides();
   }
 
   applyQualityProfile() {
@@ -11858,6 +12161,7 @@ export class GameRuntime {
       this.composer.setSize(window.innerWidth, window.innerHeight);
     }
     this.updateFullscreenToggleState();
+    this.syncGraphicsControlsUi();
     this.syncMobileUiState();
   }
 
@@ -11877,6 +12181,7 @@ export class GameRuntime {
       id: normalizedId,
       mesh,
       colliderIndex: normalizedColliderIndex,
+      _savedHighlightMaterials: null,
       _savedEmissive: null,
       _savedEmissiveIntensity: null
     };
@@ -11910,10 +12215,32 @@ export class GameRuntime {
   }
 
   updateObjEditorMouseFromClient(clientX, clientY) {
+    const canvasRect = this.renderer?.domElement?.getBoundingClientRect?.();
+    if (canvasRect && canvasRect.width > 0 && canvasRect.height > 0) {
+      this.objEditorMouseNdc.x = ((clientX - canvasRect.left) / canvasRect.width) * 2 - 1;
+      this.objEditorMouseNdc.y = -((clientY - canvasRect.top) / canvasRect.height) * 2 + 1;
+      return;
+    }
+
     const width = Math.max(1, Number(window.innerWidth) || 1);
     const height = Math.max(1, Number(window.innerHeight) || 1);
     this.objEditorMouseNdc.x = (clientX / width) * 2 - 1;
     this.objEditorMouseNdc.y = -(clientY / height) * 2 + 1;
+  }
+
+  findMovableEntryForObject(object) {
+    if (!object || !this.movableObjects.length) {
+      return null;
+    }
+    let current = object;
+    while (current) {
+      const entry = this.movableObjects.find((candidate) => candidate?.mesh === current) ?? null;
+      if (entry) {
+        return entry;
+      }
+      current = current.parent ?? null;
+    }
+    return null;
   }
 
   pickMovableObjectAtClient(clientX, clientY) {
@@ -11932,18 +12259,51 @@ export class GameRuntime {
 
     this.updateObjEditorMouseFromClient(clientX, clientY);
     this.objEditorRaycaster.setFromCamera(this.objEditorMouseNdc, this.camera);
-    const intersections = this.objEditorRaycaster.intersectObjects(meshes, false);
+    const intersections = this.objEditorRaycaster.intersectObjects(meshes, true);
     if (!intersections.length) {
       return null;
     }
     for (const intersection of intersections) {
       const hitMesh = intersection?.object;
-      const entry = this.movableObjects.find((candidate) => candidate?.mesh === hitMesh) ?? null;
+      const entry = this.findMovableEntryForObject(hitMesh);
       if (entry) {
         return { entry, intersection };
       }
     }
     return null;
+  }
+
+  collectObjEditorHighlightTargets(root) {
+    if (!root) {
+      return [];
+    }
+    const targets = [];
+    const seen = new Set();
+    const collectFromObject = (object) => {
+      const materials = Array.isArray(object?.material) ? object.material : [object?.material];
+      for (const material of materials) {
+        if (!material || seen.has(material)) {
+          continue;
+        }
+        seen.add(material);
+        if (material?.emissive && typeof material.emissive.clone === "function") {
+          targets.push({
+            material,
+            savedEmissive: material.emissive.clone(),
+            savedIntensity: Number(material.emissiveIntensity) || 0
+          });
+        }
+      }
+    };
+
+    if (typeof root.traverse === "function") {
+      root.traverse((object) => {
+        collectFromObject(object);
+      });
+    } else {
+      collectFromObject(root);
+    }
+    return targets;
   }
 
   selectObjEditorEntry(entry) {
@@ -11957,19 +12317,14 @@ export class GameRuntime {
     }
     this.clearObjEditorSelection();
 
-    const materials = Array.isArray(entry.mesh.material) ? entry.mesh.material : [entry.mesh.material];
-    entry._savedEmissive = [];
-    entry._savedEmissiveIntensity = [];
-    for (const material of materials) {
-      if (material?.emissive && typeof material.emissive.setHex === "function") {
-        entry._savedEmissive.push(material.emissive.clone());
-        entry._savedEmissiveIntensity.push(Number(material.emissiveIntensity) || 0);
-        material.emissive.setHex(0x00aaff);
-        material.emissiveIntensity = 0.55;
-      } else {
-        entry._savedEmissive.push(null);
-        entry._savedEmissiveIntensity.push(0);
+    entry._savedHighlightMaterials = this.collectObjEditorHighlightTargets(entry.mesh);
+    for (const target of entry._savedHighlightMaterials) {
+      const material = target.material;
+      if (!material?.emissive || typeof material.emissive.setHex !== "function") {
+        continue;
       }
+      material.emissive.setHex(0x00aaff);
+      material.emissiveIntensity = Math.max(0.55, Number(material.emissiveIntensity) || 0);
     }
 
     this.objEditorSelected = entry;
@@ -11984,16 +12339,18 @@ export class GameRuntime {
       return;
     }
 
-    const materials = Array.isArray(entry.mesh.material) ? entry.mesh.material : [entry.mesh.material];
-    for (let index = 0; index < materials.length; index += 1) {
-      const material = materials[index];
-      const savedEmissive = entry?._savedEmissive?.[index] ?? null;
-      const savedIntensity = entry?._savedEmissiveIntensity?.[index] ?? 0;
-      if (material?.emissive && typeof material.emissive.copy === "function" && savedEmissive) {
-        material.emissive.copy(savedEmissive);
-        material.emissiveIntensity = Number(savedIntensity) || 0;
+    const savedTargets = Array.isArray(entry?._savedHighlightMaterials)
+      ? entry._savedHighlightMaterials
+      : [];
+    for (const target of savedTargets) {
+      const material = target?.material;
+      if (!material?.emissive || typeof material.emissive.copy !== "function") {
+        continue;
       }
+      material.emissive.copy(target.savedEmissive);
+      material.emissiveIntensity = Number(target.savedIntensity) || 0;
     }
+    entry._savedHighlightMaterials = null;
     entry._savedEmissive = null;
     entry._savedEmissiveIntensity = null;
     this.objEditorSelected = null;
@@ -12005,7 +12362,7 @@ export class GameRuntime {
       return;
     }
     if (!entry?.mesh) {
-      this.objEditorInfoEl.textContent = "선택 없음";
+      this.objEditorInfoEl.textContent = `선택 없음 · 등록 ${this.movableObjects.length}개`;
       return;
     }
     const pos = entry.mesh.position;
@@ -12014,7 +12371,7 @@ export class GameRuntime {
   }
 
   beginObjEditorDrag(clientX, clientY) {
-    if (!this.objEditorActive || !this.flyModeActive) {
+    if (!this.objEditorActive || !this.flyModeActive || !this.canUseObjectEditor()) {
       return false;
     }
     const picked = this.pickMovableObjectAtClient(clientX, clientY);
@@ -12029,10 +12386,14 @@ export class GameRuntime {
     entry.mesh.getWorldPosition(this.objEditorDragTargetWorld);
     this.objEditorDragPlane.constant = -this.objEditorDragTargetWorld.y;
 
-    const hitPoint = this.objEditorRaycaster.ray.intersectPlane(
+    let hitPoint = this.objEditorRaycaster.ray.intersectPlane(
       this.objEditorDragPlane,
       this.objEditorDragHitPoint
     );
+    if (!hitPoint && intersection?.point) {
+      this.objEditorDragHitPoint.copy(intersection.point);
+      hitPoint = this.objEditorDragHitPoint;
+    }
     if (!hitPoint) {
       return false;
     }
@@ -12043,17 +12404,29 @@ export class GameRuntime {
   }
 
   updateObjEditorDrag(clientX, clientY) {
-    if (!this.objEditorActive || !this.objEditorDragging || !this.objEditorSelected?.mesh) {
+    if (
+      !this.objEditorActive ||
+      !this.objEditorDragging ||
+      !this.objEditorSelected?.mesh ||
+      !this.canUseObjectEditor()
+    ) {
       return false;
     }
     this.updateObjEditorMouseFromClient(clientX, clientY);
     this.objEditorRaycaster.setFromCamera(this.objEditorMouseNdc, this.camera);
-    const hitPoint = this.objEditorRaycaster.ray.intersectPlane(
+    let hitPoint = this.objEditorRaycaster.ray.intersectPlane(
       this.objEditorDragPlane,
       this.objEditorDragHitPoint
     );
     if (!hitPoint) {
-      return false;
+      const ray = this.objEditorRaycaster.ray;
+      const fallbackDistance = Math.max(0.001, ray.origin.distanceTo(this.objEditorDragTargetWorld));
+      this.objEditorDragHitPoint
+        .copy(ray.direction)
+        .multiplyScalar(fallbackDistance)
+        .add(ray.origin);
+      this.objEditorDragHitPoint.y = -this.objEditorDragPlane.constant;
+      hitPoint = this.objEditorDragHitPoint;
     }
 
     const entry = this.objEditorSelected;
@@ -12074,7 +12447,7 @@ export class GameRuntime {
 
   adjustSelectedObjEditorHeight(deltaY = 0) {
     const entry = this.objEditorSelected;
-    if (!this.objEditorActive || !entry?.mesh) {
+    if (!this.objEditorActive || !entry?.mesh || !this.canUseObjectEditor()) {
       return false;
     }
     const nextY = (Number(entry.mesh.position.y) || 0) + (Number(deltaY) || 0);
@@ -12148,6 +12521,12 @@ export class GameRuntime {
     this.climbingRope = null;
     this.flyModeActive = !this.flyModeActive;
     if (this.flyModeActive) {
+      if (this.editorMode === "obj" && !this.canUseObjectEditor()) {
+        this.editorMode = "platform";
+        this.editorModePlatformBtnEl?.classList.add("active");
+        this.editorModeRopeBtnEl?.classList.remove("active");
+        this.editorModeObjBtnEl?.classList.remove("active");
+      }
       if (!this.platformEditorPreviewMesh) {
         const geo = new THREE.BoxGeometry(
           this.platformEditorSize.w,
@@ -12167,7 +12546,7 @@ export class GameRuntime {
       this.platformEditorPreviewMesh.visible = this.editorMode === "platform";
       if (this.ropeEditorPreviewMesh) this.ropeEditorPreviewMesh.visible = this.editorMode === "rope";
       this.platformEditorEl?.classList.remove("hidden");
-      if (this.editorMode === "obj") {
+      if (this.editorMode === "obj" && this.canUseObjectEditor()) {
         this.objEditorActive = true;
         this.objEditorBarEl?.classList.remove("hidden");
         if (this.platformEditorPreviewMesh) this.platformEditorPreviewMesh.visible = false;
@@ -12334,12 +12713,21 @@ export class GameRuntime {
   // ── Rope Editor ───────────────────────────────────────────────────────
 
   setEditorMode(mode) {
-    const normalized = mode === "rope" || mode === "obj" ? mode : "platform";
+    let normalized = mode === "rope" || mode === "obj" ? mode : "platform";
+    if (normalized === "obj" && !this.canUseObjectEditor()) {
+      normalized = "platform";
+    }
     const wasObjMode = this.objEditorActive;
     this.editorMode = normalized;
     this.editorModePlatformBtnEl?.classList.toggle("active", normalized === "platform");
     this.editorModeRopeBtnEl?.classList.toggle("active", normalized === "rope");
     this.editorModeObjBtnEl?.classList.toggle("active", normalized === "obj");
+
+    if (normalized === "obj" && !this.flyModeActive) {
+      if (this.canUseObjectEditor()) {
+        this.toggleFlyMode();
+      }
+    }
 
     if (normalized === "obj" && this.flyModeActive) {
       this.objEditorActive = true;
