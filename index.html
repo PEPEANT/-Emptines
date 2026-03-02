@@ -11,6 +11,27 @@
   <body>
     <div id="app"></div>
     <button id="fullscreen-toggle" type="button" aria-pressed="false">전체화면</button>
+    <!-- Settings gear — shown only on mobile (body.is-mobile-ui) -->
+    <button id="settings-btn" type="button" aria-label="설정" aria-haspopup="true" aria-expanded="false">⚙</button>
+    <div id="settings-panel" class="hidden" role="dialog" aria-label="모바일 설정">
+      <div class="sp-row">
+        <span class="sp-label">그래픽</span>
+        <div class="sp-quality-btns">
+          <button class="sp-quality-btn" type="button" data-quality="low">낮음</button>
+          <button class="sp-quality-btn" type="button" data-quality="medium">보통</button>
+          <button class="sp-quality-btn" type="button" data-quality="high">높음</button>
+        </div>
+      </div>
+      <div class="sp-row">
+        <span class="sp-label">소리</span>
+        <div class="sp-volume-row">
+          <input id="sp-volume" type="range" min="0" max="1" step="0.05" value="0.7" aria-label="볼륨" />
+        </div>
+      </div>
+      <div class="sp-row">
+        <button id="sp-fullscreen-btn" type="button">전체화면 전환</button>
+      </div>
+    </div>
     <button id="host-chat-toggle" class="hidden" type="button" aria-pressed="false">채팅</button>
     <button id="host-controls-toggle" class="hidden" type="button" aria-pressed="true">조작 패널</button>
     <div id="mobile-rotate-overlay" class="hidden" aria-live="assertive" role="dialog" aria-modal="true">
@@ -133,6 +154,23 @@
             <button id="editor-mode-rope" class="editor-mode-btn" type="button">줄</button>
             <button id="editor-mode-obj" class="editor-mode-btn" type="button">오브젝트</button>
           </div>
+          <div id="editor-limit-row" class="host-custom-row">
+            <label for="editor-platform-limit">발판 최대</label>
+            <input id="editor-platform-limit" type="number" min="1" max="10000" step="1" value="400" />
+            <label for="editor-rope-limit">줄 최대</label>
+            <input id="editor-rope-limit" type="number" min="1" max="10000" step="1" value="200" />
+          </div>
+          <div id="editor-scale-row" class="host-custom-row">
+            <label for="editor-platform-scale">발판 크기</label>
+            <input id="editor-platform-scale" type="range" min="0.25" max="8" step="0.05" value="1" />
+            <span id="editor-platform-scale-value">1.00x</span>
+          </div>
+          <div id="editor-rope-scale-row" class="host-custom-row">
+            <label for="editor-rope-scale">줄 길이</label>
+            <input id="editor-rope-scale" type="range" min="0.25" max="8" step="0.05" value="1" />
+            <span id="editor-rope-scale-value">1.00x</span>
+          </div>
+          <button id="editor-settings-apply" type="button">에디터 값 적용</button>
           <span id="platform-editor-count" class="host-editor-count">발판: 0개</span>
           <span id="rope-editor-count" class="host-editor-count">줄: 0개</span>
           <div class="host-custom-row">
@@ -207,8 +245,8 @@
         </div>
       </div>
       <div id="mobile-actions">
-        <button id="mobile-jump" class="mobile-action-btn" type="button">점프</button>
         <button id="mobile-sprint" class="mobile-action-btn" type="button">질주</button>
+        <button id="mobile-jump" class="mobile-action-btn" type="button">점프</button>
         <button id="mobile-paint" class="mobile-action-btn hidden" type="button">그리기</button>
       </div>
     </div>
@@ -293,5 +331,81 @@
     </div>
 
     <script type="module" src="/src/main.js"></script>
+    <script>
+    (function () {
+      function initSettingsPanel() {
+        var btn = document.getElementById('settings-btn');
+        var panel = document.getElementById('settings-panel');
+        var qualityBtns = document.querySelectorAll('.sp-quality-btn');
+        var fsBtn = document.getElementById('sp-fullscreen-btn');
+        var volSlider = document.getElementById('sp-volume');
+        if (!btn || !panel) return;
+
+        function openPanel() {
+          panel.classList.remove('hidden');
+          btn.setAttribute('aria-expanded', 'true');
+          updateQualityActive();
+        }
+        function closePanel() {
+          panel.classList.add('hidden');
+          btn.setAttribute('aria-expanded', 'false');
+        }
+        function togglePanel() {
+          if (panel.classList.contains('hidden')) { openPanel(); } else { closePanel(); }
+        }
+
+        btn.addEventListener('click', function (e) { e.stopPropagation(); togglePanel(); });
+        document.addEventListener('click', function (e) {
+          if (!panel.classList.contains('hidden') && !panel.contains(e.target) && e.target !== btn) {
+            closePanel();
+          }
+        });
+
+        function updateQualityActive() {
+          var g = window.__emptinesGame;
+          var q = (g && g.graphicsQuality) ? g.graphicsQuality : 'medium';
+          qualityBtns.forEach(function (b) { b.classList.toggle('active', b.dataset.quality === q); });
+        }
+
+        qualityBtns.forEach(function (qBtn) {
+          qBtn.addEventListener('click', function () {
+            var q = qBtn.dataset.quality;
+            var g = window.__emptinesGame;
+            if (g && g.setGraphicsQuality) { g.setGraphicsQuality(q, { persist: true }); }
+            qualityBtns.forEach(function (b) { b.classList.remove('active'); });
+            qBtn.classList.add('active');
+          });
+        });
+
+        if (fsBtn) {
+          fsBtn.addEventListener('click', function () {
+            var g = window.__emptinesGame;
+            if (g && g.toggleFullscreenFromInteraction) { g.toggleFullscreenFromInteraction(); }
+            closePanel();
+          });
+        }
+
+        if (volSlider) {
+          volSlider.addEventListener('input', function () {
+            var v = parseFloat(volSlider.value);
+            var g = window.__emptinesGame;
+            if (!g) return;
+            g.sharedMusicBaseVolume = v;
+            g.entryMusicBaseVolume = v * 0.88;
+            if (g.sharedMusicAudioEl) { g.sharedMusicAudioEl.volume = Math.min(1, v); }
+          });
+        }
+
+        // Sync quality display after game is ready
+        setTimeout(updateQualityActive, 1200);
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initSettingsPanel);
+      } else {
+        initSettingsPanel();
+      }
+    })();
+    </script>
   </body>
 </html>

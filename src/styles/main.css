@@ -103,6 +103,113 @@ canvas {
   background: rgba(19, 45, 69, 0.92);
 }
 
+/* Settings gear button — hidden on desktop, shown on mobile */
+#settings-btn {
+  display: none;
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 74;
+  width: 36px;
+  height: 36px;
+  border: 1px solid rgba(180, 212, 239, 0.5);
+  border-radius: 50%;
+  background: rgba(10, 24, 39, 0.84);
+  color: #e6f4ff;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+}
+
+#settings-btn:active {
+  background: rgba(20, 46, 70, 0.92);
+}
+
+#settings-panel {
+  position: fixed;
+  top: 58px;
+  right: 14px;
+  z-index: 74;
+  width: 190px;
+  padding: 10px;
+  border: 1px solid rgba(170, 206, 238, 0.52);
+  border-radius: 12px;
+  background: rgba(8, 20, 33, 0.92);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 8px 22px rgba(2, 8, 14, 0.46);
+  display: grid;
+  gap: 9px;
+}
+
+#settings-panel.hidden {
+  display: none;
+}
+
+.sp-row {
+  display: grid;
+  gap: 5px;
+}
+
+.sp-label {
+  color: rgba(186, 220, 248, 0.85);
+  font: 700 0.58rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.sp-quality-btns {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+
+.sp-quality-btn {
+  height: 26px;
+  border: 1px solid rgba(155, 198, 232, 0.44);
+  border-radius: 6px;
+  background: rgba(12, 28, 44, 0.82);
+  color: #c2dff4;
+  font: 700 0.6rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.sp-quality-btn.active {
+  border-color: rgba(120, 196, 255, 0.78);
+  background: rgba(18, 48, 74, 0.9);
+  color: #a6dcff;
+}
+
+#sp-fullscreen-btn {
+  width: 100%;
+  height: 28px;
+  border: 1px solid rgba(155, 198, 232, 0.44);
+  border-radius: 7px;
+  background: rgba(12, 28, 44, 0.82);
+  color: #c2dff4;
+  font: 700 0.62rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+
+#sp-fullscreen-btn:active {
+  background: rgba(20, 48, 74, 0.92);
+}
+
+.sp-volume-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+#sp-volume {
+  flex: 1;
+  accent-color: #5abeff;
+  height: 4px;
+  cursor: pointer;
+}
+
 #graphics-toggle {
   position: fixed;
   top: 52px;
@@ -369,6 +476,74 @@ canvas {
 
 #editor-mode-row {
   gap: 4px;
+}
+
+#editor-limit-row,
+#editor-scale-row,
+#editor-rope-scale-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 4px;
+}
+
+#editor-limit-row label,
+#editor-scale-row label,
+#editor-rope-scale-row label {
+  color: #a9d7f6;
+  font: 700 0.58rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+#editor-platform-limit,
+#editor-rope-limit {
+  min-width: 0;
+  width: 100%;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid rgba(163, 206, 239, 0.62);
+  border-radius: 7px;
+  background: rgba(10, 24, 37, 0.9);
+  color: #e6f5ff;
+  font: 700 0.62rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+}
+
+#editor-platform-scale,
+#editor-rope-scale {
+  width: 100%;
+  min-width: 0;
+  accent-color: #00e5cc;
+}
+
+#editor-platform-scale-value,
+#editor-rope-scale-value {
+  color: #c7f6e9;
+  font: 700 0.58rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.06em;
+  text-align: right;
+  min-width: 36px;
+}
+
+#editor-settings-apply {
+  min-width: 0;
+  height: 28px;
+  border: 1px solid rgba(161, 203, 235, 0.58);
+  border-radius: 7px;
+  background: rgba(10, 26, 40, 0.82);
+  color: #dcefff;
+  font: 700 0.64rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+#editor-settings-apply:disabled,
+#editor-platform-limit:disabled,
+#editor-rope-limit:disabled,
+#editor-platform-scale:disabled,
+#editor-rope-scale:disabled {
+  opacity: 0.62;
+  cursor: default;
 }
 
 .editor-mode-btn {
@@ -1242,17 +1417,13 @@ canvas {
 
 #mobile-move-pad {
   position: relative;
-  width: 132px;
-  height: 132px;
+  width: 96px;
+  height: 96px;
   border-radius: 50%;
-  border: 1px solid rgba(169, 203, 234, 0.58);
-  background:
-    radial-gradient(circle at 38% 35%, rgba(145, 194, 237, 0.2), rgba(12, 30, 46, 0.84)),
-    rgba(8, 22, 35, 0.78);
-  box-shadow:
-    0 0 0 1px rgba(116, 156, 191, 0.2),
-    0 8px 22px rgba(2, 8, 13, 0.46);
-  backdrop-filter: blur(5px);
+  border: 1.5px solid rgba(200, 230, 255, 0.1);
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
   pointer-events: auto;
   touch-action: none;
 }
@@ -1261,13 +1432,13 @@ canvas {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 58px;
-  height: 58px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   transform: translate(-50%, -50%);
-  border: 1px solid rgba(198, 226, 250, 0.74);
-  background: radial-gradient(circle at 32% 28%, rgba(227, 244, 255, 0.9), rgba(84, 136, 183, 0.86));
-  box-shadow: 0 6px 14px rgba(5, 14, 22, 0.45);
+  border: 1px solid rgba(180, 218, 248, 0.38);
+  background: radial-gradient(circle at 35% 30%, rgba(220, 240, 255, 0.5), rgba(100, 150, 200, 0.35));
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
 }
 
 #mobile-actions {
@@ -1281,10 +1452,10 @@ canvas {
   position: fixed;
   left: 50%;
   top: auto;
-  bottom: max(108px, calc(env(safe-area-inset-bottom, 0px) + 86px));
+  bottom: max(14px, calc(env(safe-area-inset-bottom, 0px) + 10px));
   transform: translateX(-50%);
-  min-width: 116px;
-  height: 42px;
+  min-width: 110px;
+  height: 38px;
   border-radius: 999px;
   z-index: 66;
   pointer-events: auto;
@@ -1306,6 +1477,25 @@ canvas {
   border-color: rgba(202, 229, 249, 0.9);
   background: rgba(20, 53, 83, 0.92);
   box-shadow: 0 0 0 2px rgba(132, 176, 216, 0.24);
+}
+
+/* Circular jump + sprint buttons */
+#mobile-jump {
+  width: 62px;
+  height: 62px;
+  min-width: 62px;
+  border-radius: 50%;
+  font-size: 0.64rem;
+  letter-spacing: 0.04em;
+}
+
+#mobile-sprint {
+  width: 50px;
+  height: 50px;
+  min-width: 50px;
+  border-radius: 50%;
+  font-size: 0.56rem;
+  letter-spacing: 0.03em;
 }
 
 #chat-ui {
@@ -1594,17 +1784,58 @@ body.is-mobile-ui #chat-ui.mobile-fullscreen #chat-send {
 
 body.is-mobile-ui #chat-live-feed {
   left: 10px;
-  width: min(76vw, 320px);
-  max-height: min(30vh, 214px);
+  width: min(60vw, 250px);
+  max-height: min(22vh, 150px);
   z-index: 40;
+  background: transparent;
+  border: none;
+  backdrop-filter: none;
+  box-shadow: none;
+  padding: 2px;
+  bottom: 175px;
 }
 
 body.is-mobile-ui #chat-live-log {
-  min-height: 82px;
+  min-height: 36px;
+  background: transparent;
+  border: none;
+  padding: 3px;
 }
 
 body.is-mobile-ui #chat-live-log .chat-line {
-  font-size: 0.7rem;
+  font-size: 0.67rem;
+  text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.95), 0 0 8px rgba(0, 0, 0, 0.85);
+  color: #e8f5ff;
+}
+
+/* Mobile: show settings gear, hide fullscreen + graphics buttons */
+body.is-mobile-ui #settings-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+body.is-mobile-ui #fullscreen-toggle {
+  display: none !important;
+}
+
+body.is-mobile-ui #graphics-toggle {
+  display: none !important;
+}
+
+body.is-mobile-ui #graphics-controls {
+  display: none !important;
+}
+
+/* Mobile move-pad: even smaller at small screens */
+body.is-mobile-ui #mobile-move-pad {
+  width: 90px;
+  height: 90px;
+}
+
+body.is-mobile-ui #mobile-move-stick {
+  width: 40px;
+  height: 40px;
 }
 
 @media (max-width: 640px) {
@@ -1927,26 +2158,46 @@ body.is-mobile-ui #chat-live-log .chat-line {
   }
 
   #mobile-move-pad {
-    width: 118px;
-    height: 118px;
+    width: 90px;
+    height: 90px;
   }
 
   #mobile-move-stick {
-    width: 50px;
-    height: 50px;
+    width: 40px;
+    height: 40px;
   }
 
   .mobile-action-btn {
-    min-width: 82px;
-    height: 36px;
-    font-size: 0.67rem;
+    min-width: 72px;
+    height: 34px;
+    font-size: 0.64rem;
+  }
+
+  #mobile-jump {
+    width: 58px;
+    height: 58px;
+    min-width: 58px;
+    font-size: 0.6rem;
+  }
+
+  #mobile-sprint {
+    width: 46px;
+    height: 46px;
+    min-width: 46px;
+    font-size: 0.52rem;
   }
 
   #mobile-chat {
-    min-width: 64px;
-    height: 30px;
-    font-size: 0.6rem;
-    letter-spacing: 0.04em;
+    min-width: 58px;
+    height: 28px;
+    font-size: 0.58rem;
+    letter-spacing: 0.03em;
+  }
+
+  #settings-panel {
+    top: 54px;
+    right: 10px;
+    width: 178px;
   }
 
   #surface-paint-prompt {
@@ -2132,6 +2383,8 @@ body.mobile-portrait-lock #chalk-pickup-prompt,
 body.mobile-portrait-lock #surface-painter,
 body.mobile-portrait-lock #hud-ui,
 body.mobile-portrait-lock #fullscreen-toggle,
+body.mobile-portrait-lock #settings-btn,
+body.mobile-portrait-lock #settings-panel,
 body.mobile-portrait-lock #graphics-toggle,
 body.mobile-portrait-lock #graphics-controls,
 body.mobile-portrait-lock #host-chat-toggle,
