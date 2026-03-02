@@ -45,6 +45,14 @@ const MAX_PROMO_OBJECTS = 1200;
 const MAX_PROMO_NAME_CHARS = 48;
 const MAX_PROMO_URL_CHARS = 2048;
 const MAX_PROMO_MEDIA_DATA_URL_CHARS = 9_000_000;
+const PROMO_BLOCKED_SPAWN_X = 0;
+const PROMO_BLOCKED_SPAWN_Z = -98;
+const PROMO_BLOCKED_SPAWN_RADIUS = 14;
+const PROMO_BLOCKED_BRIDGE_A_X = 0;
+const PROMO_BLOCKED_BRIDGE_A_Z = -86;
+const PROMO_BLOCKED_BRIDGE_B_X = 0;
+const PROMO_BLOCKED_BRIDGE_B_Z = -18;
+const PROMO_BLOCKED_BRIDGE_HALF_WIDTH = 7;
 
 function normalizeRoomPortalTarget(rawValue, fallback = "") {
   const text = String(rawValue ?? "").trim().slice(0, 2048);
@@ -275,6 +283,43 @@ function normalizePromoAxis(rawValue, fallback = 0, min = -2000, max = 2000) {
   const parsed = Number(rawValue);
   const safe = Number.isFinite(parsed) ? parsed : Number(fallback) || 0;
   return Math.max(min, Math.min(max, safe));
+}
+
+function isPromoPlacementBlocked(x, z) {
+  const safeX = Number(x);
+  const safeZ = Number(z);
+  if (!Number.isFinite(safeX) || !Number.isFinite(safeZ)) {
+    return false;
+  }
+
+  const spawnDx = safeX - PROMO_BLOCKED_SPAWN_X;
+  const spawnDz = safeZ - PROMO_BLOCKED_SPAWN_Z;
+  if (spawnDx * spawnDx + spawnDz * spawnDz <= PROMO_BLOCKED_SPAWN_RADIUS * PROMO_BLOCKED_SPAWN_RADIUS) {
+    return true;
+  }
+
+  const abx = PROMO_BLOCKED_BRIDGE_B_X - PROMO_BLOCKED_BRIDGE_A_X;
+  const abz = PROMO_BLOCKED_BRIDGE_B_Z - PROMO_BLOCKED_BRIDGE_A_Z;
+  const abLenSq = abx * abx + abz * abz;
+  if (abLenSq <= 0.001) {
+    return false;
+  }
+  const apx = safeX - PROMO_BLOCKED_BRIDGE_A_X;
+  const apz = safeZ - PROMO_BLOCKED_BRIDGE_A_Z;
+  const rawT = (apx * abx + apz * abz) / abLenSq;
+  const edgeMargin = 0.08;
+  if (rawT < -edgeMargin || rawT > 1 + edgeMargin) {
+    return false;
+  }
+  const t = Math.max(0, Math.min(1, rawT));
+  const nearX = PROMO_BLOCKED_BRIDGE_A_X + abx * t;
+  const nearZ = PROMO_BLOCKED_BRIDGE_A_Z + abz * t;
+  const lateralDx = safeX - nearX;
+  const lateralDz = safeZ - nearZ;
+  return (
+    lateralDx * lateralDx + lateralDz * lateralDz <=
+    PROMO_BLOCKED_BRIDGE_HALF_WIDTH * PROMO_BLOCKED_BRIDGE_HALF_WIDTH
+  );
 }
 
 function normalizeRightBillboardVideoId(rawValue) {
@@ -734,6 +779,13 @@ export class RoomService {
     );
     if (!normalized) {
       return { ok: false, error: "invalid promo payload" };
+    }
+    const hasPositionChange =
+      !previous ||
+      Math.abs(Number(normalized.x) - Number(previous.x)) > 0.001 ||
+      Math.abs(Number(normalized.z) - Number(previous.z)) > 0.001;
+    if (hasPositionChange && isPromoPlacementBlocked(normalized.x, normalized.z)) {
+      return { ok: false, error: "placement blocked near spawn/bridge" };
     }
     if (!previous && map.size >= MAX_PROMO_OBJECTS) {
       return { ok: false, error: "promo object limit reached" };

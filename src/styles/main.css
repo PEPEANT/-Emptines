@@ -1805,7 +1805,8 @@ canvas {
   text-transform: uppercase;
 }
 
-#chat-toggle {
+#chat-toggle,
+#promo-panel-toggle {
   min-width: 62px;
   height: 26px;
   border: 1px solid rgba(175, 208, 238, 0.62);
@@ -1815,6 +1816,12 @@ canvas {
   font: 700 0.58rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
   letter-spacing: 0.05em;
   cursor: pointer;
+}
+
+#promo-panel-toggle.active {
+  border-color: rgba(202, 229, 249, 0.9);
+  background: rgba(20, 53, 83, 0.92);
+  box-shadow: 0 0 0 2px rgba(132, 176, 216, 0.24);
 }
 
 #chat-log {
@@ -2010,6 +2017,10 @@ body.is-mobile-ui #chat-ui.mobile-fullscreen #chat-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+body.is-mobile-ui #promo-panel-toggle {
+  display: none;
 }
 
 body.is-mobile-ui #chat-ui.mobile-fullscreen #chat-log {
@@ -2380,7 +2391,8 @@ body.is-mobile-ui #mobile-move-stick {
     font-size: 0.56rem;
   }
 
-  #chat-toggle {
+  #chat-toggle,
+  #promo-panel-toggle {
     min-width: 54px;
     height: 20px;
     font-size: 0.52rem;
@@ -2426,6 +2438,10 @@ body.is-mobile-ui #mobile-move-stick {
     min-width: 68px;
     height: 30px;
     font-size: 0.67rem;
+  }
+
+  #chat-ui.mobile-fullscreen #promo-panel-toggle {
+    display: none;
   }
 
   #chat-ui.mobile-fullscreen #chat-log {

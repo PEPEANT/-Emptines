@@ -287,6 +287,7 @@ export class GameRuntime {
     };
     this.promoMediaRemoved = false;
     this.promoPanelMobileOpen = false;
+    this.promoPanelDesktopOpen = false;
     this.promoDrawContext = null;
     this.promoDrawCanvasInitialized = false;
     this.promoDrawPointerId = null;
@@ -457,6 +458,7 @@ export class GameRuntime {
     this.chatLiveLogEl = document.getElementById("chat-live-log");
     this.chatControlsEl = document.getElementById("chat-controls");
     this.chatToggleBtnEl = document.getElementById("chat-toggle");
+    this.promoPanelToggleBtnEl = document.getElementById("promo-panel-toggle");
     this.hostChatToggleBtnEl = document.getElementById("host-chat-toggle");
     this.hostControlsToggleBtnEl = document.getElementById("host-controls-toggle");
     this.chatInputEl = document.getElementById("chat-input");
@@ -1460,8 +1462,8 @@ export class GameRuntime {
         repeatY: 3.2,
         roughness: 0.6,
         metalness: 0.12,
-        emissive: 0x131920,
-        emissiveIntensity: 0.08
+        emissive: 0x1a3048,
+        emissiveIntensity: 0.42
       }),
       this.createCityWindowMaterial({
         style: "cyan",
@@ -1469,8 +1471,8 @@ export class GameRuntime {
         repeatY: 3.6,
         roughness: 0.58,
         metalness: 0.14,
-        emissive: 0x152231,
-        emissiveIntensity: 0.1
+        emissive: 0x183a50,
+        emissiveIntensity: 0.45
       }),
       this.createCityWindowMaterial({
         style: "amber",
@@ -1478,8 +1480,8 @@ export class GameRuntime {
         repeatY: 3.4,
         roughness: 0.62,
         metalness: 0.12,
-        emissive: 0x1a1d23,
-        emissiveIntensity: 0.09
+        emissive: 0x2a2010,
+        emissiveIntensity: 0.42
       })
     ];
     for (let ti = 0; ti < towerPositions.length; ti++) {
@@ -1525,8 +1527,8 @@ export class GameRuntime {
         repeatY: 8.8,
         roughness: 0.62,
         metalness: 0.12,
-        emissive: 0x111720,
-        emissiveIntensity: 0.09
+        emissive: 0x1e3850,
+        emissiveIntensity: 0.45
       }),
       this.createCityWindowMaterial({
         style: "cyan",
@@ -1534,8 +1536,8 @@ export class GameRuntime {
         repeatY: 9.4,
         roughness: 0.6,
         metalness: 0.16,
-        emissive: 0x132433,
-        emissiveIntensity: 0.1
+        emissive: 0x183a52,
+        emissiveIntensity: 0.48
       }),
       this.createCityWindowMaterial({
         style: "amber",
@@ -1543,8 +1545,8 @@ export class GameRuntime {
         repeatY: 8.9,
         roughness: 0.64,
         metalness: 0.12,
-        emissive: 0x171c23,
-        emissiveIntensity: 0.09
+        emissive: 0x302010,
+        emissiveIntensity: 0.45
       })
     ];
     const skylineCapMats = [
@@ -1562,11 +1564,11 @@ export class GameRuntime {
       }),
     ];
     const skylineRoofMaterial = new THREE.MeshStandardMaterial({
-      color: 0x515e6d,
-      roughness: 0.76,
-      metalness: 0.16,
-      emissive: 0x1d2732,
-      emissiveIntensity: 0.16
+      color: 0x7a96aa,
+      roughness: 0.72,
+      metalness: 0.18,
+      emissive: 0x2a4060,
+      emissiveIntensity: 0.40
     });
     const bridgeLocalTarget = new THREE.Vector3(
       this.bridgeApproachSpawn.x - cityGroupWorldX,
@@ -4258,31 +4260,31 @@ export class GameRuntime {
     const key = String(style ?? "").trim().toLowerCase();
     if (key === "cyan") {
       return {
-        wall: "#313c47",
-        mullion: "#465464",
-        glassDark: "#223445",
-        glassMid: "#2b4258",
-        glassLight: "#7ea3c4",
-        reflection: "rgba(208, 232, 255, 0.18)"
+        wall: "#3e5468",
+        mullion: "#567088",
+        glassDark: "#1e3a52",
+        glassMid: "#2a5478",
+        glassLight: "#72d4ff",
+        reflection: "rgba(208, 240, 255, 0.28)"
       };
     }
     if (key === "amber") {
       return {
-        wall: "#3a3835",
-        mullion: "#504c47",
-        glassDark: "#272f39",
-        glassMid: "#333f4d",
-        glassLight: "#9ea8b3",
-        reflection: "rgba(243, 232, 212, 0.14)"
+        wall: "#524e48",
+        mullion: "#6e6860",
+        glassDark: "#2e3028",
+        glassMid: "#484038",
+        glassLight: "#e0b864",
+        reflection: "rgba(255, 240, 200, 0.28)"
       };
     }
     return {
-      wall: "#343d47",
-      mullion: "#495664",
-      glassDark: "#253545",
-      glassMid: "#304459",
-      glassLight: "#8aa8c5",
-      reflection: "rgba(216, 234, 255, 0.16)"
+      wall: "#4a5a6a",
+      mullion: "#628298",
+      glassDark: "#283c50",
+      glassMid: "#3a5870",
+      glassLight: "#aad4f0",
+      reflection: "rgba(216, 240, 255, 0.28)"
     };
   }
 
@@ -8215,6 +8217,26 @@ export class GameRuntime {
     }
   }
 
+  setPromoPanelDesktopOpen(nextOpen, { syncUi = true } = {}) {
+    const shouldOpen = Boolean(nextOpen) && !this.mobileEnabled;
+    if (this.promoPanelDesktopOpen === shouldOpen) {
+      if (syncUi) {
+        this.syncPromoPanelUi();
+      }
+      return;
+    }
+    this.promoPanelDesktopOpen = shouldOpen;
+    if (shouldOpen) {
+      this.chatInputEl?.blur?.();
+      if (typeof document !== "undefined" && document.pointerLockElement === this.renderer.domElement) {
+        document.exitPointerLock?.();
+      }
+    }
+    if (syncUi) {
+      this.syncPromoPanelUi();
+    }
+  }
+
   initPromoDrawCanvasIfNeeded() {
     if (!this.promoDrawCanvasEl) {
       return;
@@ -8442,21 +8464,24 @@ export class GameRuntime {
 
   syncPromoPanelUi() {
     this.resolveUiElements();
-    let mobilePanelVisible =
-      this.mobileEnabled &&
-      this.promoPanelMobileOpen &&
-      !this.isMobilePortraitBlocked() &&
+    const promoPanelReady =
       !this.surfacePainterOpen &&
-      !this.chatOpen &&
       !this.bootIntroVideoPlaying &&
       this.flowStage !== "portal_transfer" &&
       (this.nicknameGateEl?.classList.contains("hidden") ?? true) &&
       (this.npcChoiceGateEl?.classList.contains("hidden") ?? true);
+    let mobilePanelVisible =
+      this.mobileEnabled &&
+      this.promoPanelMobileOpen &&
+      !this.isMobilePortraitBlocked() &&
+      !this.chatOpen &&
+      promoPanelReady;
     if (this.mobileEnabled && this.promoPanelMobileOpen && !mobilePanelVisible) {
       this.promoPanelMobileOpen = false;
       mobilePanelVisible = false;
     }
-    const panelVisible = !this.mobileEnabled || mobilePanelVisible;
+    const desktopPanelVisible = !this.mobileEnabled && this.promoPanelDesktopOpen && promoPanelReady;
+    const panelVisible = this.mobileEnabled ? mobilePanelVisible : desktopPanelVisible;
     if (this.promoPanelEl) {
       this.promoPanelEl.classList.toggle("hidden", !panelVisible);
       this.promoPanelEl.classList.toggle("mobile-fullscreen", Boolean(this.mobileEnabled && panelVisible));
@@ -8476,6 +8501,9 @@ export class GameRuntime {
     const allowOthersDraw = own?.allowOthersDraw ?? false;
     const placeBtnLabel = own ? "수정" : "앞에 배치+저장";
     const mobilePromoLabel = own ? "수정" : "배치";
+    const promoPanelToggleLabel = this.promoPanelDesktopOpen
+      ? (own ? "수정 닫기" : "배치 닫기")
+      : (own ? "수정 열기" : "배치 열기");
     const prefersTouchUi =
       typeof window !== "undefined" &&
       typeof window.matchMedia === "function" &&
@@ -8511,6 +8539,11 @@ export class GameRuntime {
     }
     if (this.mobilePromoPlaceBtnEl) {
       this.mobilePromoPlaceBtnEl.textContent = mobilePromoLabel;
+    }
+    if (this.promoPanelToggleBtnEl) {
+      this.promoPanelToggleBtnEl.classList.toggle("hidden", this.mobileEnabled);
+      this.promoPanelToggleBtnEl.classList.toggle("active", Boolean(!this.mobileEnabled && panelVisible));
+      this.promoPanelToggleBtnEl.textContent = promoPanelToggleLabel;
     }
     if (panelVisible) {
       this.initPromoDrawCanvasIfNeeded();
@@ -8680,6 +8713,48 @@ export class GameRuntime {
     };
   }
 
+  isPromoPlacementBlockedAt(position) {
+    const x = Number(position?.x);
+    const z = Number(position?.z);
+    if (!Number.isFinite(x) || !Number.isFinite(z)) {
+      return false;
+    }
+
+    const spawnCenterX = Number(this.bridgeApproachSpawn?.x) || 0;
+    const spawnCenterZ = Number(this.bridgeApproachSpawn?.z) || -98;
+    const spawnRadius = Math.max(10, Number(this.bridgeWidth) * 0.95 + 4);
+    const spawnDx = x - spawnCenterX;
+    const spawnDz = z - spawnCenterZ;
+    if (spawnDx * spawnDx + spawnDz * spawnDz <= spawnRadius * spawnRadius) {
+      return true;
+    }
+
+    const ax = Number(this.bridgeSpawn?.x) || 0;
+    const az = Number(this.bridgeSpawn?.z) || -86;
+    const bx = Number(this.bridgeCityEntry?.x) || 0;
+    const bz = Number(this.bridgeCityEntry?.z) || -18;
+    const abx = bx - ax;
+    const abz = bz - az;
+    const abLenSq = abx * abx + abz * abz;
+    if (abLenSq <= 0.001) {
+      return false;
+    }
+    const apx = x - ax;
+    const apz = z - az;
+    const rawT = (apx * abx + apz * abz) / abLenSq;
+    const bridgeEdgeMargin = 0.08;
+    if (rawT < -bridgeEdgeMargin || rawT > 1 + bridgeEdgeMargin) {
+      return false;
+    }
+    const t = THREE.MathUtils.clamp(rawT, 0, 1);
+    const nearestX = ax + abx * t;
+    const nearestZ = az + abz * t;
+    const lateralDx = x - nearestX;
+    const lateralDz = z - nearestZ;
+    const bridgeHalfWidth = Math.max(4.8, Number(this.bridgeWidth) * 0.6 + 1.5);
+    return lateralDx * lateralDx + lateralDz * lateralDz <= bridgeHalfWidth * bridgeHalfWidth;
+  }
+
   requestPromoState() {
     if (!(this.socket && this.networkConnected)) {
       return;
@@ -8705,6 +8780,15 @@ export class GameRuntime {
           z: own.z,
           yaw: this.normalizePromoYaw(own.yaw, 0)
         };
+    const movingToBlockedArea = this.isPromoPlacementBlockedAt(transform);
+    const hasPositionChange =
+      !own ||
+      Math.abs(Number(transform.x) - Number(own.x)) > 0.001 ||
+      Math.abs(Number(transform.z) - Number(own.z)) > 0.001;
+    if (movingToBlockedArea && hasPositionChange) {
+      this.appendChatLine("", "스폰 지점/다리 구역에는 홍보 오브젝트를 배치할 수 없습니다.", "system");
+      return;
+    }
     const scaleRaw = Number(this.promoScaleInputEl?.value);
     const scale = THREE.MathUtils.clamp(Number.isFinite(scaleRaw) ? scaleRaw : own?.scale ?? 1, 0.35, 24);
     const linkUrl = this.normalizePromoLinkUrl(this.promoLinkInputEl?.value ?? own?.linkUrl ?? "");
@@ -11028,6 +11112,14 @@ export class GameRuntime {
         this.setPromoPanelMobileOpen(true);
       });
     }
+    if (this.promoPanelToggleBtnEl) {
+      this.promoPanelToggleBtnEl.addEventListener("click", () => {
+        if (this.mobileEnabled) {
+          return;
+        }
+        this.setPromoPanelDesktopOpen(!this.promoPanelDesktopOpen, { syncUi: true });
+      });
+    }
     if (this.promoScaleInputEl) {
       this.promoScaleInputEl.addEventListener("input", () => {
         const value = Number(this.promoScaleInputEl?.value);
@@ -11573,6 +11665,9 @@ export class GameRuntime {
     }
     if (!this.chatToggleBtnEl) {
       this.chatToggleBtnEl = document.getElementById("chat-toggle");
+    }
+    if (!this.promoPanelToggleBtnEl) {
+      this.promoPanelToggleBtnEl = document.getElementById("promo-panel-toggle");
     }
     if (!this.hostChatToggleBtnEl) {
       this.hostChatToggleBtnEl = document.getElementById("host-chat-toggle");
