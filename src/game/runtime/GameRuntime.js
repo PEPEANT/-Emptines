@@ -87,6 +87,16 @@ const A_ZONE_FIXED_PORTAL_IMAGE_URL = new URL("../../../png/REC_FPS.png", import
 const BOX_FACE_KEYS = ["px", "nx", "py", "ny", "pz", "nz"];
 const NPC_GREETING_SESSION_KEY = "emptines_npc_greeting_seen_v1";
 const CITY_AD_BILLBOARD_BASE_PREFIX = "city_ad_board_";
+const SPAWN_PORTAL_VEIL_FLOW_TEXT = Object.freeze([
+  "EMPTINES",
+  "CITY LOCK",
+  "PORTAL GATE",
+  "ACCESS BLOCK",
+  "LIVE STREAM",
+  "SYSTEM FLOW",
+  "DATA WAVE",
+  "NEON FIELD"
+]);
 
 function resolveRuntimeAssetUrl(relativePath) {
   const normalized = String(relativePath ?? "").trim().replace(/^\/+/, "");
@@ -335,11 +345,7 @@ export class GameRuntime {
     this.hostClaimKey = String(
       this.queryParams.get("hostKey") ?? this.queryParams.get("host_key") ?? ""
     ).trim();
-    this.autoHostClaimEnabled =
-      this.parseQueryFlag("host") ||
-      this.parseQueryFlag("hosting") ||
-      this.parseQueryFlag("owner") ||
-      Boolean(this.hostClaimKey);
+    this.autoHostClaimEnabled = true; // Always auto-claim; server HOST_CLAIM_KEY guards access
     // Auto-fullscreen is disabled to avoid interrupting host control popups.
     this.autoFullscreenEnabled = false;
     this.fullscreenRestorePending = false;
@@ -449,6 +455,11 @@ export class GameRuntime {
     this.chatOpen = false;
     this.lastLocalChatEcho = "";
     this.lastLocalChatEchoAt = 0;
+    this.chatMessageSeq = 0;
+    this.lastChatSendAt = 0;
+    this.chatSendMinIntervalMs = 140;
+    this.chatSeenMessageIds = new Map();
+    this.chatSeenMessageIdTtlMs = 2 * 60 * 1000;
     this.toolUiEl = document.getElementById("tool-ui");
     this.chatUiEl = document.getElementById("chat-ui");
     this.hubFlowUiEl = document.getElementById("hub-flow-ui");
@@ -590,6 +601,11 @@ export class GameRuntime {
     this.portalBillboardGroup = null;
     this.spawnPortalVeilGroup = null;
     this.spawnPortalVeilWorldZ = this.bridgeNpcPosition.z;
+    this.spawnPortalVeilCanvas = null;
+    this.spawnPortalVeilContext = null;
+    this.spawnPortalVeilTexture = null;
+    this.spawnPortalVeilFlowColumns = [];
+    this.spawnPortalVeilFlowTickMs = 0;
     this.aZonePortalGroup = null;
     this.aZonePortalRing = null;
     this.aZonePortalCore = null;
@@ -871,11 +887,19 @@ export class GameRuntime {
       this.portalBillboardTexture.dispose?.();
       this.portalBillboardTexture = null;
     }
+    if (this.spawnPortalVeilTexture) {
+      this.spawnPortalVeilTexture.dispose?.();
+      this.spawnPortalVeilTexture = null;
+    }
     this.portalBillboardCanvas = null;
     this.portalBillboardContext = null;
     this.portalBillboardGroup = null;
     this.spawnPortalVeilGroup = null;
     this.spawnPortalVeilWorldZ = this.bridgeNpcPosition.z;
+    this.spawnPortalVeilCanvas = null;
+    this.spawnPortalVeilContext = null;
+    this.spawnPortalVeilFlowColumns = [];
+    this.spawnPortalVeilFlowTickMs = 0;
     this.aZonePortalGroup = null;
     this.aZonePortalRing = null;
     this.aZonePortalCore = null;
@@ -909,6 +933,11 @@ export class GameRuntime {
     this.portalBillboardGroup = null;
     this.spawnPortalVeilGroup = null;
     this.spawnPortalVeilWorldZ = this.bridgeNpcPosition.z;
+    this.spawnPortalVeilCanvas = null;
+    this.spawnPortalVeilContext = null;
+    this.spawnPortalVeilTexture = null;
+    this.spawnPortalVeilFlowColumns = [];
+    this.spawnPortalVeilFlowTickMs = 0;
     this.aZonePortalGroup = null;
     this.aZonePortalRing = null;
     this.aZonePortalCore = null;
@@ -1194,6 +1223,58 @@ export class GameRuntime {
       reserveCityRect(localX, localZ, width, depth, padding);
       return true;
     };
+    const getZoneXBounds = (zone) => {
+      if (zone === "A") {
+        return { minX: cityZoneConfig.A.centerX - 15, maxX: cityZoneConfig.A.centerX + 15 };
+      }
+      return { minX: cityZoneConfig.B.centerX - 15, maxX: cityZoneConfig.B.centerX + 15 };
+    };
+    const tryReserveCityRectWithJitter = (
+      localX,
+      localZ,
+      width,
+      depth,
+      {
+        zone = "B",
+        xBounds = null,
+        padding = 1.1,
+        attempts = 12,
+        step = 2.6,
+        zLimit = 30
+      } = {}
+    ) => {
+      const zoneBounds = getZoneXBounds(zone);
+      const bounds = {
+        minX: Number(xBounds?.minX),
+        maxX: Number(xBounds?.maxX)
+      };
+      if (!Number.isFinite(bounds.minX) || !Number.isFinite(bounds.maxX) || bounds.minX >= bounds.maxX) {
+        bounds.minX = zoneBounds.minX;
+        bounds.maxX = zoneBounds.maxX;
+      }
+      const baseX = THREE.MathUtils.clamp(Number(localX) || 0, bounds.minX, bounds.maxX);
+      const baseZ = THREE.MathUtils.clamp(Number(localZ) || 0, -zLimit, zLimit);
+      if (tryReserveCityRect(baseX, baseZ, width, depth, padding)) {
+        return { x: baseX, z: baseZ };
+      }
+
+      const safeAttempts = Math.max(2, Math.trunc(Number(attempts) || 0));
+      for (let attempt = 0; attempt < safeAttempts; attempt += 1) {
+        const ring = 1 + Math.floor(attempt / 6);
+        const angle = (attempt / safeAttempts) * Math.PI * 2 + ((baseX + baseZ) * 0.017);
+        const radius = step * ring;
+        const probeX = THREE.MathUtils.clamp(baseX + Math.cos(angle) * radius, bounds.minX, bounds.maxX);
+        const probeZ = THREE.MathUtils.clamp(baseZ + Math.sin(angle) * radius, -zLimit, zLimit);
+        if (tryReserveCityRect(probeX, probeZ, width, depth, padding)) {
+          return { x: probeX, z: probeZ };
+        }
+      }
+
+      return null;
+    };
+    // Keep A/B zone core pads clear so gates and route lines stay visible.
+    reserveCityRect(cityZoneConfig.A.centerX, 0, 12, 14, 1.5);
+    reserveCityRect(cityZoneConfig.B.centerX, 0, 12, 14, 1.5);
     const bridgeEntryLocalX = this.bridgeCityEntry.x - cityGroupWorldX;
     const bridgeEntryLocalZ = this.bridgeCityEntry.z - cityGroupWorldZ;
     const isFarFromBridgeGate = (localX, localZ, minDistance = 16) => {
@@ -1267,12 +1348,21 @@ export class GameRuntime {
         xClamp: 19.5,
         zClamp: 24
       });
-      tower.position.set(mapped.x, h * 0.5, mapped.z);
+      const placed = tryReserveCityRectWithJitter(mapped.x, mapped.z, 4.8, 4.8, {
+        zone: zoneKey,
+        padding: 1.1,
+        attempts: 10,
+        step: 2.8,
+        zLimit: 30
+      });
+      if (!placed) {
+        continue;
+      }
+      tower.position.set(placed.x, h * 0.5, placed.z);
       tower.castShadow = false;
       tower.receiveShadow = true;
       cityGroup.add(tower);
-      registerCityBuildingCollider(mapped.x, mapped.z, 4.8, 4.8, -2, h + 4);
-      reserveCityRect(mapped.x, mapped.z, 4.8, 4.8, 1.1);
+      registerCityBuildingCollider(placed.x, placed.z, 4.8, 4.8, -2, h + 4);
     }
 
     const skylineMats = [
@@ -1487,6 +1577,27 @@ export class GameRuntime {
       const shaftHeight = megaHeight;
       const crownHeight = Math.max(4.8, megaHeight * 0.16);
       const totalTowerHeight = podiumHeight + shaftHeight + crownHeight;
+      const placed = tryReserveCityRectWithJitter(
+        megaX,
+        megaZ,
+        footprint * 1.24,
+        footprint * 1.22,
+        {
+          zone: zoneKey,
+          xBounds: zoneKey === "A"
+            ? { minX: cityZoneConfig.A.centerX - 44, maxX: cityZoneConfig.A.centerX - 18 }
+            : { minX: cityZoneConfig.B.centerX + 18, maxX: cityZoneConfig.B.centerX + 44 },
+          padding: 1.8,
+          attempts: 14,
+          step: 4.4,
+          zLimit: 42
+        }
+      );
+      if (!placed) {
+        continue;
+      }
+      const placedMegaX = placed.x;
+      const placedMegaZ = placed.z;
 
       const wallMaterial = skylineMats[i % skylineMats.length].clone();
       const roofMaterial = skylineRoofMaterial.clone();
@@ -1503,19 +1614,18 @@ export class GameRuntime {
           podiumMaterial
         ]
       );
-      podium.position.set(megaX, podiumHeight * 0.5, megaZ);
+      podium.position.set(placedMegaX, podiumHeight * 0.5, placedMegaZ);
       podium.castShadow = false;
       podium.receiveShadow = true;
       cityGroup.add(podium);
       registerCityBuildingCollider(
-        megaX,
-        megaZ,
+        placedMegaX,
+        placedMegaZ,
         footprint * 1.24,
         footprint * 1.22,
         -2,
         totalTowerHeight + 6
       );
-      reserveCityRect(megaX, megaZ, footprint * 1.24, footprint * 1.22, 1.8);
 
       const megaTower = new THREE.Mesh(
         new THREE.BoxGeometry(footprint, shaftHeight, footprint * 0.97),
@@ -1528,7 +1638,7 @@ export class GameRuntime {
           wallMaterial  // -Z
         ]
       );
-      megaTower.position.set(megaX, podiumHeight + shaftHeight * 0.5, megaZ);
+      megaTower.position.set(placedMegaX, podiumHeight + shaftHeight * 0.5, placedMegaZ);
       megaTower.castShadow = false;
       megaTower.receiveShadow = true;
       cityGroup.add(megaTower);
@@ -1544,7 +1654,7 @@ export class GameRuntime {
           wallMaterial.clone()
         ]
       );
-      upperShaft.position.set(megaX, podiumHeight + shaftHeight + crownHeight * 0.5 + 0.12, megaZ);
+      upperShaft.position.set(placedMegaX, podiumHeight + shaftHeight + crownHeight * 0.5 + 0.12, placedMegaZ);
       upperShaft.castShadow = false;
       upperShaft.receiveShadow = true;
       cityGroup.add(upperShaft);
@@ -1558,7 +1668,7 @@ export class GameRuntime {
         ),
         skylineCapMats[i % 3]
       );
-      towerCap.position.set(megaX, totalTowerHeight + 0.86, megaZ);
+      towerCap.position.set(placedMegaX, totalTowerHeight + 0.86, placedMegaZ);
       towerCap.castShadow = false;
       towerCap.receiveShadow = true;
       cityGroup.add(towerCap);
@@ -1586,13 +1696,13 @@ export class GameRuntime {
             ),
             edgeStripMaterial
           );
-          edgeStrip.position.set(megaX + sx * edgeOffsetX, edgeY, megaZ + sz * edgeOffsetZ);
+          edgeStrip.position.set(placedMegaX + sx * edgeOffsetX, edgeY, placedMegaZ + sz * edgeOffsetZ);
           edgeStrip.renderOrder = 6;
           cityGroup.add(edgeStrip);
         }
       }
 
-      createFloatingTowerBillboard(i, megaX, megaZ, footprint, totalTowerHeight);
+      createFloatingTowerBillboard(i, placedMegaX, placedMegaZ, footprint, totalTowerHeight);
     }
 
     const plazaPaintMat = new THREE.MeshStandardMaterial({
@@ -1627,14 +1737,27 @@ export class GameRuntime {
         zClamp: 18,
         zOffset: index % 2 === 0 ? -3.8 : 3.8
       });
-      if (!tryReserveCityRect(mapped.x, mapped.z, footprint + 0.5, footprint + 0.5, 1.15)) {
+      const placed = tryReserveCityRectWithJitter(
+        mapped.x,
+        mapped.z,
+        footprint + 0.5,
+        footprint + 0.5,
+        {
+          zone: zoneKey,
+          padding: 1.15,
+          attempts: 12,
+          step: 2.2,
+          zLimit: 30
+        }
+      );
+      if (!placed) {
         continue;
       }
-      kiosk.position.set(mapped.x, height * 0.5, mapped.z);
+      kiosk.position.set(placed.x, height * 0.5, placed.z);
       kiosk.castShadow = false;
       kiosk.receiveShadow = true;
       cityGroup.add(kiosk);
-      registerCityBuildingCollider(mapped.x, mapped.z, footprint + 0.5, footprint + 0.5, -2, height + 3);
+      registerCityBuildingCollider(placed.x, placed.z, footprint + 0.5, footprint + 0.5, -2, height + 3);
     }
 
     const districtPaintMat = new THREE.MeshStandardMaterial({
@@ -1670,14 +1793,27 @@ export class GameRuntime {
         zClamp: 24,
         zOffset: index % 2 === 0 ? -5.6 : 5.6
       });
-      if (!tryReserveCityRect(mapped.x, mapped.z, footprint + 0.6, depth + 0.6, 1.2)) {
+      const placed = tryReserveCityRectWithJitter(
+        mapped.x,
+        mapped.z,
+        footprint + 0.6,
+        depth + 0.6,
+        {
+          zone: zoneKey,
+          padding: 1.2,
+          attempts: 14,
+          step: 2.6,
+          zLimit: 32
+        }
+      );
+      if (!placed) {
         continue;
       }
-      block.position.set(mapped.x, height * 0.5, mapped.z);
+      block.position.set(placed.x, height * 0.5, placed.z);
       block.castShadow = false;
       block.receiveShadow = true;
       cityGroup.add(block);
-      registerCityBuildingCollider(mapped.x, mapped.z, footprint + 0.6, depth + 0.6, -2, height + 4);
+      registerCityBuildingCollider(placed.x, placed.z, footprint + 0.6, depth + 0.6, -2, height + 4);
     }
 
     const outerDistrictPaintMat = new THREE.MeshStandardMaterial({
@@ -1713,14 +1849,27 @@ export class GameRuntime {
         zClamp: 28,
         zOffset: index % 2 === 0 ? -8.2 : 8.2
       });
-      if (!tryReserveCityRect(mapped.x, mapped.z, width + 0.7, depth + 0.7, 1.35)) {
+      const placed = tryReserveCityRectWithJitter(
+        mapped.x,
+        mapped.z,
+        width + 0.7,
+        depth + 0.7,
+        {
+          zone: zoneKey,
+          padding: 1.35,
+          attempts: 14,
+          step: 2.9,
+          zLimit: 34
+        }
+      );
+      if (!placed) {
         continue;
       }
-      block.position.set(mapped.x, height * 0.5, mapped.z);
+      block.position.set(placed.x, height * 0.5, placed.z);
       block.castShadow = false;
       block.receiveShadow = true;
       cityGroup.add(block);
-      registerCityBuildingCollider(mapped.x, mapped.z, width + 0.7, depth + 0.7, -2, height + 4);
+      registerCityBuildingCollider(placed.x, placed.z, width + 0.7, depth + 0.7, -2, height + 4);
     }
 
     const bridgeDistrictPaintMat = new THREE.MeshStandardMaterial({
@@ -1818,55 +1967,25 @@ export class GameRuntime {
     });
     npcTempleGate.position.set(0, 0, 0.34);
     const spawnPortalVeil = new THREE.Group();
-    spawnPortalVeil.position.set(0, 3.15, npcTempleGate.position.z - 0.02);
-    const veilWidth = this.mobileEnabled ? 18 : 24;
-    const veilHeight = this.mobileEnabled ? 10 : 13.8;
+    spawnPortalVeil.position.set(0, this.mobileEnabled ? 8.4 : 10.8, npcTempleGate.position.z - 0.03);
+    const veilWidth = this.mobileEnabled ? 84 : 122;
+    const veilHeight = this.mobileEnabled ? 48 : 70;
+    const veilTexture = this.createSpawnPortalVeilTexture();
     const veilCore = new THREE.Mesh(
       new THREE.PlaneGeometry(veilWidth, veilHeight),
       new THREE.MeshStandardMaterial({
-        color: 0x78dcff,
-        roughness: 0.08,
-        metalness: 0.78,
-        emissive: 0x4bcfff,
-        emissiveIntensity: 0.56,
-        transparent: true,
-        opacity: 0.96,
+        color: 0xffffff,
+        map: veilTexture,
+        roughness: 0.62,
+        metalness: 0.1,
+        emissive: 0x0b1f12,
+        emissiveIntensity: 0.24,
         depthWrite: true,
         side: THREE.DoubleSide
       })
     );
     veilCore.renderOrder = 18;
-    const veilGlow = new THREE.Mesh(
-      new THREE.PlaneGeometry(veilWidth * 1.08, veilHeight * 1.06),
-      new THREE.MeshBasicMaterial({
-        color: 0x79f2ff,
-        transparent: true,
-        opacity: 0.24,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-        blending: THREE.AdditiveBlending,
-        fog: false,
-        toneMapped: false
-      })
-    );
-    veilGlow.position.z = -0.02;
-    veilGlow.renderOrder = 17;
-    const veilMist = new THREE.Mesh(
-      new THREE.PlaneGeometry(veilWidth * 0.92, veilHeight * 0.88),
-      new THREE.MeshBasicMaterial({
-        color: 0xadf7ff,
-        transparent: true,
-        opacity: 0.3,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-        blending: THREE.AdditiveBlending,
-        fog: false,
-        toneMapped: false
-      })
-    );
-    veilMist.position.z = 0.015;
-    veilMist.renderOrder = 19;
-    spawnPortalVeil.add(veilGlow, veilCore, veilMist);
+    spawnPortalVeil.add(veilCore);
 
     const npcBody = new THREE.Mesh(
       new THREE.CapsuleGeometry(0.32, 0.86, 4, 8),
@@ -2195,6 +2314,7 @@ export class GameRuntime {
     this.portalBillboardGroup = portalBillboard;
     this.spawnPortalVeilGroup = spawnPortalVeil;
     this.spawnPortalVeilWorldZ = npcGuide.position.z + npcTempleGate.position.z;
+    this.updateSpawnPortalVeilFlowTexture(true);
     this.aZonePortalGroup = aZonePortalGroup;
     this.aZonePortalRing = aZonePortalRing;
     this.aZonePortalCore = aZonePortalCore;
@@ -3316,7 +3436,7 @@ export class GameRuntime {
     const centerDistance = this.mobileEnabled ? 228 : 248;
     const center = spawnBase.clone().addScaledVector(forward, centerDistance);
     const skylineHeight = this.mobileEnabled ? 92 : 118;
-    const skylineY = this.mobileEnabled ? 30 : 38;
+    const skylineY = this.mobileEnabled ? 20 : 28;
     const baseYaw = Math.atan2(forward.x, forward.z) + Math.PI;
 
     const segments = [
@@ -3591,7 +3711,7 @@ export class GameRuntime {
     const districtGroup = new THREE.Group();
     districtGroup.name = "future_city_billboard_district";
     const toPlayer = forward.clone().multiplyScalar(-1).normalize();
-    const baseCenter = center.clone().addScaledVector(forward, this.mobileEnabled ? -28 : -24);
+    const baseCenter = center.clone().addScaledVector(forward, this.mobileEnabled ? -46 : -40);
     const topBillboardForwardOffset = this.mobileEnabled ? 9 : 14;
     const styleCycle = ["cyan", "slate", "amber"];
 
@@ -4322,15 +4442,16 @@ export class GameRuntime {
       };
       break;
     }
-    const adBoardTarget = this.getCityAdBillboardProximityTarget(this.mobileEnabled ? 16 : 9.4);
+    const adBoardTarget = this.getCityAdBillboardProximityTarget(this.mobileEnabled ? 20 : 12.5);
     if (adBoardTarget) {
-      if (!raycastTarget) {
-        return adBoardTarget;
+      if (raycastTarget) {
+        const rayIsBillboard = this.isCityMainAdBillboardSurface(raycastTarget.surfaceId);
+        if (rayIsBillboard) {
+          return raycastTarget;
+        }
       }
-      const rayIsBillboard = this.isCityMainAdBillboardSurface(raycastTarget.surfaceId);
-      if (!rayIsBillboard && adBoardTarget.distance <= raycastTarget.distance + 2.4) {
-        return adBoardTarget;
-      }
+      // Prioritize ad boards over nearby building walls so F interaction opens billboard painter reliably.
+      return adBoardTarget;
     }
     if (raycastTarget) {
       return raycastTarget;
@@ -4432,7 +4553,7 @@ export class GameRuntime {
     return bestTarget;
   }
 
-  getCityAdBillboardProximityTarget(maxDistance = 9.4) {
+  getCityAdBillboardProximityTarget(maxDistance = 12.5) {
     if (!this.camera || !this.paintableSurfaceMeshes.length) {
       return null;
     }
@@ -5996,6 +6117,124 @@ export class GameRuntime {
     });
   }
 
+  createSpawnPortalVeilTexture() {
+    const canvas = document.createElement("canvas");
+    canvas.width = this.mobileEnabled ? 1024 : 1536;
+    canvas.height = this.mobileEnabled ? 640 : 900;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return null;
+    }
+
+    const columnCount = this.mobileEnabled ? 22 : 34;
+    const columns = [];
+    for (let index = 0; index < columnCount; index += 1) {
+      const ratio = columnCount <= 1 ? 0 : index / (columnCount - 1);
+      const spread = canvas.width * 0.08 + ratio * canvas.width * 0.84;
+      const seeded = Math.sin((index + 1) * 12.9898) * 43758.5453;
+      const rnd = seeded - Math.floor(seeded);
+      const text = SPAWN_PORTAL_VEIL_FLOW_TEXT[index % SPAWN_PORTAL_VEIL_FLOW_TEXT.length];
+      columns.push({
+        x: Math.round(spread),
+        speed: 54 + rnd * 112,
+        offset: rnd * canvas.height,
+        text
+      });
+    }
+
+    this.spawnPortalVeilCanvas = canvas;
+    this.spawnPortalVeilContext = context;
+    this.spawnPortalVeilFlowColumns = columns;
+    this.spawnPortalVeilFlowTickMs = 0;
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.generateMipmaps = false;
+    texture.needsUpdate = true;
+    this.spawnPortalVeilTexture = texture;
+    this.updateSpawnPortalVeilFlowTexture(true);
+    return texture;
+  }
+
+  updateSpawnPortalVeilFlowTexture(force = false) {
+    const context = this.spawnPortalVeilContext;
+    const canvas = this.spawnPortalVeilCanvas;
+    const texture = this.spawnPortalVeilTexture;
+    if (!context || !canvas || !texture) {
+      return;
+    }
+
+    const nowMs = performance.now();
+    if (!force && nowMs - this.spawnPortalVeilFlowTickMs < 33) {
+      return;
+    }
+    this.spawnPortalVeilFlowTickMs = nowMs;
+    const nowSec = nowMs * 0.001;
+    const width = canvas.width;
+    const height = canvas.height;
+
+    context.clearRect(0, 0, width, height);
+
+    const base = context.createLinearGradient(0, 0, 0, height);
+    base.addColorStop(0, "#010402");
+    base.addColorStop(0.38, "#041009");
+    base.addColorStop(1, "#020804");
+    context.fillStyle = base;
+    context.fillRect(0, 0, width, height);
+
+    const edgeGlow = context.createRadialGradient(
+      width * 0.5,
+      height * 0.5,
+      height * 0.08,
+      width * 0.5,
+      height * 0.5,
+      height * 0.78
+    );
+    edgeGlow.addColorStop(0, "rgba(28, 126, 88, 0.22)");
+    edgeGlow.addColorStop(0.66, "rgba(8, 33, 21, 0.5)");
+    edgeGlow.addColorStop(1, "rgba(1, 6, 3, 0.92)");
+    context.fillStyle = edgeGlow;
+    context.fillRect(0, 0, width, height);
+
+    context.font = `700 ${this.mobileEnabled ? 24 : 28}px monospace`;
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    for (const column of this.spawnPortalVeilFlowColumns) {
+      const glyphStep = this.mobileEnabled ? 26 : 30;
+      const streamText = String(column.text ?? "EMPTINES").replace(/\s+/g, "");
+      const streamLength = Math.max(1, streamText.length);
+      const trackLength = streamLength * glyphStep;
+      const offset = (nowSec * column.speed + column.offset) % trackLength;
+      for (let y = -glyphStep * 2; y <= height + glyphStep * 2; y += glyphStep) {
+        const streamY = y + offset;
+        const charIndex = Math.floor((streamY / glyphStep) % streamLength + streamLength) % streamLength;
+        const pulse = 0.45 + 0.55 * Math.sin(nowSec * 2.1 + column.x * 0.015 + charIndex * 0.8);
+        context.fillStyle = `rgba(108, 255, 155, ${0.42 + pulse * 0.44})`;
+        context.fillText(streamText.charAt(charIndex), column.x, streamY);
+      }
+    }
+
+    const tickerText = " EMPTINES // CITY STREAM LOCKED // PORTAL PASS REQUIRED // ";
+    context.font = `700 ${this.mobileEnabled ? 30 : 42}px monospace`;
+    context.textAlign = "left";
+    context.textBaseline = "middle";
+    const tickerWidth = context.measureText(tickerText).width;
+    const tickerShift = (nowSec * 180) % tickerWidth;
+    const tickerY = height * 0.52;
+    context.fillStyle = "rgba(18, 34, 23, 0.9)";
+    context.fillRect(0, tickerY - (this.mobileEnabled ? 24 : 30), width, this.mobileEnabled ? 48 : 60);
+    context.fillStyle = "rgba(186, 255, 205, 0.95)";
+    for (let x = -tickerShift - tickerWidth; x <= width + tickerWidth; x += tickerWidth) {
+      context.fillText(tickerText, x, tickerY);
+    }
+
+    texture.needsUpdate = true;
+  }
+
   getNpcDistance() {
     const dx = this.playerPosition.x - this.bridgeNpcPosition.x;
     const dz = this.playerPosition.z - this.bridgeNpcPosition.z;
@@ -6420,6 +6659,9 @@ export class GameRuntime {
       this.flowStage === "city_live" ||
       this.flowStage === "portal_transfer";
     this.spawnPortalVeilGroup.visible = !forceHideByFlow && !passedPortal;
+    if (this.spawnPortalVeilGroup.visible) {
+      this.updateSpawnPortalVeilFlowTexture();
+    }
   }
 
   updatePortalVisual() {
@@ -6933,9 +7175,7 @@ export class GameRuntime {
   }
 
   syncHostControls() {
-    const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
-    const hasHostPrivilege = this.isRoomHost || localHostMode;
-    const visible = this.hubFlowEnabled && hasHostPrivilege;
+    const visible = this.hubFlowEnabled;
     const canHostUseChat = this.canUseHostChatShortcut();
     const chatEnabled = this.canUseChatControls();
     this.chatUiEl?.classList.toggle("hidden", !chatEnabled);
@@ -6964,7 +7204,7 @@ export class GameRuntime {
       return;
     }
 
-    const canControlPortal = visible && this.flowStage === "city_live";
+    const canControlPortal = visible;
     const schedule = this.getPortalScheduleComputed();
     const portalOpenNow = schedule.mode === "open" || schedule.mode === "open_manual";
     const canSchedulePortal = canControlPortal && !portalOpenNow;
@@ -6983,25 +7223,23 @@ export class GameRuntime {
       if (this.hostOpenPortalBtnEl.textContent !== nextLabel) {
         this.hostOpenPortalBtnEl.textContent = nextLabel;
       }
-      this.hostOpenPortalBtnEl.disabled = !canControlPortal || controlsBusy;
-      this.hostOpenPortalBtnEl.title = !canControlPortal
-        ? "도시 라이브 단계에서만 사용 가능"
-        : portalOpenNow
-          ? "방장 포탈 즉시 닫기"
-          : "방장 포탈 즉시 개방";
+      this.hostOpenPortalBtnEl.disabled = controlsBusy;
+      this.hostOpenPortalBtnEl.title = portalOpenNow
+        ? "포탈 즉시 닫기"
+        : "포탈 즉시 개방";
     }
 
     for (const button of this.hostDelayButtons) {
-      button.disabled = !canSchedulePortal || controlsBusy;
+      button.disabled = controlsBusy;
     }
     if (this.hostDelayMinutesInputEl) {
-      this.hostDelayMinutesInputEl.disabled = !canSchedulePortal || controlsBusy;
+      this.hostDelayMinutesInputEl.disabled = controlsBusy;
     }
     if (this.hostApplyDelayBtnEl) {
-      this.hostApplyDelayBtnEl.disabled = !canSchedulePortal || controlsBusy;
+      this.hostApplyDelayBtnEl.disabled = controlsBusy;
     }
     if (this.hostPortalTargetInputEl) {
-      this.hostPortalTargetInputEl.disabled = !canControlPortal || controlsBusy;
+      this.hostPortalTargetInputEl.disabled = controlsBusy;
       if (document.activeElement !== this.hostPortalTargetInputEl) {
         const nextValue = String(this.hostPortalTargetCandidate || this.portalTargetUrl || "").trim();
         if (this.hostPortalTargetInputEl.value !== nextValue) {
@@ -7010,34 +7248,34 @@ export class GameRuntime {
       }
     }
     if (this.hostPortalTargetApplyBtnEl) {
-      this.hostPortalTargetApplyBtnEl.disabled = !canControlPortal || controlsBusy;
+      this.hostPortalTargetApplyBtnEl.disabled = controlsBusy;
     }
     if (this.hostRightVideoSelectEl) {
-      this.hostRightVideoSelectEl.disabled = !canControlPortal || controlsBusy;
+      this.hostRightVideoSelectEl.disabled = controlsBusy;
     }
     if (this.hostPlayRightVideoBtnEl) {
-      this.hostPlayRightVideoBtnEl.disabled = !canControlPortal || controlsBusy;
+      this.hostPlayRightVideoBtnEl.disabled = controlsBusy;
     }
     if (this.hostResetRightVideoBtnEl) {
-      this.hostResetRightVideoBtnEl.disabled = !canControlPortal || controlsBusy;
+      this.hostResetRightVideoBtnEl.disabled = controlsBusy;
     }
     if (this.hostLeftImageFileInputEl) {
-      this.hostLeftImageFileInputEl.disabled = !canControlPortal || controlsBusy;
+      this.hostLeftImageFileInputEl.disabled = controlsBusy;
     }
     if (this.hostResetLeftImageBtnEl) {
-      this.hostResetLeftImageBtnEl.disabled = !canControlPortal || controlsBusy;
+      this.hostResetLeftImageBtnEl.disabled = controlsBusy;
     }
     if (this.hostMusicFileInputEl) {
-      this.hostMusicFileInputEl.disabled = !canControlPortal || controlsBusy;
+      this.hostMusicFileInputEl.disabled = controlsBusy;
     }
     if (this.hostMusicPlayBtnEl) {
-      this.hostMusicPlayBtnEl.disabled = !canControlPortal || controlsBusy;
+      this.hostMusicPlayBtnEl.disabled = controlsBusy;
     }
     if (this.hostMusicStopBtnEl) {
-      this.hostMusicStopBtnEl.disabled = !canControlPortal || controlsBusy;
+      this.hostMusicStopBtnEl.disabled = controlsBusy;
     }
     for (const button of this.hostRightVideoQuickButtons ?? []) {
-      button.disabled = !canControlPortal || controlsBusy;
+      button.disabled = controlsBusy;
     }
     this.syncRightBillboardHostUi();
   }
@@ -8739,6 +8977,9 @@ export class GameRuntime {
         const isEscape = event.code === "Escape" || event.key === "Escape";
         if (isEnter) {
           event.preventDefault();
+          if (event.repeat) {
+            return;
+          }
           this.sendChatMessage();
           return;
         }
@@ -8807,9 +9048,7 @@ export class GameRuntime {
     }
     if (this.hostControlsToggleBtnEl) {
       this.hostControlsToggleBtnEl.addEventListener("click", () => {
-        const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
-        const hasHostPrivilege = this.isRoomHost || localHostMode;
-        if (!this.hubFlowEnabled || !hasHostPrivilege) {
+        if (!this.hubFlowEnabled) {
           return;
         }
         this.hostControlsOpen = !this.hostControlsOpen;
@@ -9656,6 +9895,9 @@ export class GameRuntime {
       this.lastAckInputSeq = 0;
       this.pendingInputQueue.length = 0;
       this.netPingPending.clear();
+      this.chatSeenMessageIds.clear();
+      this.chatMessageSeq = 0;
+      this.lastChatSendAt = 0;
       this.pendingAuthoritativeStateSync = true;
       this.authoritativeSyncGraceUntil = performance.now() + 2200;
       this.updateRoomPlayerSnapshot([]);
@@ -9693,6 +9935,9 @@ export class GameRuntime {
       this.pendingJumpInput = false;
       this.pendingInputQueue.length = 0;
       this.netPingPending.clear();
+      this.chatSeenMessageIds.clear();
+      this.chatMessageSeq = 0;
+      this.lastChatSendAt = 0;
       this.stopNetworkPing();
       this.authoritativeSyncGraceUntil = 0;
       this.clearRemotePlayers();
@@ -9722,6 +9967,9 @@ export class GameRuntime {
       this.pendingJumpInput = false;
       this.pendingInputQueue.length = 0;
       this.authoritativeSyncGraceUntil = 0;
+      this.chatSeenMessageIds.clear();
+      this.chatMessageSeq = 0;
+      this.lastChatSendAt = 0;
       this.clearRemotePlayers();
       this.updateRoomPlayerSnapshot([]);
       this.setPlayerRosterVisible(false);
@@ -10633,7 +10881,74 @@ export class GameRuntime {
     }
   }
 
+  normalizeChatMessageId(rawValue) {
+    const value = String(rawValue ?? "").trim();
+    if (!value) {
+      return "";
+    }
+    return value.replace(/[^a-zA-Z0-9:_-]/g, "").slice(0, 80);
+  }
+
+  pruneSeenChatMessageIds(nowMs = Date.now()) {
+    const ttlMs = Math.max(20_000, Math.trunc(Number(this.chatSeenMessageIdTtlMs) || 0));
+    for (const [messageId, seenAt] of this.chatSeenMessageIds.entries()) {
+      if (nowMs - seenAt > ttlMs) {
+        this.chatSeenMessageIds.delete(messageId);
+      }
+    }
+
+    const maxTracked = 512;
+    while (this.chatSeenMessageIds.size > maxTracked) {
+      const oldestKey = this.chatSeenMessageIds.keys().next().value;
+      if (!oldestKey) {
+        break;
+      }
+      this.chatSeenMessageIds.delete(oldestKey);
+    }
+  }
+
+  hasSeenChatMessageId(messageId, nowMs = Date.now()) {
+    const normalized = this.normalizeChatMessageId(messageId);
+    if (!normalized) {
+      return false;
+    }
+    this.pruneSeenChatMessageIds(nowMs);
+    return this.chatSeenMessageIds.has(normalized);
+  }
+
+  rememberSeenChatMessageId(messageId, nowMs = Date.now()) {
+    const normalized = this.normalizeChatMessageId(messageId);
+    if (!normalized) {
+      return "";
+    }
+    this.chatSeenMessageIds.set(normalized, nowMs);
+    this.pruneSeenChatMessageIds(nowMs);
+    return normalized;
+  }
+
+  createClientChatMessageId() {
+    const localId = String(this.localPlayerId ?? "local")
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, "")
+      .slice(-12) || "local";
+    this.chatMessageSeq = (this.chatMessageSeq + 1) % 1_000_000_000;
+    const seq = this.chatMessageSeq.toString(36);
+    const stamp = Date.now().toString(36);
+    return `c_${localId}_${stamp}_${seq}`;
+  }
+
   handleChatMessage(payload) {
+    const messageId = this.normalizeChatMessageId(
+      payload?.messageId ?? payload?.clientMessageId ?? ""
+    );
+    const nowMs = Date.now();
+    if (messageId && this.hasSeenChatMessageId(messageId, nowMs)) {
+      return;
+    }
+    if (messageId) {
+      this.rememberSeenChatMessageId(messageId, nowMs);
+    }
+
     const text = String(payload?.text ?? "").trim().slice(0, 120);
     if (!text) {
       return;
@@ -10746,6 +11061,12 @@ export class GameRuntime {
     }
 
     const text = rawInput.slice(0, 120);
+    const sendNow = performance.now();
+    if (sendNow - this.lastChatSendAt < this.chatSendMinIntervalMs) {
+      return;
+    }
+    this.lastChatSendAt = sendNow;
+    const messageId = this.createClientChatMessageId();
 
     const senderName = this.formatPlayerName(this.localPlayerName);
     this.localPlayerName = senderName;
@@ -10753,13 +11074,15 @@ export class GameRuntime {
     if (appended) {
       this.lastLocalChatEcho = `${senderName}|${text}`;
       this.lastLocalChatEchoAt = performance.now();
+      this.rememberSeenChatMessageId(messageId);
     }
     this.showLocalChatBubble(text);
 
     if (this.socket && this.networkConnected) {
       this.socket.emit("chat:send", {
         name: senderName,
-        text
+        text,
+        clientMessageId: messageId
       });
     }
 
@@ -11557,7 +11880,9 @@ export class GameRuntime {
     }
     // Sync to server so all players see the platforms
     if (this.socket && this.networkConnected) {
-      this.socket.emit("platform:state:set", { platforms: this.jumpPlatforms });
+      this.socket.emit("platform:state:set", { platforms: this.jumpPlatforms }, (res = {}) => {
+        if (!res?.ok) console.warn("[platform] save rejected:", res?.error);
+      });
     }
   }
 
@@ -11780,7 +12105,9 @@ export class GameRuntime {
       localStorage.setItem("jumpRopes_v1", JSON.stringify(this.jumpRopes));
     } catch { /* ignore */ }
     if (this.socket && this.networkConnected) {
-      this.socket.emit("rope:state:set", { ropes: this.jumpRopes });
+      this.socket.emit("rope:state:set", { ropes: this.jumpRopes }, (res = {}) => {
+        if (!res?.ok) console.warn("[rope] save rejected:", res?.error);
+      });
     }
   }
 

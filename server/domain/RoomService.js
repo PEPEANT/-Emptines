@@ -826,6 +826,11 @@ export class RoomService {
       return { ok: true, changed: false, hostId: room.hostId };
     }
 
+    // Prevent host takeover when another player is actively in the room as host
+    if (room.hostId && room.players.has(room.hostId)) {
+      return { ok: false, error: "room already has a host" };
+    }
+
     room.hostId = socketId;
     return { ok: true, changed: true, hostId: room.hostId };
   }
