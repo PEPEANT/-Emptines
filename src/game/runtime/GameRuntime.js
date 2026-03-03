@@ -373,6 +373,7 @@ export class GameRuntime {
     this.surfacePainterPromoRemoveBtnEl = null;
     this.surfacePainterPromoScaleDownBtnEl = null;
     this.surfacePainterPromoScaleUpBtnEl = null;
+    this.surfacePainterPromoShareToggleBtnEl = null;
     this.surfacePainterEraserBtnEl = null;
     this.surfacePainterFillBtnEl = null;
     this.surfacePainterOpen = false;
@@ -636,6 +637,7 @@ export class GameRuntime {
     this.surfacePainterPromoRemoveBtnEl = document.getElementById("surface-painter-promo-remove");
     this.surfacePainterPromoScaleDownBtnEl = document.getElementById("surface-painter-promo-scale-down");
     this.surfacePainterPromoScaleUpBtnEl = document.getElementById("surface-painter-promo-scale-up");
+    this.surfacePainterPromoShareToggleBtnEl = document.getElementById("surface-painter-promo-share-toggle");
     this.surfacePainterEraserBtnEl = document.getElementById("surface-painter-eraser");
     this.surfacePainterFillBtnEl = document.getElementById("surface-painter-fill");
     this.surfacePainterContext = this.surfacePainterCanvasEl?.getContext?.("2d") ?? null;
@@ -5733,6 +5735,18 @@ export class GameRuntime {
     return this.promoObjects.get(ownerKey) ?? null;
   }
 
+  canCurrentPlayerEditPromoSurface(ownerKey = this.getSurfacePainterPromoOwnerKey()) {
+    const targetOwnerKey = String(ownerKey ?? "").trim();
+    if (!targetOwnerKey) {
+      return true;
+    }
+    if (targetOwnerKey === String(this.promoOwnerKey ?? "")) {
+      return true;
+    }
+    const promoTarget = this.promoObjects.get(targetOwnerKey);
+    return Boolean(promoTarget?.allowOthersDraw);
+  }
+
   getSurfacePainterPromoBlockedReason() {
     const ownerKey = this.getSurfacePainterPromoOwnerKey();
     if (!ownerKey) {
@@ -5798,6 +5812,24 @@ export class GameRuntime {
     });
   }
 
+  toggleSurfacePainterPromoAllowOthersDraw() {
+    const blockedReason = this.getSurfacePainterPromoBlockedReason();
+    if (blockedReason) {
+      this.appendChatLine("", blockedReason, "system");
+      return;
+    }
+    const target = this.getSurfacePainterPromoTarget();
+    if (!target) {
+      return;
+    }
+    const nextAllow = !Boolean(target.allowOthersDraw);
+    this.requestPromoUpsert({
+      placeInFront: false,
+      preserveExistingStyle: true,
+      allowOthersDrawOverride: nextAllow
+    });
+  }
+
   handleSurfacePainterDeleteAction() {
     const promoOwnerKey = this.getSurfacePainterPromoOwnerKey();
     if (promoOwnerKey) {
@@ -5812,8 +5844,8 @@ export class GameRuntime {
       return "그림 저장 중입니다.";
     }
     const promoOwnerKey = this.getSurfacePainterPromoOwnerKey();
-    if (promoOwnerKey && promoOwnerKey !== String(this.promoOwnerKey ?? "")) {
-      return "다른 플레이어 오브젝트는 수정할 수 없습니다.";
+    if (promoOwnerKey && !this.canCurrentPlayerEditPromoSurface(promoOwnerKey)) {
+      return "소유자가 허용한 오브젝트만 수정할 수 있습니다.";
     }
     if (!this.socketEndpoint) {
       const endpointError = String(this.socketEndpointValidationError ?? "").trim();
@@ -5869,6 +5901,22 @@ export class GameRuntime {
         button.title = promoBlockedReason;
       } else {
         button.removeAttribute("title");
+      }
+    }
+
+    if (this.surfacePainterPromoShareToggleBtnEl) {
+      const promoTarget = this.getSurfacePainterPromoTarget();
+      const nextAllow = Boolean(promoTarget?.allowOthersDraw);
+      const showShareToggle = showPromoButtons;
+      this.surfacePainterPromoShareToggleBtnEl.classList.toggle("hidden", !showShareToggle);
+      this.surfacePainterPromoShareToggleBtnEl.textContent = nextAllow
+        ? "다른사람 수정: 허용"
+        : "다른사람 수정: 비허용";
+      this.surfacePainterPromoShareToggleBtnEl.disabled = Boolean(promoBlockedReason);
+      if (promoBlockedReason) {
+        this.surfacePainterPromoShareToggleBtnEl.title = promoBlockedReason;
+      } else {
+        this.surfacePainterPromoShareToggleBtnEl.removeAttribute("title");
       }
     }
   }
@@ -9103,6 +9151,9 @@ export class GameRuntime {
     if (this.promoLinkInputEl && document.activeElement !== this.promoLinkInputEl) {
       this.promoLinkInputEl.value = linkValue;
     }
+    if (this.promoAllowOthersDrawEl && document.activeElement !== this.promoAllowOthersDrawEl && hasOwnPromo) {
+      this.promoAllowOthersDrawEl.checked = Boolean(own?.allowOthersDraw);
+    }
     if (this.promoTypeSelectEl && document.activeElement !== this.promoTypeSelectEl) {
       const selectedType = this.normalizePromoKind(this.promoTypeSelectEl.value, ownKind);
       this.promoTypeSelectEl.value = hasOwnPromo ? ownKind : selectedType;
@@ -9567,6 +9618,7 @@ export class GameRuntime {
     preserveExistingStyle = false,
     scaleOverride = null,
     transformOverride = null,
+    allowOthersDrawOverride = null,
     skipPlacementPreview = false
   } = {}) {
     if (!(this.socket && this.networkConnected)) {
@@ -9642,7 +9694,11 @@ export class GameRuntime {
       linkUrl = this.normalizePromoLinkUrl(own.linkUrl ?? "");
     }
 
-    const allowOthersDraw = false;
+    const allowOthersDraw = typeof allowOthersDrawOverride === "boolean"
+      ? allowOthersDrawOverride
+      : usePanelValues
+        ? Boolean(this.promoAllowOthersDrawEl?.checked)
+        : Boolean(own?.allowOthersDraw);
 
     let mediaDataUrl = "";
     if (this.promoMediaRemoved) {
@@ -12567,6 +12623,9 @@ export class GameRuntime {
     this.surfacePainterPromoScaleUpBtnEl?.addEventListener("click", () => {
       this.requestPromoScaleFromSurfacePainter(0.5);
     });
+    this.surfacePainterPromoShareToggleBtnEl?.addEventListener("click", () => {
+      this.toggleSurfacePainterPromoAllowOthersDraw();
+    });
     this.surfacePainterFillBtnEl?.addEventListener("click", () => {
       this.fillSurfacePainterWithBrushColor();
     });
@@ -12805,6 +12864,11 @@ export class GameRuntime {
     if (!this.surfacePainterPromoScaleUpBtnEl) {
       this.surfacePainterPromoScaleUpBtnEl = document.getElementById(
         "surface-painter-promo-scale-up"
+      );
+    }
+    if (!this.surfacePainterPromoShareToggleBtnEl) {
+      this.surfacePainterPromoShareToggleBtnEl = document.getElementById(
+        "surface-painter-promo-share-toggle"
       );
     }
     if (!this.surfacePainterEraserBtnEl) {

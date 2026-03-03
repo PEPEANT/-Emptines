@@ -168,6 +168,28 @@ function getPromoOwnerKeyFromSurfaceId(rawSurfaceId, promoMap = null) {
   return strippedOwnerKey || directOwnerKey || "";
 }
 
+function normalizeBooleanFlag(rawValue, fallback = false) {
+  if (typeof rawValue === "boolean") {
+    return rawValue;
+  }
+  if (typeof rawValue === "number") {
+    return rawValue !== 0;
+  }
+  if (typeof rawValue === "string") {
+    const normalized = rawValue.trim().toLowerCase();
+    if (!normalized) {
+      return Boolean(fallback);
+    }
+    if (["1", "true", "yes", "y", "on"].includes(normalized)) {
+      return true;
+    }
+    if (["0", "false", "no", "n", "off"].includes(normalized)) {
+      return false;
+    }
+  }
+  return Boolean(fallback);
+}
+
 function normalizeSurfaceImageDataUrl(rawValue) {
   const value = String(rawValue ?? "").trim();
   if (!value || value.length > MAX_SURFACE_IMAGE_CHARS) {
@@ -970,7 +992,7 @@ export class RoomService {
       linkUrl: normalizePromoUrl(source.linkUrl ?? fallback?.linkUrl ?? ""),
       mediaDataUrl,
       mediaKind,
-      allowOthersDraw: false,
+      allowOthersDraw: normalizeBooleanFlag(source.allowOthersDraw, fallback?.allowOthersDraw ?? false),
       updatedAt: Math.max(
         0,
         Math.trunc(Number(source.updatedAt) || Number(fallback?.updatedAt) || Date.now())
@@ -1607,7 +1629,9 @@ export class RoomService {
       if (!actorKey) {
         return { ok: false, error: "invalid owner key" };
       }
-      if (actorKey !== promoOwnerKey) {
+      const promoEntry = promoMap instanceof Map ? promoMap.get(promoOwnerKey) : null;
+      const allowOthersDraw = normalizeBooleanFlag(promoEntry?.allowOthersDraw, false);
+      if (actorKey !== promoOwnerKey && !allowOthersDraw) {
         return { ok: false, error: "owner denied edits" };
       }
     }

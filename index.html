@@ -296,6 +296,14 @@
         placeholder="https://example.com (비워도 됨)"
         autocomplete="off"
       />
+      <div class="promo-panel-row">
+        <label for="promo-allow-others-draw">수정 권한</label>
+        <label class="promo-panel-check" for="promo-allow-others-draw">
+          <input id="promo-allow-others-draw" type="checkbox" />
+          다른 사람 수정 허용
+        </label>
+        <span aria-hidden="true"></span>
+      </div>
       <label class="promo-panel-label" for="promo-draw-canvas">캔버스(네모 오브젝트 확장판)</label>
       <div id="promo-draw-wrap">
         <canvas id="promo-draw-canvas" width="1024" height="576" aria-label="홍보 오브젝트 캔버스"></canvas>
@@ -416,6 +424,7 @@
           <button id="surface-painter-eraser" type="button" aria-pressed="false">지우개</button>
         </div>
         <div id="surface-painter-actions">
+          <button id="surface-painter-promo-share-toggle" class="hidden" type="button">다른사람 수정: 비허용</button>
           <button id="surface-painter-export" type="button">PNG 내보내기</button>
           <button id="surface-painter-import" type="button">PNG 불러오기</button>
           <input id="surface-painter-import-file" class="hidden" type="file" accept=".png,image/png" />
