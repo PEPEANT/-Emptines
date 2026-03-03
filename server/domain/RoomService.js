@@ -520,11 +520,12 @@ function normalizeLeftBillboardImageDataUrl(rawValue) {
   return value;
 }
 
-function createPersistentRoom(code, defaultPortalTargetUrl) {
+function createPersistentRoom(code, defaultPortalTargetUrl, defaultAZonePortalTargetUrl) {
   return {
     code,
     hostId: null,
     portalTarget: defaultPortalTargetUrl,
+    aZonePortalTarget: defaultAZonePortalTargetUrl,
     portalSchedule: createPortalScheduleState(),
     leftBillboard: createLeftBillboardState(),
     rightBillboard: createRightBillboardState(),
@@ -552,6 +553,7 @@ export class RoomService {
     defaultRoomCode,
     maxRoomPlayers,
     defaultPortalTargetUrl,
+    defaultAZonePortalTargetUrl = "",
     portalOpenSeconds = 24,
     portalFinalCountdownSeconds = 10,
     surfacePaintStorePath = "",
@@ -563,6 +565,10 @@ export class RoomService {
     this.defaultRoomCode = defaultRoomCode;
     this.maxRoomPlayers = maxRoomPlayers;
     this.defaultPortalTargetUrl = normalizeRoomPortalTarget(defaultPortalTargetUrl, "");
+    this.defaultAZonePortalTargetUrl = normalizeRoomPortalTarget(
+      defaultAZonePortalTargetUrl,
+      this.defaultPortalTargetUrl
+    );
     this.portalOpenSeconds = Math.max(5, Math.trunc(Number(portalOpenSeconds) || 24));
     this.portalFinalCountdownSeconds = Math.max(
       3,
@@ -586,7 +592,11 @@ export class RoomService {
   getDefaultRoom() {
     let room = this.rooms.get(this.defaultRoomCode);
     if (!room) {
-      room = createPersistentRoom(this.defaultRoomCode, this.defaultPortalTargetUrl);
+      room = createPersistentRoom(
+        this.defaultRoomCode,
+        this.defaultPortalTargetUrl,
+        this.defaultAZonePortalTargetUrl
+      );
       this.rooms.set(this.defaultRoomCode, room);
     }
     return room;
@@ -815,6 +825,7 @@ export class RoomService {
       code: room.code,
       hostId: room.hostId,
       portalTarget: String(room.portalTarget ?? "").trim(),
+      aZonePortalTarget: String(room.aZonePortalTarget ?? "").trim(),
       portalSchedule: this.serializePortalSchedule(room),
       rightBillboard: this.serializeRightBillboard(room),
       securityTest: this.serializeSecurityTest(room),
@@ -901,6 +912,12 @@ export class RoomService {
   emitPortalTargetUpdate(room) {
     this.io.to(room.code).emit("portal:target:update", {
       targetUrl: String(room?.portalTarget ?? "").trim()
+    });
+  }
+
+  emitAZonePortalTargetUpdate(room) {
+    this.io.to(room.code).emit("portal:a-zone-target:update", {
+      targetUrl: String(room?.aZonePortalTarget ?? "").trim()
     });
   }
 
@@ -1719,6 +1736,24 @@ export class RoomService {
 
     room.portalTarget = normalized;
     return { ok: true, changed: true, targetUrl: room.portalTarget };
+  }
+
+  setAZonePortalTarget(room, rawTarget) {
+    if (!room) {
+      return { ok: false, error: "room not found" };
+    }
+
+    const normalized = normalizeRoomPortalTarget(rawTarget, "");
+    if (!normalized) {
+      return { ok: false, error: "invalid portal target" };
+    }
+
+    if (room.aZonePortalTarget === normalized) {
+      return { ok: true, changed: false, targetUrl: room.aZonePortalTarget };
+    }
+
+    room.aZonePortalTarget = normalized;
+    return { ok: true, changed: true, targetUrl: room.aZonePortalTarget };
   }
 
   setSecurityTestEnabled(room, rawEnabled) {

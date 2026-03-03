@@ -643,6 +643,7 @@ canvas {
 
 #host-delay-minutes,
 #host-portal-target,
+#host-a-zone-portal-target,
 #host-gray-object-width,
 #host-gray-object-height,
 #host-gray-object-depth {
@@ -664,6 +665,7 @@ canvas {
 
 #host-apply-delay,
 #host-portal-target-apply,
+#host-a-zone-portal-target-apply,
 #host-gray-object-add {
   flex: 1;
   min-width: 0;
@@ -680,6 +682,8 @@ canvas {
 #host-apply-delay:disabled,
 #host-portal-target-apply:disabled,
 #host-portal-target:disabled,
+#host-a-zone-portal-target-apply:disabled,
+#host-a-zone-portal-target:disabled,
 #host-gray-object-width:disabled,
 #host-gray-object-height:disabled,
 #host-gray-object-depth:disabled,
@@ -2363,7 +2367,8 @@ body.is-mobile-ui #mobile-move-stick {
 
   .host-delay-btn,
   #host-apply-delay,
-  #host-portal-target-apply {
+  #host-portal-target-apply,
+  #host-a-zone-portal-target-apply {
     height: 26px;
     font-size: 0.6rem;
   }
@@ -2399,7 +2404,8 @@ body.is-mobile-ui #mobile-move-stick {
     width: 84px;
   }
 
-  #host-portal-target {
+  #host-portal-target,
+  #host-a-zone-portal-target {
     min-width: 96px;
   }
 

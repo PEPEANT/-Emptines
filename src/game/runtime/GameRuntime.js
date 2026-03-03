@@ -480,8 +480,11 @@ export class GameRuntime {
     this.roomHostId = null;
     this.isRoomHost = false;
     this.portalTargetSetInFlight = false;
+    this.aZonePortalTargetSetInFlight = false;
     this.hostPortalTargetCandidate = this.resolveRequestedPortalTargetCandidate();
     this.hostPortalTargetSynced = false;
+    this.hostAZonePortalTargetCandidate = "";
+    this.hostAZonePortalTargetSynced = false;
     this.pendingPlayerNameSync = false;
     this.pendingAuthoritativeStateSync = false;
     this.authoritativeStateSyncInFlight = false;
@@ -567,6 +570,8 @@ export class GameRuntime {
     this.hostApplyDelayBtnEl = document.getElementById("host-apply-delay");
     this.hostPortalTargetInputEl = document.getElementById("host-portal-target");
     this.hostPortalTargetApplyBtnEl = document.getElementById("host-portal-target-apply");
+    this.hostAZonePortalTargetInputEl = document.getElementById("host-a-zone-portal-target");
+    this.hostAZonePortalTargetApplyBtnEl = document.getElementById("host-a-zone-portal-target-apply");
     this.hostLeftImageFileInputEl = document.getElementById("host-left-image-file");
     this.hostResetLeftImageBtnEl = document.getElementById("host-left-image-reset");
     this.hostMusicFileInputEl = document.getElementById("host-music-file");
@@ -779,9 +784,11 @@ export class GameRuntime {
     this.portalOpenSeconds = parseSeconds(portalConfig?.openSeconds, 24, 5);
     this.portalTargetUrl = this.resolvePortalTargetUrl(portalConfig?.targetUrl ?? "");
     this.aZonePortalTargetUrl = this.normalizePortalTargetUrl(
-      A_ZONE_FIXED_PORTAL_TARGET_URL,
+      portalConfig?.aZoneTargetUrl ?? A_ZONE_FIXED_PORTAL_TARGET_URL,
       A_ZONE_FIXED_PORTAL_TARGET_URL
     );
+    this.hostAZonePortalTargetCandidate = this.aZonePortalTargetUrl;
+    this.hostAZonePortalTargetSynced = true;
     this.aZonePortalFloorPosition = new THREE.Vector3(-60, 0.08, 0);
     this.aZonePortalRadius = Math.max(2.2, this.portalRadius * 0.88);
     this.portalPhase = this.hubFlowEnabled ? "open" : "idle";
@@ -8347,6 +8354,7 @@ export class GameRuntime {
       this.portalCloseInFlight ||
       this.portalScheduleSetInFlight ||
       this.portalTargetSetInFlight ||
+      this.aZonePortalTargetSetInFlight ||
       this.leftBillboardSetInFlight ||
       this.rightBillboardResetInFlight ||
       this.hostMusicSetInFlight ||
@@ -8385,6 +8393,20 @@ export class GameRuntime {
     }
     if (this.hostPortalTargetApplyBtnEl) {
       this.hostPortalTargetApplyBtnEl.disabled = controlsBusy;
+    }
+    if (this.hostAZonePortalTargetInputEl) {
+      this.hostAZonePortalTargetInputEl.disabled = controlsBusy;
+      if (document.activeElement !== this.hostAZonePortalTargetInputEl) {
+        const nextValue = String(
+          this.hostAZonePortalTargetCandidate || this.aZonePortalTargetUrl || ""
+        ).trim();
+        if (this.hostAZonePortalTargetInputEl.value !== nextValue) {
+          this.hostAZonePortalTargetInputEl.value = nextValue;
+        }
+      }
+    }
+    if (this.hostAZonePortalTargetApplyBtnEl) {
+      this.hostAZonePortalTargetApplyBtnEl.disabled = controlsBusy;
     }
     if (this.hostRightVideoSelectEl) {
       this.hostRightVideoSelectEl.disabled = controlsBusy;
@@ -9586,6 +9608,22 @@ export class GameRuntime {
     return true;
   }
 
+  applyAZonePortalTargetUpdate(rawTarget) {
+    const normalized = this.normalizePortalTargetUrl(rawTarget, "");
+    if (!normalized || normalized === this.aZonePortalTargetUrl) {
+      if (normalized && normalized === this.hostAZonePortalTargetCandidate) {
+        this.hostAZonePortalTargetSynced = true;
+      }
+      return false;
+    }
+
+    this.aZonePortalTargetUrl = normalized;
+    if (normalized === this.hostAZonePortalTargetCandidate) {
+      this.hostAZonePortalTargetSynced = true;
+    }
+    return true;
+  }
+
   confirmPromoPlacementPreview() {
     if (!this.promoPlacementPreviewActive) {
       return false;
@@ -10677,6 +10715,7 @@ export class GameRuntime {
           this.appendChatLine("", "방장 권한을 획득했습니다.", "system");
         }
         this.syncHostPortalTargetCandidate();
+        this.syncHostAZonePortalTargetCandidate();
         this.requestPlatformState();
         this.requestRopeState();
         this.requestObjectState();
@@ -10743,6 +10782,84 @@ export class GameRuntime {
     });
   }
 
+  requestAZonePortalTargetUpdate(targetUrl, { announceSuccess = false, announceErrors = false } = {}) {
+    if (!this.socket || !this.networkConnected) {
+      if (announceErrors) {
+        this.appendChatLine("", "서버 연결 후 FPS 포탈 링크를 변경할 수 있습니다.", "system");
+      }
+      return;
+    }
+    if (!this.isRoomHost) {
+      if (announceErrors) {
+        this.appendChatLine("", "FPS 포탈 링크 변경은 방장만 가능합니다.", "system");
+      }
+      return;
+    }
+    if (this.aZonePortalTargetSetInFlight) {
+      return;
+    }
+
+    const normalized = this.normalizePortalTargetUrl(targetUrl, "");
+    if (!normalized) {
+      if (announceErrors) {
+        this.appendChatLine("", "유효한 http/https 링크를 입력하세요.", "system");
+      }
+      return;
+    }
+
+    if (normalized === this.aZonePortalTargetUrl) {
+      if (announceSuccess) {
+        this.appendChatLine("", `FPS 포탈 링크 유지: ${normalized}`, "system");
+      }
+      if (normalized === this.hostAZonePortalTargetCandidate) {
+        this.hostAZonePortalTargetSynced = true;
+      }
+      return;
+    }
+
+    this.aZonePortalTargetSetInFlight = true;
+    let completed = false;
+    const finalize = () => {
+      if (completed) {
+        return false;
+      }
+      completed = true;
+      this.aZonePortalTargetSetInFlight = false;
+      return true;
+    };
+    const timeoutId = window.setTimeout(() => {
+      if (!finalize()) {
+        return;
+      }
+      if (announceErrors) {
+        this.appendChatLine("", "FPS 포탈 링크 변경 응답 시간 초과", "system");
+      }
+    }, 4000);
+    this.socket.emit("portal:a-zone-target:set", { targetUrl: normalized }, (response = {}) => {
+      if (!finalize()) {
+        return;
+      }
+      window.clearTimeout(timeoutId);
+
+      if (!response?.ok) {
+        if (announceErrors) {
+          const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
+          this.appendChatLine("", `FPS 포탈 링크 변경 실패: ${reason}`, "system");
+        }
+        return;
+      }
+
+      const applied = this.normalizePortalTargetUrl(response?.targetUrl ?? normalized, normalized);
+      this.aZonePortalTargetUrl = applied;
+      if (applied === this.hostAZonePortalTargetCandidate) {
+        this.hostAZonePortalTargetSynced = true;
+      }
+      if (announceSuccess) {
+        this.appendChatLine("", `FPS 포탈 링크 변경 완료: ${applied}`, "system");
+      }
+    });
+  }
+
   syncHostPortalTargetCandidate() {
     if (!this.isRoomHost || !this.hostPortalTargetCandidate) {
       return;
@@ -10757,6 +10874,20 @@ export class GameRuntime {
     }
 
     this.requestPortalTargetUpdate(this.hostPortalTargetCandidate);
+  }
+
+  syncHostAZonePortalTargetCandidate() {
+    if (!this.isRoomHost || !this.hostAZonePortalTargetCandidate) {
+      return;
+    }
+    if (this.hostAZonePortalTargetSynced) {
+      return;
+    }
+    if (this.hostAZonePortalTargetCandidate === this.aZonePortalTargetUrl) {
+      this.hostAZonePortalTargetSynced = true;
+      return;
+    }
+    this.requestAZonePortalTargetUpdate(this.hostAZonePortalTargetCandidate);
   }
 
   handleChatCommand(rawText) {
@@ -12513,6 +12644,32 @@ export class GameRuntime {
         this.hostPortalTargetApplyBtnEl?.click?.();
       });
     }
+    if (this.hostAZonePortalTargetApplyBtnEl) {
+      this.hostAZonePortalTargetApplyBtnEl.addEventListener("click", () => {
+        const raw = String(this.hostAZonePortalTargetInputEl?.value ?? "").trim();
+        const normalized = this.normalizePortalTargetUrl(raw, "");
+        if (!normalized) {
+          this.appendChatLine("", "유효한 http/https 링크를 입력하세요.", "system");
+          this.hostAZonePortalTargetInputEl?.focus?.();
+          return;
+        }
+        this.hostAZonePortalTargetCandidate = normalized;
+        this.hostAZonePortalTargetSynced = false;
+        this.requestAZonePortalTargetUpdate(normalized, {
+          announceSuccess: true,
+          announceErrors: true
+        });
+      });
+    }
+    if (this.hostAZonePortalTargetInputEl) {
+      this.hostAZonePortalTargetInputEl.addEventListener("keydown", (event) => {
+        if (event.code !== "Enter") {
+          return;
+        }
+        event.preventDefault();
+        this.hostAZonePortalTargetApplyBtnEl?.click?.();
+      });
+    }
     if (this.hostPlayRightVideoBtnEl) {
       this.hostPlayRightVideoBtnEl.addEventListener("click", () => {
         const videoId = String(this.hostRightVideoSelectEl?.value ?? "").trim();
@@ -13070,6 +13227,14 @@ export class GameRuntime {
     }
     if (!this.hostPortalTargetApplyBtnEl) {
       this.hostPortalTargetApplyBtnEl = document.getElementById("host-portal-target-apply");
+    }
+    if (!this.hostAZonePortalTargetInputEl) {
+      this.hostAZonePortalTargetInputEl = document.getElementById("host-a-zone-portal-target");
+    }
+    if (!this.hostAZonePortalTargetApplyBtnEl) {
+      this.hostAZonePortalTargetApplyBtnEl = document.getElementById(
+        "host-a-zone-portal-target-apply"
+      );
     }
     if (!this.hostRightVideoSelectEl) {
       this.hostRightVideoSelectEl = document.getElementById("host-right-video");
@@ -13695,7 +13860,9 @@ export class GameRuntime {
       this.isRoomHost = false;
       this.autoHostClaimLastAttemptMs = 0;
       this.hostPortalTargetSynced = false;
+      this.hostAZonePortalTargetSynced = false;
       this.portalTargetSetInFlight = false;
+      this.aZonePortalTargetSetInFlight = false;
       this.portalForceOpenInFlight = false;
       this.portalCloseInFlight = false;
       this.portalScheduleSetInFlight = false;
@@ -13767,7 +13934,9 @@ export class GameRuntime {
       this.isRoomHost = false;
       this.autoHostClaimLastAttemptMs = 0;
       this.hostPortalTargetSynced = false;
+      this.hostAZonePortalTargetSynced = false;
       this.portalTargetSetInFlight = false;
+      this.aZonePortalTargetSetInFlight = false;
       this.portalForceOpenInFlight = false;
       this.portalCloseInFlight = false;
       this.portalScheduleSetInFlight = false;
@@ -13887,6 +14056,10 @@ export class GameRuntime {
       if (changed) {
         this.updatePortalTimeBillboard(0, true);
       }
+    });
+
+    socket.on("portal:a-zone-target:update", (payload = {}) => {
+      this.applyAZonePortalTargetUpdate(payload?.targetUrl ?? payload?.url ?? "");
     });
 
     socket.on("portal:schedule:update", (payload = {}) => {
@@ -14101,6 +14274,9 @@ export class GameRuntime {
         this.updatePortalTimeBillboard(0, true);
       }
     }
+    if (typeof room?.aZonePortalTarget === "string") {
+      this.applyAZonePortalTargetUpdate(room.aZonePortalTarget);
+    }
     if (room?.portalSchedule && typeof room.portalSchedule === "object") {
       this.applyPortalScheduleUpdate(room.portalSchedule, { announce: false });
     }
@@ -14173,6 +14349,7 @@ export class GameRuntime {
     }
     if (this.isRoomHost) {
       this.syncHostPortalTargetCandidate();
+      this.syncHostAZonePortalTargetCandidate();
     }
     if (previousHostState !== this.isRoomHost) {
       this.hud.setStatus(this.getStatusText());

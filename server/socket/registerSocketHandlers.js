@@ -415,6 +415,38 @@ export function registerSocketHandlers({
       });
     });
 
+    socket.on("portal:a-zone-target:set", (payload = {}, ackFn) => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        ack(ackFn, { ok: false, error: "room not found" });
+        return;
+      }
+
+      if (!roomService.isHost(room, socket.id)) {
+        ack(ackFn, { ok: false, error: "host only" });
+        return;
+      }
+
+      const result = roomService.setAZonePortalTarget(
+        room,
+        payload?.targetUrl ?? payload?.url ?? ""
+      );
+      if (!result.ok) {
+        ack(ackFn, result);
+        return;
+      }
+
+      if (result.changed) {
+        roomService.emitAZonePortalTargetUpdate(room);
+      }
+
+      ack(ackFn, {
+        ok: true,
+        changed: Boolean(result.changed),
+        targetUrl: result.targetUrl
+      });
+    });
+
     socket.on("portal:schedule:set", (payload = {}, ackFn) => {
       const room = roomService.getRoomBySocket(socket);
       if (!room) {

@@ -49,6 +49,7 @@ export function startRealtimeServer(options = {}) {
     defaultRoomCode: config.defaultRoomCode,
     maxRoomPlayers: config.maxRoomPlayers,
     defaultPortalTargetUrl: config.defaultPortalTargetUrl,
+    defaultAZonePortalTargetUrl: config.defaultAZonePortalTargetUrl,
     surfacePaintStorePath: config.surfacePaintStorePath,
     surfacePaintSaveDebounceMs: config.surfacePaintSaveDebounceMs,
     log

@@ -189,9 +189,8 @@ export const BASE_VOID_PACK = {
         cooldownSeconds: 60,
         warningSeconds: 16,
         openSeconds: 24,
-        // Local test target requested by user.
-        targetUrl:
-          "http://localhost:5173/?server=http://localhost:3001&name=PLAYER"
+        targetUrl: "https://reclaim-fps.vercel.app/",
+        aZoneTargetUrl: "https://reclaim-fps.vercel.app/"
       }
     },
     postProcessing: {

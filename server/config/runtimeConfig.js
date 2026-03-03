@@ -2,6 +2,8 @@ export const SERVICE_NAME = "reclaim-fps-chat";
 export const DEFAULT_ROOM_CODE = "GLOBAL";
 export const DEFAULT_PORTAL_TARGET_URL =
   "https://reclaim-fps.vercel.app/";
+export const DEFAULT_A_ZONE_PORTAL_TARGET_URL =
+  "https://reclaim-fps.vercel.app/";
 export const DEFAULT_SURFACE_PAINT_STORE_PATH = "server/data/surface-paint.json";
 export const DEFAULT_SURFACE_PAINT_SAVE_DEBOUNCE_MS = 300;
 export const DEFAULT_MAX_SOCKET_PAYLOAD_BYTES = 12_000_000;
@@ -91,16 +93,22 @@ export function loadRuntimeConfig(env = process.env) {
 
   const parsedPort = Number(env.PORT ?? 3001);
   const port = Number.isFinite(parsedPort) ? Math.max(1, Math.trunc(parsedPort)) : 3001;
+  const defaultPortalTargetUrl = normalizeAbsoluteHttpUrl(
+    env.DEFAULT_PORTAL_TARGET_URL,
+    DEFAULT_PORTAL_TARGET_URL
+  );
+  const defaultAZonePortalTargetUrl = normalizeAbsoluteHttpUrl(
+    env.DEFAULT_A_ZONE_PORTAL_TARGET_URL,
+    defaultPortalTargetUrl
+  );
 
   return {
     serviceName: SERVICE_NAME,
     defaultRoomCode: DEFAULT_ROOM_CODE,
     maxRoomPlayers,
     hostClaimKey: parseOptionalString(env.HOST_CLAIM_KEY, 256),
-    defaultPortalTargetUrl: normalizeAbsoluteHttpUrl(
-      env.DEFAULT_PORTAL_TARGET_URL,
-      DEFAULT_PORTAL_TARGET_URL
-    ),
+    defaultPortalTargetUrl,
+    defaultAZonePortalTargetUrl,
     surfacePaintStorePath:
       parseOptionalString(env.SURFACE_PAINT_STORE_PATH, 2048) || DEFAULT_SURFACE_PAINT_STORE_PATH,
     surfacePaintSaveDebounceMs: Math.trunc(
