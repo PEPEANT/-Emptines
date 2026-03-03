@@ -19,6 +19,13 @@ export function startRealtimeServer(options = {}) {
   const env = options.env ?? process.env;
   const log = options.log ?? console;
   const config = loadRuntimeConfig(env);
+  const linkGateVersion = String(env.EMPTINES_LINK_GATE_VERSION ?? "2026-03-03-allowlist-v1").trim();
+  const linkGateDisabledRaw = String(env.EMPTINES_LINK_GATE_DISABLED ?? "").trim().toLowerCase();
+  const linkGateEnabled =
+    linkGateVersion.length > 0 &&
+    linkGateDisabledRaw !== "1" &&
+    linkGateDisabledRaw !== "true" &&
+    linkGateDisabledRaw !== "yes";
 
   const playerCounter = createPlayerCounter();
   let roomService = null;
@@ -43,6 +50,25 @@ export function startRealtimeServer(options = {}) {
     pingInterval: 5000,
     pingTimeout: 5000
   });
+  if (linkGateEnabled) {
+    io.use((socket, next) => {
+      const auth = socket.handshake?.auth ?? {};
+      const gateVersion = String(auth?.linkGateVersion ?? "").trim();
+      const gateMode = String(auth?.linkGateMode ?? "")
+        .trim()
+        .toLowerCase();
+      const modeAllowed = gateMode === "player" || gateMode === "host";
+      if (gateVersion !== linkGateVersion || !modeAllowed) {
+        next(new Error("link gate denied"));
+        return;
+      }
+      socket.data.linkGateMode = gateMode;
+      next();
+    });
+    log.log(`[link-gate] enabled (version=${linkGateVersion})`);
+  } else {
+    log.log("[link-gate] disabled");
+  }
 
   roomService = new RoomService({
     io,

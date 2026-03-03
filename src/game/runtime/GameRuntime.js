@@ -473,6 +473,8 @@ export class GameRuntime {
 
     this.socket = null;
     this.socketEndpoint = null;
+    this.socketLinkGateVersion = "2026-03-03-allowlist-v1";
+    this.socketLinkGateMode = "player";
     this.networkConnected = false;
     this.localPlayerId = null;
     this.queryParams =
@@ -14485,7 +14487,11 @@ export class GameRuntime {
       timeout: 3200,
       reconnection: true,
       reconnectionDelay: 900,
-      reconnectionDelayMax: 5000
+      reconnectionDelayMax: 5000,
+      auth: {
+        linkGateVersion: this.socketLinkGateVersion,
+        linkGateMode: this.socketLinkGateMode || "player"
+      }
     });
 
     this.socket = socket;
@@ -14633,7 +14639,12 @@ export class GameRuntime {
       this.updateSurfacePainterSaveAvailability();
     });
 
-    socket.on("connect_error", () => {
+    socket.on("connect_error", (error) => {
+      const connectErrorMessage = String(error?.message ?? "").toLowerCase();
+      if (connectErrorMessage.includes("link gate denied")) {
+        this.socketEndpointValidationError = "허용된 접속 링크만 사용할 수 있습니다.";
+        this.socketEndpointLinkRequired = true;
+      }
       this.networkConnected = false;
       this.localPlayerId = null;
       this.roomHostId = null;
@@ -14847,9 +14858,11 @@ export class GameRuntime {
 
     this.socketEndpointValidationError = "";
     this.socketEndpointLinkRequired = false;
+    this.socketLinkGateMode = "player";
     const pushEndpointError = (message, linkRequired = false) => {
       this.socketEndpointValidationError = String(message ?? "").trim();
       this.socketEndpointLinkRequired = Boolean(linkRequired);
+      this.socketLinkGateMode = "";
       return null;
     };
     const normalizeEndpoint = (raw, sourceLabel = "server") => {
@@ -14945,6 +14958,7 @@ export class GameRuntime {
         if (!isExactPlayerLink && !isExactHostLink) {
           return pushEndpointError("허용된 접속 링크만 사용할 수 있습니다.", true);
         }
+        this.socketLinkGateMode = isExactHostLink ? "host" : "player";
       }
       return normalizedQueryEndpoint;
     }
