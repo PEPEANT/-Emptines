@@ -3208,7 +3208,7 @@ export class GameRuntime {
       return;
     }
 
-    const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
+    const localHostMode = this.canUseOfflineHostMode();
     if (!this.socket || !this.networkConnected) {
       if (localHostMode) {
         this.applyLeftBillboardState(next, { force: true });
@@ -3242,7 +3242,7 @@ export class GameRuntime {
   }
 
   requestLeftBillboardReset({ announceErrors = true } = {}) {
-    const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
+    const localHostMode = this.canUseOfflineHostMode();
     if (!this.socket || !this.networkConnected) {
       if (localHostMode) {
         this.applyLeftBillboardState(
@@ -3293,7 +3293,7 @@ export class GameRuntime {
       return;
     }
 
-    const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
+    const localHostMode = this.canUseOfflineHostMode();
     if (!this.socket || !this.networkConnected) {
       if (localHostMode) {
         this.applyRightBillboardState(
@@ -3326,7 +3326,7 @@ export class GameRuntime {
   }
 
   requestRightBillboardReset({ announceErrors = true } = {}) {
-    const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
+    const localHostMode = this.canUseOfflineHostMode();
     if (!this.socket || !this.networkConnected) {
       if (localHostMode) {
         this.applyRightBillboardState(
@@ -6976,8 +6976,22 @@ export class GameRuntime {
     return this.hasHostPrivilege();
   }
 
+  canUseOfflineHostMode() {
+    if (this.socketEndpoint || !this.autoHostClaimEnabled) {
+      return false;
+    }
+    if (typeof window === "undefined") {
+      return false;
+    }
+    const { protocol, hostname } = window.location;
+    if (protocol === "file:") {
+      return true;
+    }
+    return hostname === "localhost" || hostname === "127.0.0.1";
+  }
+
   hasHostPrivilege() {
-    const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
+    const localHostMode = this.canUseOfflineHostMode();
     const roomHostMatch = Boolean(
       this.localPlayerId &&
       this.roomHostId &&
@@ -9317,7 +9331,7 @@ export class GameRuntime {
     }
     const delay = Math.max(10, Math.min(6 * 60 * 60, requestedDelay));
 
-    const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
+    const localHostMode = this.canUseOfflineHostMode();
     if (!this.socket || !this.networkConnected) {
       if (!localHostMode) {
         this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
@@ -9429,7 +9443,7 @@ export class GameRuntime {
   }
 
   requestPortalForceOpen() {
-    const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
+    const localHostMode = this.canUseOfflineHostMode();
     if (!this.socket || !this.networkConnected) {
       if (localHostMode) {
         this.handlePortalForceOpen({}, { announce: false });
@@ -9470,7 +9484,7 @@ export class GameRuntime {
   }
 
   requestPortalForceClose() {
-    const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
+    const localHostMode = this.canUseOfflineHostMode();
     if (!this.socket || !this.networkConnected) {
       if (localHostMode) {
         this.handlePortalForceClose({}, { announce: false });
@@ -9534,7 +9548,7 @@ export class GameRuntime {
     const nextEnabled =
       typeof forceEnabled === "boolean" ? forceEnabled : !Boolean(this.securityTestState?.enabled);
 
-    const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
+    const localHostMode = this.canUseOfflineHostMode();
     if (!this.socket || !this.networkConnected) {
       if (!localHostMode) {
         this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
@@ -11161,8 +11175,7 @@ export class GameRuntime {
     }
     if (this.hostControlsToggleBtnEl) {
       this.hostControlsToggleBtnEl.addEventListener("click", () => {
-        const localHostMode = !this.socketEndpoint && this.autoHostClaimEnabled;
-        if (!this.hubFlowEnabled || (!this.isRoomHost && !localHostMode)) {
+        if (!this.hubFlowEnabled || !this.hasHostPrivilege()) {
           return;
         }
         this.hostControlsOpen = !this.hostControlsOpen;
