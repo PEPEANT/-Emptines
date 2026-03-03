@@ -7627,6 +7627,12 @@ export class GameRuntime {
     this.updateBridgeBoundaryMarker(delta);
     this.updateSpawnPortalVeilVisibility();
 
+    // Keep portal transfer unconditional across hub-flow stages.
+    if (!this.portalTransitioning && this.isPlayerInAZonePortalZone()) {
+      this.triggerPortalTransfer(this.buildAZonePortalTransferUrl());
+      return;
+    }
+
     if (this.flowStage === "boot_intro") {
       this.updatePortalVisual();
       return;
@@ -7700,10 +7706,6 @@ export class GameRuntime {
 
     this.updatePortalPhase(delta);
     this.updatePortalVisual();
-    if (!this.portalTransitioning && this.isPlayerInAZonePortalZone()) {
-      this.triggerPortalTransfer(this.buildAZonePortalTransferUrl());
-      return;
-    }
     if (!this.portalTransitioning && this.isPlayerInPortalZone()) {
       const destination = this.buildPortalTransferUrl();
       if (destination) {

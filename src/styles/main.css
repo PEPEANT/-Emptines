@@ -643,7 +643,6 @@ canvas {
 
 #host-delay-minutes,
 #host-portal-target,
-#host-a-zone-portal-target,
 #host-gray-object-width,
 #host-gray-object-height,
 #host-gray-object-depth {
@@ -663,6 +662,12 @@ canvas {
   min-width: 130px;
 }
 
+#host-a-zone-portal-target {
+  flex: 1 1 240px;
+  width: 100%;
+  min-width: 220px;
+}
+
 #host-apply-delay,
 #host-portal-target-apply,
 #host-a-zone-portal-target-apply,
@@ -677,6 +682,12 @@ canvas {
   font: 700 0.64rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
   letter-spacing: 0.04em;
   cursor: pointer;
+}
+
+#host-a-zone-portal-target-apply {
+  flex: 0 0 auto;
+  min-width: 56px;
+  padding: 0 10px;
 }
 
 #host-apply-delay:disabled,
@@ -2404,9 +2415,12 @@ body.is-mobile-ui #mobile-move-stick {
     width: 84px;
   }
 
-  #host-portal-target,
-  #host-a-zone-portal-target {
+  #host-portal-target {
     min-width: 96px;
+  }
+
+  #host-a-zone-portal-target {
+    min-width: 148px;
   }
 
   .hud-row {
