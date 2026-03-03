@@ -11918,6 +11918,17 @@ export class GameRuntime {
         return;
       }
 
+      if (event.code === "KeyG" && this.hasHostPrivilege()) {
+        // Always allow turning fly mode off, even when gameplay controls are
+        // temporarily blocked by flow/UI state. Turning it on keeps the
+        // original gameplay-control gate.
+        if (this.flyModeActive || this.canUseGameplayControls()) {
+          event.preventDefault();
+          this.toggleFlyMode();
+          return;
+        }
+      }
+
       if (!this.canMovePlayer()) {
         return;
       }
@@ -11971,12 +11982,6 @@ export class GameRuntime {
       if (event.code === "KeyE" && this.canUseGameplayControls()) {
         event.preventDefault();
         this.tryClimbRope();
-        return;
-      }
-
-      if (event.code === "KeyG" && this.canUseGameplayControls() && this.hasHostPrivilege()) {
-        event.preventDefault();
-        this.toggleFlyMode();
         return;
       }
 
