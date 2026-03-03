@@ -40,6 +40,9 @@ const MIN_EDITOR_LIMIT = 1;
 const MAX_EDITOR_LIMIT = 10_000;
 const MIN_EDITOR_SCALE = 0.25;
 const MAX_EDITOR_SCALE = 8;
+const OBJECT_POSITION_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,96}$/;
+const MAX_OBJECT_POSITIONS = 4000;
+const MAX_OBJECT_COORDINATE = 2500;
 const PROMO_OWNER_KEY_PATTERN = /^[a-zA-Z0-9:_-]{8,96}$/;
 const MAX_PROMO_OBJECTS = 1200;
 const MAX_PROMO_NAME_CHARS = 48;
@@ -116,6 +119,46 @@ function normalizeSurfacePaintEntry(rawValue, fallbackUpdatedAt = Date.now()) {
     imageDataUrl,
     updatedAt: Math.max(0, Math.trunc(Number(rawValue?.updatedAt) || Number(fallbackUpdatedAt) || Date.now()))
   };
+}
+
+function normalizeObjectPositionId(rawValue) {
+  const value = String(rawValue ?? "").trim();
+  if (!value || !OBJECT_POSITION_ID_PATTERN.test(value)) {
+    return "";
+  }
+  return value;
+}
+
+function normalizeObjectPositionEntry(rawValue) {
+  if (!rawValue || typeof rawValue !== "object") {
+    return null;
+  }
+  const x = Number(rawValue.x);
+  const y = Number(rawValue.y);
+  const z = Number(rawValue.z);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+    return null;
+  }
+  return {
+    x: Math.max(-MAX_OBJECT_COORDINATE, Math.min(MAX_OBJECT_COORDINATE, x)),
+    y: Math.max(-MAX_OBJECT_COORDINATE, Math.min(MAX_OBJECT_COORDINATE, y)),
+    z: Math.max(-MAX_OBJECT_COORDINATE, Math.min(MAX_OBJECT_COORDINATE, z))
+  };
+}
+
+function normalizeStateRevision(rawValue, fallback = 0) {
+  const parsed = Math.trunc(Number(rawValue));
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    const fallbackParsed = Math.trunc(Number(fallback));
+    return Number.isFinite(fallbackParsed) && fallbackParsed >= 0 ? fallbackParsed : 0;
+  }
+  return parsed;
+}
+
+function nextStateRevision(currentRevision = 0) {
+  const base = normalizeStateRevision(currentRevision, 0);
+  const now = Math.trunc(Date.now());
+  return Math.max(base + 1, now);
 }
 
 function normalizeSharedAudioDataUrl(rawValue) {
@@ -354,6 +397,10 @@ function createPersistentRoom(code, defaultPortalTargetUrl) {
     surfacePaint: new Map(),
     promoObjects: new Map(),
     objectEditor: createObjectEditorState(),
+    objectPositions: {},
+    platformRevision: 0,
+    ropeRevision: 0,
+    objectRevision: 0,
     platforms: [],
     ropes: [],
     players: new Map(),
@@ -443,6 +490,13 @@ export class RoomService {
     const platforms = Array.isArray(parsed?.platforms) ? parsed.platforms : [];
     const ropes = Array.isArray(parsed?.ropes) ? parsed.ropes : [];
     const promoObjects = Array.isArray(parsed?.promoObjects) ? parsed.promoObjects : [];
+    const objectPositions =
+      parsed?.objectPositions && typeof parsed.objectPositions === "object"
+        ? parsed.objectPositions
+        : {};
+    const platformRevision = normalizeStateRevision(parsed?.platformRevision, 0);
+    const ropeRevision = normalizeStateRevision(parsed?.ropeRevision, 0);
+    const objectRevision = normalizeStateRevision(parsed?.objectRevision, 0);
     const restored = new Map();
     for (const entry of surfaces) {
       const surfaceId = normalizeSurfaceId(entry?.surfaceId);
@@ -456,8 +510,12 @@ export class RoomService {
     const room = this.getDefaultRoom();
     room.surfacePaint = restored;
     room.objectEditor = normalizeObjectEditorState(parsed?.objectEditor, room.objectEditor);
-    this.setPlatforms(room, platforms, { persist: false });
-    this.setRopes(room, ropes, { persist: false });
+    room.platformRevision = platformRevision;
+    room.ropeRevision = ropeRevision;
+    room.objectRevision = objectRevision;
+    this.setObjectPositions(room, objectPositions, { persist: false, bumpRevision: false });
+    this.setPlatforms(room, platforms, { persist: false, bumpRevision: false });
+    this.setRopes(room, ropes, { persist: false, bumpRevision: false });
     this.setPromoObjects(room, promoObjects, { persist: false });
     if (restored.size > 0) {
       this.log?.log?.(
@@ -481,6 +539,18 @@ export class RoomService {
     }, this.surfacePaintSaveDebounceMs);
   }
 
+  async flushSurfacePaintToDiskNow() {
+    if (!this.surfacePaintStorePath) {
+      return;
+    }
+    this.surfacePaintSaveQueued = true;
+    if (this.surfacePaintSaveTimer) {
+      clearTimeout(this.surfacePaintSaveTimer);
+      this.surfacePaintSaveTimer = null;
+    }
+    await this.flushSurfacePaintToDisk();
+  }
+
   async flushSurfacePaintToDisk() {
     if (!this.surfacePaintStorePath || this.surfacePaintSaveInFlight || !this.surfacePaintSaveQueued) {
       return;
@@ -495,8 +565,12 @@ export class RoomService {
       defaultRoomCode: this.defaultRoomCode,
       surfaces: this.serializeSurfacePaint(room),
       platforms: this.serializePlatforms(room),
+      platformRevision: this.getPlatformRevision(room),
       ropes: this.serializeRopes(room),
+      ropeRevision: this.getRopeRevision(room),
       promoObjects: this.serializePromoObjects(room),
+      objectPositions: this.serializeObjectPositions(room),
+      objectRevision: this.getObjectRevision(room),
       objectEditor: this.serializeObjectEditor(room)
     };
     const tmpPath = `${this.surfacePaintStorePath}.tmp`;
@@ -829,11 +903,100 @@ export class RoomService {
     return Array.isArray(room?.platforms) ? room.platforms : [];
   }
 
-  emitPlatformUpdate(room) {
-    this.io.to(room.code).emit("platform:state", { platforms: this.serializePlatforms(room) });
+  getPlatformRevision(room) {
+    if (!room || typeof room !== "object") {
+      return 0;
+    }
+    room.platformRevision = normalizeStateRevision(room.platformRevision, 0);
+    return room.platformRevision;
   }
 
-  setPlatforms(room, rawPlatforms, { persist = true } = {}) {
+  getRopeRevision(room) {
+    if (!room || typeof room !== "object") {
+      return 0;
+    }
+    room.ropeRevision = normalizeStateRevision(room.ropeRevision, 0);
+    return room.ropeRevision;
+  }
+
+  getObjectRevision(room) {
+    if (!room || typeof room !== "object") {
+      return 0;
+    }
+    room.objectRevision = normalizeStateRevision(room.objectRevision, 0);
+    return room.objectRevision;
+  }
+
+  serializeObjectPositions(room) {
+    if (!room || typeof room !== "object") {
+      return {};
+    }
+    const source =
+      room.objectPositions && typeof room.objectPositions === "object"
+        ? room.objectPositions
+        : {};
+    const sanitized = {};
+    let count = 0;
+    for (const [rawId, rawValue] of Object.entries(source)) {
+      if (count >= MAX_OBJECT_POSITIONS) {
+        break;
+      }
+      const id = normalizeObjectPositionId(rawId);
+      const normalized = normalizeObjectPositionEntry(rawValue);
+      if (!id || !normalized) {
+        continue;
+      }
+      sanitized[id] = normalized;
+      count += 1;
+    }
+    room.objectPositions = sanitized;
+    return sanitized;
+  }
+
+  emitObjectPositionUpdate(room) {
+    this.io.to(room.code).emit("object:state", {
+      positions: this.serializeObjectPositions(room),
+      revision: this.getObjectRevision(room)
+    });
+  }
+
+  setObjectPositions(room, rawPositions, { persist = true, bumpRevision = true } = {}) {
+    if (!room || typeof room !== "object") {
+      return { ok: false, error: "room not found" };
+    }
+    const source = rawPositions && typeof rawPositions === "object" ? rawPositions : {};
+    const sanitized = {};
+    let count = 0;
+    for (const [rawId, rawValue] of Object.entries(source)) {
+      if (count >= MAX_OBJECT_POSITIONS) {
+        break;
+      }
+      const id = normalizeObjectPositionId(rawId);
+      const normalized = normalizeObjectPositionEntry(rawValue);
+      if (!id || !normalized) {
+        continue;
+      }
+      sanitized[id] = normalized;
+      count += 1;
+    }
+    room.objectPositions = sanitized;
+    if (bumpRevision) {
+      room.objectRevision = nextStateRevision(room.objectRevision);
+    }
+    if (persist) {
+      this.scheduleSurfacePaintSave();
+    }
+    return { ok: true };
+  }
+
+  emitPlatformUpdate(room) {
+    this.io.to(room.code).emit("platform:state", {
+      platforms: this.serializePlatforms(room),
+      revision: this.getPlatformRevision(room)
+    });
+  }
+
+  setPlatforms(room, rawPlatforms, { persist = true, bumpRevision = true } = {}) {
     if (!room) return { ok: false, error: "room not found" };
     const MAX_NUM = 2000;
     const editorSettings = this.serializeObjectEditor(room);
@@ -850,6 +1013,9 @@ export class RoomService {
         d: Math.max(0.1, Math.min(50, Number(p.d) || 3))
       }));
     room.platforms = sanitized;
+    if (bumpRevision) {
+      room.platformRevision = nextStateRevision(room.platformRevision);
+    }
     if (persist) {
       this.scheduleSurfacePaintSave();
     }
@@ -861,10 +1027,13 @@ export class RoomService {
   }
 
   emitRopeUpdate(room) {
-    this.io.to(room.code).emit("rope:state", { ropes: this.serializeRopes(room) });
+    this.io.to(room.code).emit("rope:state", {
+      ropes: this.serializeRopes(room),
+      revision: this.getRopeRevision(room)
+    });
   }
 
-  setRopes(room, rawRopes, { persist = true } = {}) {
+  setRopes(room, rawRopes, { persist = true, bumpRevision = true } = {}) {
     if (!room) return { ok: false, error: "room not found" };
     const MAX_NUM = 2000;
     const editorSettings = this.serializeObjectEditor(room);
@@ -879,6 +1048,9 @@ export class RoomService {
         height: Math.max(0.5, Math.min(50, Number(r.height) || 4))
       }));
     room.ropes = sanitized;
+    if (bumpRevision) {
+      room.ropeRevision = nextStateRevision(room.ropeRevision);
+    }
     if (persist) {
       this.scheduleSurfacePaintSave();
     }

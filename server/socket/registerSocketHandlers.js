@@ -62,13 +62,28 @@ export function registerSocketHandlers({
     const emitPlatformState = () => {
       const room = roomService.getRoomBySocket(socket);
       if (!room) return;
-      socket.emit("platform:state", { platforms: roomService.serializePlatforms(room) });
+      socket.emit("platform:state", {
+        platforms: roomService.serializePlatforms(room),
+        revision: roomService.getPlatformRevision(room)
+      });
     };
 
     const emitRopeState = () => {
       const room = roomService.getRoomBySocket(socket);
       if (!room) return;
-      socket.emit("rope:state", { ropes: roomService.serializeRopes(room) });
+      socket.emit("rope:state", {
+        ropes: roomService.serializeRopes(room),
+        revision: roomService.getRopeRevision(room)
+      });
+    };
+
+    const emitObjectState = () => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) return;
+      socket.emit("object:state", {
+        positions: roomService.serializeObjectPositions(room),
+        revision: roomService.getObjectRevision(room)
+      });
     };
 
     const emitPromoState = () => {
@@ -103,6 +118,7 @@ export function registerSocketHandlers({
         emitLeftBillboardState();
         emitPortalOpenCatchup();
         emitPromoState();
+        emitObjectState();
       }
       ack(ackFn, result);
       return result;
@@ -124,6 +140,7 @@ export function registerSocketHandlers({
     emitPlatformState();
     emitRopeState();
     emitPromoState();
+    emitObjectState();
     roomService.emitRoomList(socket);
 
     socket.on("player:key:set", (payload = {}, ackFn) => {
@@ -231,7 +248,7 @@ export function registerSocketHandlers({
       joinDefaultAndAck(null, ackFn);
     });
 
-    socket.on("paint:surface:set", (payload = {}, ackFn) => {
+    socket.on("paint:surface:set", async (payload = {}, ackFn) => {
       const room = roomService.getRoomBySocket(socket);
       if (!room) {
         ack(ackFn, { ok: false, error: "room not found" });
@@ -259,6 +276,13 @@ export function registerSocketHandlers({
           updatedAt: result.updatedAt,
           authorId: socket.id
         });
+        if (Boolean(payload?.forceFlush) && typeof roomService.flushSurfacePaintToDiskNow === "function") {
+          try {
+            await roomService.flushSurfacePaintToDiskNow();
+          } catch {
+            // ignore immediate flush failures; debounced persistence still applies
+          }
+        }
       }
 
       ack(ackFn, {
@@ -643,7 +667,7 @@ export function registerSocketHandlers({
       });
     });
 
-    socket.on("platform:state:set", (payload = {}, ackFn) => {
+    socket.on("platform:state:set", async (payload = {}, ackFn) => {
       const room = roomService.getRoomBySocket(socket);
       if (!room) {
         ack(ackFn, { ok: false, error: "room not found" });
@@ -659,14 +683,21 @@ export function registerSocketHandlers({
         return;
       }
       roomService.emitPlatformUpdate(room);
-      ack(ackFn, { ok: true });
+      if (Boolean(payload?.forceFlush) && typeof roomService.flushSurfacePaintToDiskNow === "function") {
+        try {
+          await roomService.flushSurfacePaintToDiskNow();
+        } catch {
+          // ignore immediate flush failures; debounced persistence still applies
+        }
+      }
+      ack(ackFn, { ok: true, revision: roomService.getPlatformRevision(room) });
     });
 
     socket.on("platform:state:request", () => {
       emitPlatformState();
     });
 
-    socket.on("rope:state:set", (payload = {}, ackFn) => {
+    socket.on("rope:state:set", async (payload = {}, ackFn) => {
       const room = roomService.getRoomBySocket(socket);
       if (!room) {
         ack(ackFn, { ok: false, error: "room not found" });
@@ -682,18 +713,58 @@ export function registerSocketHandlers({
         return;
       }
       roomService.emitRopeUpdate(room);
-      ack(ackFn, { ok: true });
+      if (Boolean(payload?.forceFlush) && typeof roomService.flushSurfacePaintToDiskNow === "function") {
+        try {
+          await roomService.flushSurfacePaintToDiskNow();
+        } catch {
+          // ignore immediate flush failures; debounced persistence still applies
+        }
+      }
+      ack(ackFn, { ok: true, revision: roomService.getRopeRevision(room) });
     });
 
     socket.on("rope:state:request", () => {
       emitRopeState();
     });
 
+    socket.on("object:state:request", () => {
+      emitObjectState();
+    });
+
+    socket.on("object:state:set", async (payload = {}, ackFn) => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        ack(ackFn, { ok: false, error: "room not found" });
+        return;
+      }
+      if (!roomService.isHost(room, socket.id)) {
+        ack(ackFn, { ok: false, error: "host only" });
+        return;
+      }
+      const result = roomService.setObjectPositions(
+        room,
+        payload?.positions ?? payload?.objectPositions ?? payload
+      );
+      if (!result.ok) {
+        ack(ackFn, result);
+        return;
+      }
+      roomService.emitObjectPositionUpdate(room);
+      if (Boolean(payload?.forceFlush) && typeof roomService.flushSurfacePaintToDiskNow === "function") {
+        try {
+          await roomService.flushSurfacePaintToDiskNow();
+        } catch {
+          // ignore immediate flush failures; debounced persistence still applies
+        }
+      }
+      ack(ackFn, { ok: true, revision: roomService.getObjectRevision(room) });
+    });
+
     socket.on("promo:state:request", () => {
       emitPromoState();
     });
 
-    socket.on("promo:upsert", (payload = {}, ackFn) => {
+    socket.on("promo:upsert", async (payload = {}, ackFn) => {
       const room = roomService.getRoomBySocket(socket);
       if (!room) {
         ack(ackFn, { ok: false, error: "room not found" });
@@ -717,6 +788,13 @@ export function registerSocketHandlers({
       }
       roomService.emitPromoObjectsUpdate(room);
       roomService.emitRoomUpdate(room);
+      if (Boolean(payload?.forceFlush) && typeof roomService.flushSurfacePaintToDiskNow === "function") {
+        try {
+          await roomService.flushSurfacePaintToDiskNow();
+        } catch {
+          // ignore immediate flush failures; debounced persistence still applies
+        }
+      }
       ack(ackFn, {
         ok: true,
         changed: Boolean(result.changed),
@@ -724,7 +802,7 @@ export function registerSocketHandlers({
       });
     });
 
-    socket.on("promo:remove", (payload = {}, ackFn) => {
+    socket.on("promo:remove", async (payload = {}, ackFn) => {
       const room = roomService.getRoomBySocket(socket);
       if (!room) {
         ack(ackFn, { ok: false, error: "room not found" });
@@ -747,6 +825,13 @@ export function registerSocketHandlers({
       if (result.changed) {
         roomService.emitPromoObjectsUpdate(room);
         roomService.emitRoomUpdate(room);
+        if (Boolean(payload?.forceFlush) && typeof roomService.flushSurfacePaintToDiskNow === "function") {
+          try {
+            await roomService.flushSurfacePaintToDiskNow();
+          } catch {
+            // ignore immediate flush failures; debounced persistence still applies
+          }
+        }
       }
       ack(ackFn, {
         ok: true,

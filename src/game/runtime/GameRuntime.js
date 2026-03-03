@@ -91,6 +91,7 @@ const BOX_FACE_KEYS = ["px", "nx", "py", "ny", "pz", "nz"];
 const NPC_GREETING_SESSION_KEY = "emptines_npc_greeting_seen_v1";
 const CITY_AD_BILLBOARD_BASE_PREFIX = "city_ad_board_";
 const OBJECT_EDITOR_SETTINGS_STORAGE_KEY = "objectEditorSettings_v1";
+const OBJECT_POSITIONS_STORAGE_KEY = "objPositions_v1";
 const OBJECT_EDITOR_MIN_LIMIT = 1;
 const OBJECT_EDITOR_MAX_LIMIT = 10000;
 const OBJECT_EDITOR_MIN_SCALE = 0.25;
@@ -253,11 +254,19 @@ export class GameRuntime {
 
     this.jumpPlatforms = [];
     this.jumpPlatformMeshes = [];
+    this.platformSpatialCellSize = 10;
+    this.platformSpatialIndex = new Map();
+    this.platformCollisionCandidateBuffer = [];
+    this.platformCollisionCandidateSeen = new Set();
+    this.platformCollisionMaxHalfExtent = 0.5;
     this.flyModeActive = false;
     this.platformEditorPreviewMesh = null;
+    this.editorPreviewDirection = new THREE.Vector3();
+    this.editorPreviewPosition = new THREE.Vector3();
     this.platformEditorBaseSize = { w: 3, h: 0.3, d: 3 };
     this.ropeEditorBaseHeight = 4;
     this.objectEditorSettingsStorageKey = OBJECT_EDITOR_SETTINGS_STORAGE_KEY;
+    this.objectPositionsStorageKey = OBJECT_POSITIONS_STORAGE_KEY;
     this.objectEditorSettings = {
       platformLimit: 400,
       ropeLimit: 200,
@@ -266,6 +275,27 @@ export class GameRuntime {
       updatedAt: Date.now()
     };
     this.editorSettingsSetInFlight = false;
+    this.platformSaveInFlight = false;
+    this.platformSavePending = false;
+    this.platformSavePendingForceFlush = false;
+    this.platformStateRevision = 0;
+    this.platformStateDirty = false;
+    this.platformStateAutosaveClock = 0;
+    this.platformStateAutosaveInterval = this.mobileEnabled ? 0.36 : 0.24;
+    this.ropeSaveInFlight = false;
+    this.ropeSavePending = false;
+    this.ropeSavePendingForceFlush = false;
+    this.ropeStateRevision = 0;
+    this.ropeStateDirty = false;
+    this.ropeStateAutosaveClock = 0;
+    this.ropeStateAutosaveInterval = this.mobileEnabled ? 0.38 : 0.26;
+    this.objectStateSaveInFlight = false;
+    this.objectStateSavePending = false;
+    this.objectStateSavePendingForceFlush = false;
+    this.objectStateRevision = 0;
+    this.objectStateDirty = false;
+    this.objectStateAutosaveClock = 0;
+    this.objectStateAutosaveInterval = this.mobileEnabled ? 0.32 : 0.22;
     this.platformEditorSize = { ...this.platformEditorBaseSize };
     this.platformEditorDist = 4;
     this.jumpRopes = [];
@@ -296,6 +326,8 @@ export class GameRuntime {
     this.promoDrawLastY = 0;
     this.promoDrawBackgroundColor = "#707782";
     this.nearestPromoLinkObject = null;
+    this.promoLinkPromptUpdateClock = 0;
+    this.promoLinkPromptUpdateInterval = this.mobileEnabled ? 0.24 : 0.12;
     this.surfacePaintRaycaster = new THREE.Raycaster();
     this.surfacePaintAimPoint = new THREE.Vector2(0, 0);
     this.surfacePaintTarget = null;
@@ -391,6 +423,10 @@ export class GameRuntime {
     this.mobileUiRefreshClock = 0;
     this.spatialAudioMixClock = 0;
     this.spatialAudioMixInterval = 0.12;
+    this.chalkPickupPromptClock = 0;
+    this.chalkPickupPromptInterval = this.mobileEnabled ? 0.14 : 0.1;
+    this.ropeProximityClock = 0;
+    this.ropeProximityInterval = this.mobileEnabled ? 0.14 : 0.1;
 
     this.socket = null;
     this.socketEndpoint = null;
@@ -420,6 +456,9 @@ export class GameRuntime {
     this.lastAuthoritativeStateSyncAt = 0;
     this.remotePlayers = new Map();
     this.remoteSyncClock = 0;
+    this.remoteUpdateClock = 0;
+    this.remoteUpdateTurningInterval = this.mobileEnabled ? 0.05 : 0.033;
+    this.remoteUpdateTurningPeerThreshold = this.mobileEnabled ? 6 : 10;
     this.localInputSeq = 0;
     this.lastAckInputSeq = 0;
     this.pendingInputQueue = [];
@@ -451,6 +490,12 @@ export class GameRuntime {
     this.localChatExpireAt = 0;
     this.loopRafCallback = () => this.loop();
     this.lastActiveMoveInputAt = 0;
+    this.cloudUpdateClock = 0;
+    this.cloudUpdateInterval = this.mobileEnabled ? 0.05 : 1 / 30;
+    this.cloudUpdateTurningInterval = this.mobileEnabled ? 0.08 : 1 / 24;
+    this.oceanUpdateClock = 0;
+    this.oceanUpdateInterval = this.mobileEnabled ? 0.05 : 1 / 30;
+    this.oceanUpdateTurningInterval = this.mobileEnabled ? 0.08 : 1 / 24;
     this.chatLogMaxEntries = RUNTIME_TUNING.CHAT_LOG_MAX_ENTRIES;
     this.chatTitleEl = document.getElementById("chat-title");
     this.chatLogEl = document.getElementById("chat-log");
@@ -698,6 +743,7 @@ export class GameRuntime {
     this.portalTransitioning = false;
     this.portalPulseClock = 0;
     this.portalBillboardUpdateClock = 0;
+    this.portalBillboardUpdateInterval = 0.4;
     this.waterDeltaSmoothed = 1 / 60;
     this.boundaryReturnDelaySeconds = 1.8;
     this.boundaryReturnNoticeSeconds = 1.2;
@@ -705,6 +751,8 @@ export class GameRuntime {
     this.boundaryOutClock = 0;
     this.boundaryNoticeClock = 0;
     this.lastSafePosition = new THREE.Vector3(0, GAME_CONSTANTS.PLAYER_HEIGHT, 0);
+    this.lastLookInputAtMs = 0;
+    this.dynamicResolutionInputQuietMs = this.mobileEnabled ? 180 : 140;
     this.hubFlowGroup = null;
     this.portalGroup = null;
     this.portalRing = null;
@@ -768,6 +816,8 @@ export class GameRuntime {
     this.mobileLookTouchId = null;
     this.mobileLookLastX = 0;
     this.mobileLookLastY = 0;
+    this.pendingMouseLookDeltaX = 0;
+    this.pendingMouseLookDeltaY = 0;
     this.mobileJumpQueued = false;
     this.mobileSprintHeld = false;
 
@@ -2553,6 +2603,9 @@ export class GameRuntime {
     );
     this.scene.add(group);
     this.loadSavedObjectPositions();
+    if (this.socket && this.networkConnected) {
+      this.requestObjectState();
+    }
     this.refreshSecurityTestObjectLabels();
     this.setMirrorGateVisible(this.flowStage === "bridge_mirror");
     this.updateBridgeBoundaryMarker(0);
@@ -4498,18 +4551,25 @@ export class GameRuntime {
     this.setActiveTool("chalk");
   }
 
-  updateChalkPickupPrompt() {
+  updateChalkPickupPrompt(delta = 0) {
     if (!this.isChalkFeatureEnabled()) {
+      this.chalkPickupPromptClock = this.chalkPickupPromptInterval;
       this.chalkPickupEl?.classList.add("hidden");
       return;
     }
     if (!this.chalkPickupEl || !this.chalkTableWorldPos || this.hasChalk) {
+      this.chalkPickupPromptClock = this.chalkPickupPromptInterval;
       this.chalkPickupEl?.classList.add("hidden");
       return;
     }
+    this.chalkPickupPromptClock += Math.max(0, Number(delta) || 0);
+    if (this.chalkPickupPromptClock < this.chalkPickupPromptInterval) {
+      return;
+    }
+    this.chalkPickupPromptClock = 0;
     const dx = this.playerPosition.x - this.chalkTableWorldPos.x;
     const dz = this.playerPosition.z - this.chalkTableWorldPos.z;
-    const near = Math.sqrt(dx * dx + dz * dz) <= this.chalkTablePickupRadius
+    const near = dx * dx + dz * dz <= this.chalkTablePickupRadius * this.chalkTablePickupRadius
       && this.canUseGameplayControls();
     this.chalkPickupEl.classList.toggle("hidden", !near);
   }
@@ -4873,9 +4933,13 @@ export class GameRuntime {
     }
 
     this.surfacePaintProbeClock += Math.max(0, Number(delta) || 0);
-    const probeInterval = this.surfacePaintTarget
+    const baseProbeInterval = this.surfacePaintTarget
       ? this.surfacePaintProbeIntervalActive
       : this.surfacePaintProbeIntervalIdle;
+    const nowMs = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const recentLookInputMs = Math.max(0, nowMs - (Number(this.lastLookInputAtMs) || 0));
+    const turningProbeMultiplier = recentLookInputMs < this.dynamicResolutionInputQuietMs ? 1.8 : 1;
+    const probeInterval = baseProbeInterval * turningProbeMultiplier;
     const shouldProbe =
       this.surfacePaintProbeClock >= probeInterval || !this.surfacePaintTarget;
     if (shouldProbe) {
@@ -5565,7 +5629,7 @@ export class GameRuntime {
     this.socket.emit("paint:state:request");
   }
 
-  sendSurfacePaintUpdate(surfaceId, imageDataUrl) {
+  sendSurfacePaintUpdate(surfaceId, imageDataUrl, { forceFlush = false } = {}) {
     return new Promise((resolve) => {
       if (!this.isSurfacePaintOnlineReady()) {
         resolve({ ok: false, error: "offline" });
@@ -5585,9 +5649,13 @@ export class GameRuntime {
       const timeoutId = window.setTimeout(() => {
         finish({ ok: false, error: "timeout" });
       }, 4500);
-      this.socket.emit("paint:surface:set", { surfaceId, imageDataUrl }, (response = {}) => {
-        finish(response);
-      });
+      this.socket.emit(
+        "paint:surface:set",
+        { surfaceId, imageDataUrl, forceFlush: Boolean(forceFlush) },
+        (response = {}) => {
+          finish(response);
+        }
+      );
     });
   }
 
@@ -5625,8 +5693,13 @@ export class GameRuntime {
     let failedCount = 0;
     let lastReason = "";
     try {
-      for (const targetId of targetIds) {
-        const response = await this.sendSurfacePaintUpdate(targetId, imageDataUrl);
+      const totalTargets = targetIds.length;
+      for (let index = 0; index < totalTargets; index += 1) {
+        const targetId = targetIds[index];
+        const response = await this.sendSurfacePaintUpdate(targetId, imageDataUrl, {
+          // Explicit save action should be durable even if server exits immediately after.
+          forceFlush: index === totalTargets - 1
+        });
         if (response?.ok) {
           successCount += 1;
           this.applySurfacePaintUpdate(response);
@@ -6405,11 +6478,29 @@ export class GameRuntime {
     const deltaY = touch.clientY - this.mobileLookLastY;
     this.mobileLookLastX = touch.clientX;
     this.mobileLookLastY = touch.clientY;
+    this.lastLookInputAtMs = typeof performance !== "undefined" ? performance.now() : Date.now();
 
     // Increase mobile drag sensitivity to reduce sluggish camera response.
     this.yaw -= deltaX * 0.005;
     this.yaw = this.normalizeYawAngle(this.yaw);
     this.pitch -= deltaY * 0.0038;
+    this.pitch = THREE.MathUtils.clamp(this.pitch, -1.52, 1.52);
+  }
+
+  applyPendingMouseLookInput() {
+    const deltaX = Number(this.pendingMouseLookDeltaX) || 0;
+    const deltaY = Number(this.pendingMouseLookDeltaY) || 0;
+    if (Math.abs(deltaX) < 0.0001 && Math.abs(deltaY) < 0.0001) {
+      return;
+    }
+    this.pendingMouseLookDeltaX = 0;
+    this.pendingMouseLookDeltaY = 0;
+
+    const sensitivityX = this.mobileEnabled ? 0.0018 : 0.0023;
+    const sensitivityY = this.mobileEnabled ? 0.0016 : 0.002;
+    this.yaw -= deltaX * sensitivityX;
+    this.yaw = this.normalizeYawAngle(this.yaw);
+    this.pitch -= deltaY * sensitivityY;
     this.pitch = THREE.MathUtils.clamp(this.pitch, -1.52, 1.52);
   }
 
@@ -7290,7 +7381,8 @@ export class GameRuntime {
     }
 
     this.portalBillboardUpdateClock += Math.max(0, Number(delta) || 0);
-    if (!force && this.portalBillboardUpdateClock < 0.2) {
+    const updateInterval = Math.max(0.2, Number(this.portalBillboardUpdateInterval) || 0.4);
+    if (!force && this.portalBillboardUpdateClock < updateInterval) {
       return;
     }
     this.portalBillboardUpdateClock = 0;
@@ -8762,6 +8854,27 @@ export class GameRuntime {
     return lateralDx * lateralDx + lateralDz * lateralDz <= bridgeHalfWidth * bridgeHalfWidth;
   }
 
+  requestPlatformState() {
+    if (!(this.socket && this.networkConnected)) {
+      return;
+    }
+    this.socket.emit("platform:state:request");
+  }
+
+  requestRopeState() {
+    if (!(this.socket && this.networkConnected)) {
+      return;
+    }
+    this.socket.emit("rope:state:request");
+  }
+
+  requestObjectState() {
+    if (!(this.socket && this.networkConnected)) {
+      return;
+    }
+    this.socket.emit("object:state:request");
+  }
+
   requestPromoState() {
     if (!(this.socket && this.networkConnected)) {
       return;
@@ -8822,7 +8935,8 @@ export class GameRuntime {
         scale,
         linkUrl,
         mediaDataUrl,
-        allowOthersDraw
+        allowOthersDraw,
+        forceFlush: true
       },
       (response = {}) => {
         this.promoSetInFlight = false;
@@ -8853,7 +8967,7 @@ export class GameRuntime {
     }
     this.promoRemoveInFlight = true;
     this.syncPromoPanelUi();
-    this.socket.emit("promo:remove", {}, (response = {}) => {
+    this.socket.emit("promo:remove", { forceFlush: true }, (response = {}) => {
       this.promoRemoveInFlight = false;
       if (!response?.ok) {
         this.appendChatLine("", `홍보 오브젝트 삭제 실패: ${String(response?.error ?? "unknown")}`, "system");
@@ -8920,9 +9034,11 @@ export class GameRuntime {
     const pole = new THREE.Mesh(
       new THREE.CylinderGeometry(0.1 * safeScale, 0.14 * safeScale, poleHeight, 12),
       new THREE.MeshStandardMaterial({
-        color: 0x60708b,
-        roughness: 0.7,
-        metalness: 0.22
+        color: 0x788ba6,
+        roughness: 0.64,
+        metalness: 0.2,
+        emissive: 0x1f2f45,
+        emissiveIntensity: 0.22
       })
     );
     pole.position.y = poleHeight * 0.5;
@@ -8931,11 +9047,11 @@ export class GameRuntime {
     const frame = new THREE.Mesh(
       new THREE.BoxGeometry(boardWidth + 0.16 * safeScale, boardHeight + 0.16 * safeScale, boardDepth),
       new THREE.MeshStandardMaterial({
-        color: 0x1f2a38,
-        roughness: 0.52,
-        metalness: 0.28,
-        emissive: 0x09111a,
-        emissiveIntensity: 0.52
+        color: 0x314763,
+        roughness: 0.46,
+        metalness: 0.24,
+        emissive: 0x203449,
+        emissiveIntensity: 0.78
       })
     );
     frame.position.y = poleHeight + boardHeight * 0.5 + 0.04 * safeScale;
@@ -8943,11 +9059,12 @@ export class GameRuntime {
 
     const screenMaterial = new THREE.MeshStandardMaterial({
       color: 0xe2f2ff,
-      emissive: 0x1b2c40,
-      emissiveIntensity: 0.4,
+      emissive: 0x294766,
+      emissiveIntensity: 0.56,
       roughness: 0.3,
       metalness: 0.02
     });
+    screenMaterial.toneMapped = false;
     const screen = new THREE.Mesh(
       new THREE.PlaneGeometry(boardWidth, boardHeight),
       screenMaterial
@@ -8974,7 +9091,7 @@ export class GameRuntime {
       videoTexture.generateMipmaps = false;
       screenMaterial.map = videoTexture;
       screenMaterial.color.setHex(0xffffff);
-      screenMaterial.emissiveIntensity = 0.22;
+      screenMaterial.emissiveIntensity = 0.46;
       videoEl.play().catch(() => {});
     } else if (entry.mediaDataUrl && entry.mediaKind === "image") {
       imageTexture = this.textureLoader.load(entry.mediaDataUrl);
@@ -8984,10 +9101,10 @@ export class GameRuntime {
       imageTexture.generateMipmaps = false;
       screenMaterial.map = imageTexture;
       screenMaterial.color.setHex(0xffffff);
-      screenMaterial.emissiveIntensity = 0.2;
+      screenMaterial.emissiveIntensity = 0.5;
     } else {
       screenMaterial.color.setHex(0xd9f1ff);
-      screenMaterial.emissiveIntensity = 0.26;
+      screenMaterial.emissiveIntensity = 0.58;
     }
     screenMaterial.needsUpdate = true;
     return {
@@ -9030,7 +9147,7 @@ export class GameRuntime {
 
     this.promoObjects = nextMap;
     this.syncPromoPanelUi();
-    this.updatePromoLinkPrompt();
+    this.updatePromoLinkPrompt(0, true);
   }
 
   openNearestPromoLink() {
@@ -9049,9 +9166,25 @@ export class GameRuntime {
     }
   }
 
-  updatePromoLinkPrompt() {
+  updatePromoLinkPrompt(delta = 0, force = false) {
     if (!this.promoLinkPromptEl) {
       return;
+    }
+    const nowMs = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const recentLookInputMs = Math.max(0, nowMs - (Number(this.lastLookInputAtMs) || 0));
+    const promptInterval =
+      recentLookInputMs < this.dynamicResolutionInputQuietMs
+        ? this.promoLinkPromptUpdateInterval * 1.8
+        : this.promoLinkPromptUpdateInterval;
+    const step = Math.max(0, Number(delta) || 0);
+    if (step > 0) {
+      this.promoLinkPromptUpdateClock += step;
+      if (!force && this.promoLinkPromptUpdateClock < promptInterval) {
+        return;
+      }
+      this.promoLinkPromptUpdateClock = 0;
+    } else if (force) {
+      this.promoLinkPromptUpdateClock = 0;
     }
     if (
       this.isMobilePortraitBlocked() ||
@@ -9493,6 +9626,10 @@ export class GameRuntime {
           this.appendChatLine("", "방장 권한을 획득했습니다.", "system");
         }
         this.syncHostPortalTargetCandidate();
+        this.requestPlatformState();
+        this.requestRopeState();
+        this.requestObjectState();
+        this.requestPromoState();
       }
     );
   }
@@ -10818,7 +10955,7 @@ export class GameRuntime {
       const wasObjDragging = this.objEditorDragging;
       this.objEditorDragging = false;
       if (wasObjDragging) {
-        this.saveObjectPositions();
+        this.saveObjectPositions({ announceErrors: false, forceFlush: true });
       }
       this.chalkDrawingActive = false;
       this.chalkLastStamp = null;
@@ -10915,6 +11052,8 @@ export class GameRuntime {
       }
       this.hud.setStatus(this.getStatusText());
       if (!this.pointerLocked) {
+        this.pendingMouseLookDeltaX = 0;
+        this.pendingMouseLookDeltaY = 0;
         this.chalkDrawingActive = false;
         this.chalkLastStamp = null;
       }
@@ -10934,12 +11073,9 @@ export class GameRuntime {
         if (this.pointerLocked) {
           this.chalkPointer.set(0, 0);
         }
-        const sensitivityX = this.mobileEnabled ? 0.0018 : 0.0023;
-        const sensitivityY = this.mobileEnabled ? 0.0016 : 0.002;
-        this.yaw -= event.movementX * sensitivityX;
-        this.yaw = this.normalizeYawAngle(this.yaw);
-        this.pitch -= event.movementY * sensitivityY;
-        this.pitch = THREE.MathUtils.clamp(this.pitch, -1.52, 1.52);
+        this.lastLookInputAtMs = typeof performance !== "undefined" ? performance.now() : Date.now();
+        this.pendingMouseLookDeltaX += Number(event.movementX) || 0;
+        this.pendingMouseLookDeltaY += Number(event.movementY) || 0;
       },
       { passive: true }
     );
@@ -11525,9 +11661,16 @@ export class GameRuntime {
     });
 
     this.platformEditorSaveBtnEl?.addEventListener("click", () => {
-      this.savePlatforms();
-      this.saveRopes();
-      this.saveObjectPositions();
+      if (this.socket && this.networkConnected && !this.hasHostPrivilege()) {
+        this.appendChatLine("", "점프맵 저장은 방장만 가능합니다.", "system");
+        this.requestPlatformState();
+        this.requestRopeState();
+        this.requestObjectState();
+        return;
+      }
+      this.savePlatforms({ forceFlush: true });
+      this.saveRopes({ forceFlush: true });
+      this.saveObjectPositions({ forceFlush: true });
     });
     this.platformEditorClearBtnEl?.addEventListener("click", () => {
       for (const mesh of this.jumpPlatformMeshes) {
@@ -11537,6 +11680,7 @@ export class GameRuntime {
       }
       this.jumpPlatforms = [];
       this.jumpPlatformMeshes = [];
+      this.resetPlatformSpatialIndex();
       for (const mesh of this.jumpRopeMeshes) {
         this.scene.remove(mesh);
         mesh.geometry.dispose();
@@ -11545,8 +11689,8 @@ export class GameRuntime {
       this.jumpRopes = [];
       this.jumpRopeMeshes = [];
       this.climbingRope = null;
-      this.savePlatforms();
-      this.saveRopes();
+      this.savePlatforms({ forceFlush: true });
+      this.saveRopes({ forceFlush: true });
       this.updatePlatformEditorCount();
       this.updateRopeEditorCount();
     });
@@ -12313,6 +12457,24 @@ export class GameRuntime {
       this.localPlayerId = null;
       this.roomHostId = null;
       this.isRoomHost = false;
+      this.platformSaveInFlight = false;
+      this.platformSavePending = false;
+      this.platformSavePendingForceFlush = false;
+      this.platformStateRevision = 0;
+      this.platformStateDirty = false;
+      this.platformStateAutosaveClock = 0;
+      this.ropeSaveInFlight = false;
+      this.ropeSavePending = false;
+      this.ropeSavePendingForceFlush = false;
+      this.ropeStateRevision = 0;
+      this.ropeStateDirty = false;
+      this.ropeStateAutosaveClock = 0;
+      this.objectStateSaveInFlight = false;
+      this.objectStateSavePending = false;
+      this.objectStateSavePendingForceFlush = false;
+      this.objectStateRevision = 0;
+      this.objectStateDirty = false;
+      this.objectStateAutosaveClock = 0;
       this.leftBillboardSetInFlight = false;
       this.rightBillboardResetInFlight = false;
       this.hostMusicSetInFlight = false;
@@ -12355,10 +12517,29 @@ export class GameRuntime {
       this.portalForceOpenInFlight = false;
       this.portalCloseInFlight = false;
       this.portalScheduleSetInFlight = false;
+      this.platformSaveInFlight = false;
+      this.platformSavePending = false;
+      this.platformSavePendingForceFlush = false;
+      this.platformStateRevision = 0;
+      this.platformStateDirty = false;
+      this.platformStateAutosaveClock = 0;
+      this.ropeSaveInFlight = false;
+      this.ropeSavePending = false;
+      this.ropeSavePendingForceFlush = false;
+      this.ropeStateRevision = 0;
+      this.ropeStateDirty = false;
+      this.ropeStateAutosaveClock = 0;
+      this.objectStateSaveInFlight = false;
+      this.objectStateSavePending = false;
+      this.objectStateSavePendingForceFlush = false;
+      this.objectStateRevision = 0;
+      this.objectStateDirty = false;
+      this.objectStateAutosaveClock = 0;
       this.leftBillboardSetInFlight = false;
       this.rightBillboardResetInFlight = false;
       this.hostMusicSetInFlight = false;
       this.remoteSyncClock = 0;
+      this.remoteUpdateClock = 0;
       this.lastSentInput = null;
       this.localInputSeq = 0;
       this.lastAckInputSeq = 0;
@@ -12382,6 +12563,9 @@ export class GameRuntime {
       this.socket.emit("player:key:set", { key: this.promoOwnerKey }, () => {
         this.requestPromoState();
       });
+      this.requestPlatformState();
+      this.requestRopeState();
+      this.requestObjectState();
       if (this.surfacePaintRetryQueue.size > 0) {
         this.scheduleSurfacePaintRetry(240);
       }
@@ -12402,12 +12586,31 @@ export class GameRuntime {
       this.portalForceOpenInFlight = false;
       this.portalCloseInFlight = false;
       this.portalScheduleSetInFlight = false;
+      this.platformSaveInFlight = false;
+      this.platformSavePending = false;
+      this.platformSavePendingForceFlush = false;
+      this.platformStateRevision = 0;
+      this.platformStateDirty = false;
+      this.platformStateAutosaveClock = 0;
+      this.ropeSaveInFlight = false;
+      this.ropeSavePending = false;
+      this.ropeSavePendingForceFlush = false;
+      this.ropeStateRevision = 0;
+      this.ropeStateDirty = false;
+      this.ropeStateAutosaveClock = 0;
+      this.objectStateSaveInFlight = false;
+      this.objectStateSavePending = false;
+      this.objectStateSavePendingForceFlush = false;
+      this.objectStateRevision = 0;
+      this.objectStateDirty = false;
+      this.objectStateAutosaveClock = 0;
       this.leftBillboardSetInFlight = false;
       this.rightBillboardResetInFlight = false;
       this.hostMusicSetInFlight = false;
       this.securityTestSetInFlight = false;
       this.authoritativeStateSyncInFlight = false;
       this.remoteSyncClock = 0;
+      this.remoteUpdateClock = 0;
       this.lastSentInput = null;
       this.pendingJumpInput = false;
       this.pendingInputQueue.length = 0;
@@ -12441,12 +12644,31 @@ export class GameRuntime {
       this.portalScheduleSetInFlight = false;
       this.portalForceOpenInFlight = false;
       this.portalCloseInFlight = false;
+      this.platformSaveInFlight = false;
+      this.platformSavePending = false;
+      this.platformSavePendingForceFlush = false;
+      this.platformStateRevision = 0;
+      this.platformStateDirty = false;
+      this.platformStateAutosaveClock = 0;
+      this.ropeSaveInFlight = false;
+      this.ropeSavePending = false;
+      this.ropeSavePendingForceFlush = false;
+      this.ropeStateRevision = 0;
+      this.ropeStateDirty = false;
+      this.ropeStateAutosaveClock = 0;
+      this.objectStateSaveInFlight = false;
+      this.objectStateSavePending = false;
+      this.objectStateSavePendingForceFlush = false;
+      this.objectStateRevision = 0;
+      this.objectStateDirty = false;
+      this.objectStateAutosaveClock = 0;
       this.leftBillboardSetInFlight = false;
       this.rightBillboardResetInFlight = false;
       this.hostMusicSetInFlight = false;
       this.securityTestSetInFlight = false;
       this.authoritativeStateSyncInFlight = false;
       this.remoteSyncClock = 0;
+      this.remoteUpdateClock = 0;
       this.lastSentInput = null;
       this.pendingJumpInput = false;
       this.pendingInputQueue.length = 0;
@@ -12561,10 +12783,15 @@ export class GameRuntime {
     });
 
     socket.on("platform:state", (payload = {}) => {
-      this.applyPlatformState(payload?.platforms ?? []);
+      this.applyPlatformState(payload?.platforms ?? [], { revision: payload?.revision });
     });
     socket.on("rope:state", (payload = {}) => {
-      this.applyRopeState(payload?.ropes ?? []);
+      this.applyRopeState(payload?.ropes ?? [], { revision: payload?.revision });
+    });
+    socket.on("object:state", (payload = {}) => {
+      this.applyObjectPositionsState(payload?.positions ?? payload?.objectPositions ?? {}, {
+        revision: payload?.revision
+      });
     });
   }
 
@@ -13059,9 +13286,10 @@ export class GameRuntime {
     this.elapsedSeconds += delta;
     this.mobileUiRefreshClock += delta;
     this.spatialAudioMixClock += delta;
+    this.applyPendingMouseLookInput();
     this.updateMovement(delta);
     this.updateHubFlow(delta);
-    this.updateChalkPickupPrompt();
+    this.updateChalkPickupPrompt(delta);
     this.updateSurfacePaintPrompt(delta);
     this.updatePortalTimeBillboard(delta);
     if (this.mobileUiRefreshClock >= 0.12) {
@@ -13069,8 +13297,26 @@ export class GameRuntime {
       this.syncMobileUiState();
     }
     this.updateChalkDrawing();
-    this.updateCloudLayer(delta);
-    this.updateOcean(delta);
+    const nowMs = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const recentLookInputMs = Math.max(0, nowMs - (Number(this.lastLookInputAtMs) || 0));
+    const cloudInterval =
+      recentLookInputMs < this.dynamicResolutionInputQuietMs
+        ? this.cloudUpdateTurningInterval
+        : this.cloudUpdateInterval;
+    this.cloudUpdateClock += Math.max(0, Number(delta) || 0);
+    if (this.cloudUpdateClock >= cloudInterval) {
+      this.updateCloudLayer(this.cloudUpdateClock);
+      this.cloudUpdateClock = 0;
+    }
+    const oceanInterval =
+      recentLookInputMs < this.dynamicResolutionInputQuietMs
+        ? this.oceanUpdateTurningInterval
+        : this.oceanUpdateInterval;
+    this.oceanUpdateClock += Math.max(0, Number(delta) || 0);
+    if (this.oceanUpdateClock >= oceanInterval) {
+      this.updateOcean(this.oceanUpdateClock);
+      this.oceanUpdateClock = 0;
+    }
     this.updateRemotePlayers(delta);
     this.updateLocalChatBubble();
     this.emitLocalSync(delta);
@@ -13081,8 +13327,11 @@ export class GameRuntime {
     this.updateDynamicResolution(delta);
     this.updateHud(delta);
     this.updatePlatformEditor();
-    this.updateRopeProximity();
-    this.updatePromoLinkPrompt();
+    this.updatePlatformStateAutosave(delta);
+    this.updateRopeStateAutosave(delta);
+    this.updateObjectStateAutosave(delta);
+    this.updateRopeProximity(delta);
+    this.updatePromoLinkPrompt(delta);
     if (this.securityTestState?.enabled) {
       this.securityTestLabelRefreshClock += delta;
       if (this.securityTestLabelRefreshClock >= this.securityTestLabelRefreshInterval) {
@@ -13295,18 +13544,29 @@ export class GameRuntime {
       this.playerPosition.y += this.verticalVelocity * delta;
 
       let platformTopY = null;
-      for (const p of this.jumpPlatforms) {
-        const topY = p.y + p.h / 2;
+      if (this.verticalVelocity <= 0.1 && this.jumpPlatforms.length > 0) {
         const feetY = this.playerPosition.y - GAME_CONSTANTS.PLAYER_HEIGHT;
-        const swept = prevFeetY >= topY && feetY <= topY; // swept through from above
-        const nearTop = feetY >= topY - 0.6 && feetY <= topY + 0.1;
-        if (
-          Math.abs(this.playerPosition.x - p.x) < p.w / 2 + 0.28 &&
-          Math.abs(this.playerPosition.z - p.z) < p.d / 2 + 0.28 &&
-          (swept || nearTop) &&
-          this.verticalVelocity <= 0.1
-        ) {
-          if (platformTopY === null || topY > platformTopY) platformTopY = topY;
+        const candidatePlatforms = this.getNearbyPlatformCandidates(
+          this.playerPosition.x,
+          this.playerPosition.z
+        );
+        for (const p of candidatePlatforms) {
+          const halfW = Math.max(0.1, Number(p.w) || 0) * 0.5 + 0.28;
+          const halfD = Math.max(0.1, Number(p.d) || 0) * 0.5 + 0.28;
+          if (
+            Math.abs(this.playerPosition.x - (Number(p.x) || 0)) >= halfW ||
+            Math.abs(this.playerPosition.z - (Number(p.z) || 0)) >= halfD
+          ) {
+            continue;
+          }
+          const topY = (Number(p.y) || 0) + Math.max(0.05, Number(p.h) || 0.3) * 0.5;
+          const swept = prevFeetY >= topY && feetY <= topY; // swept through from above
+          const nearTop = feetY >= topY - 0.6 && feetY <= topY + 0.1;
+          if (swept || nearTop) {
+            if (platformTopY === null || topY > platformTopY) {
+              platformTopY = topY;
+            }
+          }
         }
       }
 
@@ -13339,8 +13599,23 @@ export class GameRuntime {
   }
 
   updateRemotePlayers(delta) {
-    const alpha = THREE.MathUtils.clamp(1 - Math.exp(-this.remoteLerpSpeed * delta), 0, 1);
     const now = performance.now();
+    const recentLookInputMs = Math.max(0, now - (Number(this.lastLookInputAtMs) || 0));
+    const turningPeersThreshold = Math.max(2, Math.trunc(Number(this.remoteUpdateTurningPeerThreshold) || 0));
+    if (
+      recentLookInputMs < this.dynamicResolutionInputQuietMs &&
+      this.remotePlayers.size >= turningPeersThreshold
+    ) {
+      this.remoteUpdateClock += Math.max(0, Number(delta) || 0);
+      const turningInterval = Math.max(0.016, Number(this.remoteUpdateTurningInterval) || 0.033);
+      if (this.remoteUpdateClock < turningInterval) {
+        return;
+      }
+      this.remoteUpdateClock = 0;
+    } else {
+      this.remoteUpdateClock = 0;
+    }
+    const alpha = THREE.MathUtils.clamp(1 - Math.exp(-this.remoteLerpSpeed * delta), 0, 1);
     const nowSec = this.elapsedSeconds;
 
     for (const [id, remote] of this.remotePlayers) {
@@ -14102,6 +14377,11 @@ export class GameRuntime {
     if (!config || !config.enabled || !Number.isFinite(delta) || delta <= 0) {
       return;
     }
+    const nowMs = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const recentLookInputMs = Math.max(0, nowMs - (Number(this.lastLookInputAtMs) || 0));
+    if (recentLookInputMs < this.dynamicResolutionInputQuietMs) {
+      return;
+    }
 
     config.sampleTime += delta;
     config.frameCount += 1;
@@ -14402,6 +14682,7 @@ export class GameRuntime {
       id: normalizedId,
       mesh,
       colliderIndex: normalizedColliderIndex,
+      defaultPosition: mesh.position.clone(),
       _savedHighlightMaterials: null,
       _savedEmissive: null,
       _savedEmissiveIntensity: null
@@ -14662,8 +14943,13 @@ export class GameRuntime {
       mesh.parent.worldToLocal(this.objEditorDragTargetWorld);
     }
 
+    const previousX = Number(mesh.position.x) || 0;
+    const previousZ = Number(mesh.position.z) || 0;
     mesh.position.x = this.objEditorDragTargetWorld.x;
     mesh.position.z = this.objEditorDragTargetWorld.z;
+    if (Math.abs(mesh.position.x - previousX) > 0.0005 || Math.abs(mesh.position.z - previousZ) > 0.0005) {
+      this.markObjectStateDirty();
+    }
     this.updateMovableObjectCollider(entry);
     this.updateSecurityTestLabelForEntry(entry);
     this.updateObjEditorInfoEl(entry);
@@ -14675,36 +14961,195 @@ export class GameRuntime {
     if (!this.objEditorActive || !entry?.mesh || !this.canUseObjectEditor()) {
       return false;
     }
-    const nextY = (Number(entry.mesh.position.y) || 0) + (Number(deltaY) || 0);
+    const previousY = Number(entry.mesh.position.y) || 0;
+    const nextY = previousY + (Number(deltaY) || 0);
     entry.mesh.position.y = THREE.MathUtils.clamp(nextY, -10, 260);
     this.updateMovableObjectCollider(entry);
     this.updateSecurityTestLabelForEntry(entry);
     this.updateObjEditorInfoEl(entry);
+    if (Math.abs(entry.mesh.position.y - previousY) > 0.0005) {
+      this.markObjectStateDirty();
+    }
     this.saveObjectPositions();
     return true;
   }
 
-  saveObjectPositions() {
+  collectObjectPositionsPayload() {
+    const payload = {};
+    for (const entry of this.movableObjects) {
+      if (!entry?.mesh || !entry?.id) {
+        continue;
+      }
+      const pos = entry.mesh.position;
+      payload[entry.id] = {
+        x: Math.round((Number(pos.x) || 0) * 1000) / 1000,
+        y: Math.round((Number(pos.y) || 0) * 1000) / 1000,
+        z: Math.round((Number(pos.z) || 0) * 1000) / 1000
+      };
+    }
+    return payload;
+  }
+
+  markObjectStateDirty() {
+    this.objectStateDirty = true;
+    const interval = Math.max(0.14, Number(this.objectStateAutosaveInterval) || 0.22);
+    this.objectStateAutosaveClock = Math.min(interval, this.objectStateAutosaveClock + interval * 0.6);
+  }
+
+  updateObjectStateAutosave(delta = 0) {
+    if (!this.objectStateDirty) {
+      return;
+    }
+    if (!(this.socket && this.networkConnected) || !this.hasHostPrivilege()) {
+      return;
+    }
+    this.objectStateAutosaveClock += Math.max(0, Number(delta) || 0);
+    const interval = Math.max(0.14, Number(this.objectStateAutosaveInterval) || 0.22);
+    if (this.objectStateAutosaveClock < interval) {
+      return;
+    }
+    this.objectStateAutosaveClock = 0;
+    this.saveObjectPositions({ announceErrors: false });
+  }
+
+  applyObjectPositionsState(rawPositions = {}, { persistLocal = true, revision = null } = {}) {
     if (!this.movableObjects.length) {
       return;
     }
-    try {
-      const payload = {};
-      for (const entry of this.movableObjects) {
-        if (!entry?.mesh || !entry?.id) {
-          continue;
+    const nextRevision = Math.trunc(Number(revision));
+    if (this.objectStateDirty) {
+      if (Number.isFinite(nextRevision) && nextRevision >= 0) {
+        if (nextRevision <= this.objectStateRevision) {
+          return;
         }
-        const pos = entry.mesh.position;
-        payload[entry.id] = {
-          x: Math.round((Number(pos.x) || 0) * 1000) / 1000,
-          y: Math.round((Number(pos.y) || 0) * 1000) / 1000,
-          z: Math.round((Number(pos.z) || 0) * 1000) / 1000
-        };
+      } else if (this.objEditorDragging || this.objectStateSaveInFlight || this.objectStateSavePending) {
+        return;
       }
-      localStorage.setItem("objPositions_v1", JSON.stringify(payload));
+    }
+    if (Number.isFinite(nextRevision) && nextRevision >= 0) {
+      if (nextRevision < this.objectStateRevision) {
+        return;
+      }
+      this.objectStateRevision = nextRevision;
+    }
+    const source = rawPositions && typeof rawPositions === "object" ? rawPositions : {};
+    const sourceKeys = Object.keys(source);
+    const hasAnySourceEntries = sourceKeys.length > 0;
+    for (const entry of this.movableObjects) {
+      if (!entry?.mesh || !entry?.id) {
+        continue;
+      }
+      if (this.objEditorDragging && this.objEditorSelected?.id === entry.id) {
+        continue;
+      }
+      const position = source[entry.id];
+      const hasServerPosition = position && typeof position === "object";
+      const fallback = entry.defaultPosition ?? entry.mesh.position;
+      let x = Number.NaN;
+      let y = Number.NaN;
+      let z = Number.NaN;
+      if (hasServerPosition) {
+        x = Number(position?.x);
+        y = Number(position?.y);
+        z = Number(position?.z);
+      } else if (!hasAnySourceEntries) {
+        // Full-empty state means explicit reset to map defaults.
+        x = Number(fallback?.x);
+        y = Number(fallback?.y);
+        z = Number(fallback?.z);
+      } else {
+        // Partial updates should not snap unspecified objects back to defaults.
+        continue;
+      }
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+        continue;
+      }
+      entry.mesh.position.set(x, y, z);
+      this.updateMovableObjectCollider(entry);
+      this.updateSecurityTestLabelForEntry(entry);
+    }
+    this.updateObjEditorInfoEl(this.objEditorSelected);
+    if (!this.objectStateSaveInFlight && !this.objectStateSavePending && !this.objEditorDragging) {
+      this.objectStateDirty = false;
+      this.objectStateAutosaveClock = 0;
+    }
+    if (persistLocal) {
+      try {
+        localStorage.setItem(
+          this.objectPositionsStorageKey,
+          JSON.stringify(this.collectObjectPositionsPayload())
+        );
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  saveObjectPositions({ announceErrors = true, forceFlush = false } = {}) {
+    if (!this.movableObjects.length) {
+      return;
+    }
+    const payload = this.collectObjectPositionsPayload();
+    try {
+      localStorage.setItem(this.objectPositionsStorageKey, JSON.stringify(payload));
     } catch {
       // ignore
     }
+    if (this.socket && this.networkConnected) {
+      if (this.objectStateSaveInFlight) {
+        this.objectStateSavePending = true;
+        this.objectStateDirty = true;
+        this.objectStateSavePendingForceFlush =
+          this.objectStateSavePendingForceFlush || Boolean(forceFlush);
+        return;
+      }
+      if (!this.hasHostPrivilege()) {
+        this.objectStateSavePending = false;
+        this.objectStateSavePendingForceFlush = false;
+        this.objectStateDirty = false;
+        this.objectStateAutosaveClock = 0;
+        if (announceErrors) {
+          this.appendChatLine("", "오브젝트 저장은 방장만 가능합니다.", "system");
+        }
+        this.requestObjectState();
+        return;
+      }
+      this.objectStateSaveInFlight = true;
+      this.objectStateDirty = true;
+      this.objectStateAutosaveClock = 0;
+      this.socket.emit("object:state:set", { positions: payload, forceFlush: Boolean(forceFlush) }, (res = {}) => {
+        this.objectStateSaveInFlight = false;
+        const ackRevision = Math.trunc(Number(res?.revision));
+        if (Number.isFinite(ackRevision) && ackRevision >= 0) {
+          this.objectStateRevision = Math.max(this.objectStateRevision, ackRevision);
+        }
+        if (!res?.ok) {
+          this.objectStateSavePending = false;
+          this.objectStateSavePendingForceFlush = false;
+          this.objectStateAutosaveClock = 0;
+          if (announceErrors) {
+            const reason = String(res?.error ?? "").trim() || "unknown";
+            this.appendChatLine("", `오브젝트 저장 실패: ${reason}`, "system");
+          }
+          this.requestObjectState();
+          return;
+        }
+        if (this.objectStateSavePending) {
+          const nextForceFlush = this.objectStateSavePendingForceFlush;
+          this.objectStateSavePending = false;
+          this.objectStateSavePendingForceFlush = false;
+          this.saveObjectPositions({ announceErrors: false, forceFlush: nextForceFlush });
+          return;
+        }
+        this.objectStateSavePendingForceFlush = false;
+        this.objectStateDirty = false;
+        this.objectStateAutosaveClock = 0;
+        this.requestObjectState();
+      });
+      return;
+    }
+    this.objectStateDirty = false;
+    this.objectStateAutosaveClock = 0;
   }
 
   loadSavedObjectPositions() {
@@ -14712,7 +15157,7 @@ export class GameRuntime {
       return;
     }
     try {
-      const savedRaw = localStorage.getItem("objPositions_v1");
+      const savedRaw = localStorage.getItem(this.objectPositionsStorageKey);
       if (!savedRaw) {
         return;
       }
@@ -14720,22 +15165,7 @@ export class GameRuntime {
       if (!saved || typeof saved !== "object") {
         return;
       }
-      for (const entry of this.movableObjects) {
-        if (!entry?.mesh || !entry?.id) {
-          continue;
-        }
-        const position = saved[entry.id];
-        const x = Number(position?.x);
-        const y = Number(position?.y);
-        const z = Number(position?.z);
-        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
-          continue;
-        }
-        entry.mesh.position.set(x, y, z);
-        this.updateMovableObjectCollider(entry);
-        this.updateSecurityTestLabelForEntry(entry);
-      }
-      this.updateObjEditorInfoEl(this.objEditorSelected);
+      this.applyObjectPositionsState(saved, { persistLocal: false });
     } catch {
       // ignore
     }
@@ -14792,6 +15222,9 @@ export class GameRuntime {
       this.objEditorDragging = false;
       this.objEditorActive = false;
       this.objEditorBarEl?.classList.add("hidden");
+      if (exitingObjEditor) {
+        this.saveObjectPositions({ announceErrors: false, forceFlush: true });
+      }
       this.clearObjEditorSelection();
       if (exitingObjEditor && !this.pointerLocked) {
         this.tryPointerLock();
@@ -14814,12 +15247,14 @@ export class GameRuntime {
     if (this.ropeEditorPreviewMesh) this.ropeEditorPreviewMesh.visible = false;
     if (!this.platformEditorPreviewMesh) return;
     // Use horizontal-only direction so platform doesn't float to ceiling when looking up
-    const dir = new THREE.Vector3();
+    const dir = this.editorPreviewDirection;
     this.camera.getWorldDirection(dir);
     dir.y = 0;
     if (dir.lengthSq() < 0.001) dir.set(0, 0, -1);
     dir.normalize();
-    const pos = this.playerPosition.clone().addScaledVector(dir, this.platformEditorDist);
+    const pos = this.editorPreviewPosition
+      .copy(this.playerPosition)
+      .addScaledVector(dir, this.platformEditorDist);
     // Snap to 0.5 grid; Y stays at player foot level by default
     pos.x = Math.round(pos.x * 2) / 2;
     pos.y = Math.round((this.playerPosition.y - GAME_CONSTANTS.PLAYER_HEIGHT) * 2) / 2;
@@ -14846,6 +15281,7 @@ export class GameRuntime {
     };
     this.spawnPlatformMesh(p);
     this.jumpPlatforms.push(p);
+    this.indexPlatformSpatialEntry(p);
     this.updatePlatformEditorCount();
     this.savePlatforms();
   }
@@ -14853,6 +15289,7 @@ export class GameRuntime {
   undoLastPlatform() {
     if (this.jumpPlatforms.length === 0) return;
     this.jumpPlatforms.pop();
+    this.rebuildPlatformSpatialIndex();
     const mesh = this.jumpPlatformMeshes.pop();
     if (mesh) {
       this.scene.remove(mesh);
@@ -14893,13 +15330,149 @@ export class GameRuntime {
         this.spawnPlatformMesh(p);
         this.jumpPlatforms.push(p);
       }
+      this.rebuildPlatformSpatialIndex();
       this.updatePlatformEditorCount();
     } catch {
       // ignore
     }
   }
 
-  applyPlatformState(rawPlatforms) {
+  resetPlatformSpatialIndex() {
+    this.platformSpatialIndex.clear();
+    this.platformCollisionCandidateBuffer.length = 0;
+    this.platformCollisionCandidateSeen.clear();
+    this.platformCollisionMaxHalfExtent = 0.5;
+  }
+
+  indexPlatformSpatialEntry(platform) {
+    if (!platform || typeof platform !== "object") {
+      return;
+    }
+    const x = Number(platform.x);
+    const z = Number(platform.z);
+    const w = Math.max(0.1, Number(platform.w) || 3);
+    const d = Math.max(0.1, Number(platform.d) || 3);
+    if (!Number.isFinite(x) || !Number.isFinite(z)) {
+      return;
+    }
+    const halfW = w * 0.5;
+    const halfD = d * 0.5;
+    this.platformCollisionMaxHalfExtent = Math.max(
+      this.platformCollisionMaxHalfExtent,
+      Math.max(halfW, halfD)
+    );
+    const pad = Math.max(0.24, Number(this.playerCollisionRadius) || 0.35) + 0.4;
+    const minX = x - halfW - pad;
+    const maxX = x + halfW + pad;
+    const minZ = z - halfD - pad;
+    const maxZ = z + halfD + pad;
+    const cellSize = Math.max(1, Number(this.platformSpatialCellSize) || 10);
+    const minCellX = Math.floor(minX / cellSize);
+    const maxCellX = Math.floor(maxX / cellSize);
+    const minCellZ = Math.floor(minZ / cellSize);
+    const maxCellZ = Math.floor(maxZ / cellSize);
+    for (let cx = minCellX; cx <= maxCellX; cx += 1) {
+      for (let cz = minCellZ; cz <= maxCellZ; cz += 1) {
+        const key = `${cx}|${cz}`;
+        let bucket = this.platformSpatialIndex.get(key);
+        if (!bucket) {
+          bucket = [];
+          this.platformSpatialIndex.set(key, bucket);
+        }
+        bucket.push(platform);
+      }
+    }
+  }
+
+  rebuildPlatformSpatialIndex() {
+    this.resetPlatformSpatialIndex();
+    for (const platform of this.jumpPlatforms) {
+      this.indexPlatformSpatialEntry(platform);
+    }
+  }
+
+  getNearbyPlatformCandidates(x, z) {
+    const candidates = this.platformCollisionCandidateBuffer;
+    candidates.length = 0;
+    if (this.jumpPlatforms.length === 0) {
+      return candidates;
+    }
+    if (this.platformSpatialIndex.size === 0) {
+      for (const platform of this.jumpPlatforms) {
+        candidates.push(platform);
+      }
+      return candidates;
+    }
+    const seen = this.platformCollisionCandidateSeen;
+    seen.clear();
+    const px = Number(x) || 0;
+    const pz = Number(z) || 0;
+    const searchRadius =
+      Math.max(0.5, Number(this.platformCollisionMaxHalfExtent) || 0.5) +
+      Math.max(0.24, Number(this.playerCollisionRadius) || 0.35) +
+      0.6;
+    const cellSize = Math.max(1, Number(this.platformSpatialCellSize) || 10);
+    const minCellX = Math.floor((px - searchRadius) / cellSize);
+    const maxCellX = Math.floor((px + searchRadius) / cellSize);
+    const minCellZ = Math.floor((pz - searchRadius) / cellSize);
+    const maxCellZ = Math.floor((pz + searchRadius) / cellSize);
+    for (let cx = minCellX; cx <= maxCellX; cx += 1) {
+      for (let cz = minCellZ; cz <= maxCellZ; cz += 1) {
+        const bucket = this.platformSpatialIndex.get(`${cx}|${cz}`);
+        if (!bucket) {
+          continue;
+        }
+        for (const platform of bucket) {
+          if (seen.has(platform)) {
+            continue;
+          }
+          seen.add(platform);
+          candidates.push(platform);
+        }
+      }
+    }
+    return candidates;
+  }
+
+  markPlatformStateDirty() {
+    this.platformStateDirty = true;
+    const interval = Math.max(0.16, Number(this.platformStateAutosaveInterval) || 0.24);
+    this.platformStateAutosaveClock = Math.min(interval, this.platformStateAutosaveClock + interval * 0.6);
+  }
+
+  updatePlatformStateAutosave(delta = 0) {
+    if (!this.platformStateDirty) {
+      return;
+    }
+    if (!(this.socket && this.networkConnected) || !this.hasHostPrivilege()) {
+      return;
+    }
+    this.platformStateAutosaveClock += Math.max(0, Number(delta) || 0);
+    const interval = Math.max(0.16, Number(this.platformStateAutosaveInterval) || 0.24);
+    if (this.platformStateAutosaveClock < interval) {
+      return;
+    }
+    this.platformStateAutosaveClock = 0;
+    this.savePlatforms({ announceErrors: false });
+  }
+
+  applyPlatformState(rawPlatforms, { revision = null } = {}) {
+    const nextRevision = Math.trunc(Number(revision));
+    if (this.platformStateDirty) {
+      if (Number.isFinite(nextRevision) && nextRevision >= 0) {
+        if (nextRevision <= this.platformStateRevision) {
+          return;
+        }
+      } else if (this.platformSaveInFlight || this.platformSavePending) {
+        return;
+      }
+    }
+    if (Number.isFinite(nextRevision) && nextRevision >= 0) {
+      if (nextRevision < this.platformStateRevision) {
+        return;
+      }
+      this.platformStateRevision = nextRevision;
+    }
     // Clear existing platform meshes
     for (const mesh of this.jumpPlatformMeshes) {
       this.scene.remove(mesh);
@@ -14915,7 +15488,12 @@ export class GameRuntime {
       this.spawnPlatformMesh(p);
       this.jumpPlatforms.push(p);
     }
+    this.rebuildPlatformSpatialIndex();
     this.updatePlatformEditorCount();
+    if (!this.platformSaveInFlight && !this.platformSavePending) {
+      this.platformStateDirty = false;
+      this.platformStateAutosaveClock = 0;
+    }
 
     // Also persist locally as backup
     try {
@@ -14925,7 +15503,7 @@ export class GameRuntime {
     }
   }
 
-  savePlatforms() {
+  savePlatforms({ announceErrors = true, forceFlush = false } = {}) {
     try {
       localStorage.setItem("jumpPlatforms_v1", JSON.stringify(this.jumpPlatforms));
     } catch {
@@ -14933,10 +15511,65 @@ export class GameRuntime {
     }
     // Sync to server so all players see the platforms
     if (this.socket && this.networkConnected) {
-      this.socket.emit("platform:state:set", { platforms: this.jumpPlatforms }, (res = {}) => {
-        if (!res?.ok) console.warn("[platform] save rejected:", res?.error);
+      if (this.platformSaveInFlight) {
+        this.platformSavePending = true;
+        this.platformStateDirty = true;
+        this.platformSavePendingForceFlush =
+          this.platformSavePendingForceFlush || Boolean(forceFlush);
+        return;
+      }
+      if (!this.hasHostPrivilege()) {
+        this.platformSavePending = false;
+        this.platformSavePendingForceFlush = false;
+        this.platformStateDirty = false;
+        this.platformStateAutosaveClock = 0;
+        if (announceErrors) {
+          this.appendChatLine("", "점프대 저장은 방장만 가능합니다.", "system");
+        }
+        this.requestPlatformState();
+        return;
+      }
+      this.platformSaveInFlight = true;
+      this.platformStateDirty = true;
+      this.platformStateAutosaveClock = 0;
+      this.socket.emit(
+        "platform:state:set",
+        { platforms: this.jumpPlatforms, forceFlush: Boolean(forceFlush) },
+        (res = {}) => {
+        this.platformSaveInFlight = false;
+        const ackRevision = Math.trunc(Number(res?.revision));
+        if (Number.isFinite(ackRevision) && ackRevision >= 0) {
+          this.platformStateRevision = Math.max(this.platformStateRevision, ackRevision);
+        }
+        if (!res?.ok) {
+          this.platformSavePending = false;
+          this.platformSavePendingForceFlush = false;
+          this.platformStateAutosaveClock = 0;
+          if (announceErrors) {
+            const reason = String(res?.error ?? "").trim() || "unknown";
+            this.appendChatLine("", `점프대 저장 실패: ${reason}`, "system");
+          }
+          console.warn("[platform] save rejected:", res?.error);
+          this.requestPlatformState();
+          return;
+        }
+        if (this.platformSavePending) {
+          const nextForceFlush = this.platformSavePendingForceFlush;
+          this.platformSavePending = false;
+          this.platformSavePendingForceFlush = false;
+          this.savePlatforms({ announceErrors: false, forceFlush: nextForceFlush });
+          return;
+        }
+        this.platformSavePendingForceFlush = false;
+        this.platformStateDirty = false;
+        this.platformStateAutosaveClock = 0;
+        // Pull canonical state from server to prevent local/server drift.
+        this.requestPlatformState();
       });
+      return;
     }
+    this.platformStateDirty = false;
+    this.platformStateAutosaveClock = 0;
   }
 
   updatePlatformEditorCount() {
@@ -14984,6 +15617,9 @@ export class GameRuntime {
     this.objEditorActive = false;
     this.objEditorDragging = false;
     this.objEditorBarEl?.classList.add("hidden");
+    if (wasObjMode) {
+      this.saveObjectPositions({ announceErrors: false, forceFlush: true });
+    }
     this.clearObjEditorSelection();
 
     if (this.flyModeActive) {
@@ -15011,7 +15647,7 @@ export class GameRuntime {
     }
     this.ropeEditorPreviewMesh.visible = true;
     // Position: horizontal direction in front of player, bottom at foot level
-    const dir = new THREE.Vector3();
+    const dir = this.editorPreviewDirection;
     this.camera.getWorldDirection(dir);
     dir.y = 0;
     if (dir.lengthSq() < 0.001) dir.set(0, 0, -1);
@@ -15079,11 +15715,17 @@ export class GameRuntime {
     this.jumpRopeMeshes.push(mesh);
   }
 
-  updateRopeProximity() {
+  updateRopeProximity(delta = 0) {
     if (this.flyModeActive || !this.canUseGameplayControls()) {
+      this.ropeProximityClock = this.ropeProximityInterval;
       this.ropeClimbPromptEl?.classList.add("hidden");
       return;
     }
+    this.ropeProximityClock += Math.max(0, Number(delta) || 0);
+    if (this.ropeProximityClock < this.ropeProximityInterval) {
+      return;
+    }
+    this.ropeProximityClock = 0;
     const nearRope = this.getNearestClimbableRope();
     if (nearRope && !this.climbingRope) {
       this.ropeClimbPromptEl?.classList.remove("hidden");
@@ -15178,7 +15820,45 @@ export class GameRuntime {
     }
   }
 
-  applyRopeState(rawRopes) {
+  markRopeStateDirty() {
+    this.ropeStateDirty = true;
+    const interval = Math.max(0.18, Number(this.ropeStateAutosaveInterval) || 0.26);
+    this.ropeStateAutosaveClock = Math.min(interval, this.ropeStateAutosaveClock + interval * 0.6);
+  }
+
+  updateRopeStateAutosave(delta = 0) {
+    if (!this.ropeStateDirty) {
+      return;
+    }
+    if (!(this.socket && this.networkConnected) || !this.hasHostPrivilege()) {
+      return;
+    }
+    this.ropeStateAutosaveClock += Math.max(0, Number(delta) || 0);
+    const interval = Math.max(0.18, Number(this.ropeStateAutosaveInterval) || 0.26);
+    if (this.ropeStateAutosaveClock < interval) {
+      return;
+    }
+    this.ropeStateAutosaveClock = 0;
+    this.saveRopes({ announceErrors: false });
+  }
+
+  applyRopeState(rawRopes, { revision = null } = {}) {
+    const nextRevision = Math.trunc(Number(revision));
+    if (this.ropeStateDirty) {
+      if (Number.isFinite(nextRevision) && nextRevision >= 0) {
+        if (nextRevision <= this.ropeStateRevision) {
+          return;
+        }
+      } else if (this.ropeSaveInFlight || this.ropeSavePending) {
+        return;
+      }
+    }
+    if (Number.isFinite(nextRevision) && nextRevision >= 0) {
+      if (nextRevision < this.ropeStateRevision) {
+        return;
+      }
+      this.ropeStateRevision = nextRevision;
+    }
     for (const mesh of this.jumpRopeMeshes) {
       this.scene.remove(mesh);
       mesh.geometry.dispose();
@@ -15194,20 +15874,74 @@ export class GameRuntime {
       this.jumpRopes.push(r);
     }
     this.updateRopeEditorCount();
+    if (!this.ropeSaveInFlight && !this.ropeSavePending) {
+      this.ropeStateDirty = false;
+      this.ropeStateAutosaveClock = 0;
+    }
     try {
       localStorage.setItem("jumpRopes_v1", JSON.stringify(this.jumpRopes));
     } catch { /* ignore */ }
   }
 
-  saveRopes() {
+  saveRopes({ announceErrors = true, forceFlush = false } = {}) {
     try {
       localStorage.setItem("jumpRopes_v1", JSON.stringify(this.jumpRopes));
     } catch { /* ignore */ }
     if (this.socket && this.networkConnected) {
-      this.socket.emit("rope:state:set", { ropes: this.jumpRopes }, (res = {}) => {
-        if (!res?.ok) console.warn("[rope] save rejected:", res?.error);
+      if (this.ropeSaveInFlight) {
+        this.ropeSavePending = true;
+        this.ropeStateDirty = true;
+        this.ropeSavePendingForceFlush = this.ropeSavePendingForceFlush || Boolean(forceFlush);
+        return;
+      }
+      if (!this.hasHostPrivilege()) {
+        this.ropeSavePending = false;
+        this.ropeSavePendingForceFlush = false;
+        this.ropeStateDirty = false;
+        this.ropeStateAutosaveClock = 0;
+        if (announceErrors) {
+          this.appendChatLine("", "로프 저장은 방장만 가능합니다.", "system");
+        }
+        this.requestRopeState();
+        return;
+      }
+      this.ropeSaveInFlight = true;
+      this.ropeStateDirty = true;
+      this.ropeStateAutosaveClock = 0;
+      this.socket.emit("rope:state:set", { ropes: this.jumpRopes, forceFlush: Boolean(forceFlush) }, (res = {}) => {
+        this.ropeSaveInFlight = false;
+        const ackRevision = Math.trunc(Number(res?.revision));
+        if (Number.isFinite(ackRevision) && ackRevision >= 0) {
+          this.ropeStateRevision = Math.max(this.ropeStateRevision, ackRevision);
+        }
+        if (!res?.ok) {
+          this.ropeSavePending = false;
+          this.ropeSavePendingForceFlush = false;
+          this.ropeStateAutosaveClock = 0;
+          if (announceErrors) {
+            const reason = String(res?.error ?? "").trim() || "unknown";
+            this.appendChatLine("", `로프 저장 실패: ${reason}`, "system");
+          }
+          console.warn("[rope] save rejected:", res?.error);
+          this.requestRopeState();
+          return;
+        }
+        if (this.ropeSavePending) {
+          const nextForceFlush = this.ropeSavePendingForceFlush;
+          this.ropeSavePending = false;
+          this.ropeSavePendingForceFlush = false;
+          this.saveRopes({ announceErrors: false, forceFlush: nextForceFlush });
+          return;
+        }
+        this.ropeSavePendingForceFlush = false;
+        this.ropeStateDirty = false;
+        this.ropeStateAutosaveClock = 0;
+        this.requestRopeState();
       });
+      return;
     }
+    this.ropeStateDirty = false;
+    this.ropeStateAutosaveClock = 0;
   }
 
   updateRopeEditorCount() {
