@@ -43,6 +43,8 @@ const MAX_EDITOR_SCALE = 8;
 const OBJECT_POSITION_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,96}$/;
 const MAX_OBJECT_POSITIONS = 4000;
 const MAX_OBJECT_COORDINATE = 2500;
+const MIN_OBJECT_SCALE = 0.25;
+const MAX_OBJECT_SCALE = 18;
 const PROMO_OWNER_KEY_PATTERN = /^[a-zA-Z0-9:_-]{8,96}$/;
 const MAX_PROMO_OBJECTS = 1200;
 const MAX_PROMO_NAME_CHARS = 48;
@@ -139,10 +141,34 @@ function normalizeObjectPositionEntry(rawValue) {
   if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
     return null;
   }
+  const sxRaw = Number(rawValue?.sx);
+  const syRaw = Number(rawValue?.sy);
+  const szRaw = Number(rawValue?.sz);
+  const sx = Number.isFinite(sxRaw)
+    ? Math.max(MIN_OBJECT_SCALE, Math.min(MAX_OBJECT_SCALE, sxRaw))
+    : 1;
+  const sy = Number.isFinite(syRaw)
+    ? Math.max(MIN_OBJECT_SCALE, Math.min(MAX_OBJECT_SCALE, syRaw))
+    : 1;
+  const sz = Number.isFinite(szRaw)
+    ? Math.max(MIN_OBJECT_SCALE, Math.min(MAX_OBJECT_SCALE, szRaw))
+    : 1;
+  let visible = true;
+  if (typeof rawValue?.visible === "boolean") {
+    visible = rawValue.visible;
+  } else if (rawValue?.visible === 0 || rawValue?.visible === "0") {
+    visible = false;
+  } else if (rawValue?.visible === 1 || rawValue?.visible === "1") {
+    visible = true;
+  }
   return {
     x: Math.max(-MAX_OBJECT_COORDINATE, Math.min(MAX_OBJECT_COORDINATE, x)),
     y: Math.max(-MAX_OBJECT_COORDINATE, Math.min(MAX_OBJECT_COORDINATE, y)),
-    z: Math.max(-MAX_OBJECT_COORDINATE, Math.min(MAX_OBJECT_COORDINATE, z))
+    z: Math.max(-MAX_OBJECT_COORDINATE, Math.min(MAX_OBJECT_COORDINATE, z)),
+    sx,
+    sy,
+    sz,
+    visible
   };
 }
 

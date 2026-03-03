@@ -96,6 +96,10 @@ const OBJECT_EDITOR_MIN_LIMIT = 1;
 const OBJECT_EDITOR_MAX_LIMIT = 10000;
 const OBJECT_EDITOR_MIN_SCALE = 0.25;
 const OBJECT_EDITOR_MAX_SCALE = 8;
+const HOST_CUSTOM_BLOCK_POOL_SIZE = 24;
+const HOST_CUSTOM_BLOCK_MIN_SIZE = 0.5;
+const HOST_CUSTOM_BLOCK_MAX_SIZE = 18;
+const HOST_CUSTOM_BLOCK_DEFAULT_SIZE = 2.5;
 const PROMO_OWNER_KEY_STORAGE_KEY = "promoOwnerKey_v1";
 const PROMO_MAX_MEDIA_BYTES = 6 * 1024 * 1024;
 const PROMO_LINK_INTERACT_RADIUS = 4.2;
@@ -298,6 +302,7 @@ export class GameRuntime {
     this.objectStateAutosaveInterval = this.mobileEnabled ? 0.32 : 0.22;
     this.platformEditorSize = { ...this.platformEditorBaseSize };
     this.platformEditorDist = 4;
+    this.hostCustomPaintBlockCount = HOST_CUSTOM_BLOCK_POOL_SIZE;
     this.jumpRopes = [];
     this.jumpRopeMeshes = [];
     this.climbingRope = null;
@@ -655,6 +660,10 @@ export class GameRuntime {
     this.editorModePlatformBtnEl = document.getElementById("editor-mode-platform");
     this.editorModeRopeBtnEl = document.getElementById("editor-mode-rope");
     this.editorModeObjBtnEl = document.getElementById("editor-mode-obj");
+    this.hostGrayObjectWidthInputEl = document.getElementById("host-gray-object-width");
+    this.hostGrayObjectHeightInputEl = document.getElementById("host-gray-object-height");
+    this.hostGrayObjectDepthInputEl = document.getElementById("host-gray-object-depth");
+    this.hostGrayObjectAddBtnEl = document.getElementById("host-gray-object-add");
     this.objEditorBarEl = document.getElementById("obj-editor-bar");
     this.objEditorInfoEl = document.getElementById("obj-editor-info");
 
@@ -2208,6 +2217,39 @@ export class GameRuntime {
         panel.receiveShadow = true;
         bridgeGroup.add(panel);
         bridgePanelIndex += 1;
+      }
+    }
+
+    const hostCustomBlockMaterial = bridgePaintMat.clone();
+    for (let index = 0; index < this.hostCustomPaintBlockCount; index += 1) {
+      const blockId = `host_custom_block_${index}`;
+      const customBlock = this.createPaintableBoxMesh(
+        new THREE.BoxGeometry(1, 1, 1),
+        hostCustomBlockMaterial,
+        blockId
+      );
+      const stashY = -920 - index * 2.8;
+      customBlock.position.set(0, stashY, 0);
+      customBlock.scale.set(1, 1, 1);
+      customBlock.visible = false;
+      customBlock.castShadow = false;
+      customBlock.receiveShadow = true;
+      cityGroup.add(customBlock);
+      const customColliderIndex = registerCityBuildingCollider(
+        0,
+        0,
+        0.2,
+        0.2,
+        -1100,
+        -900
+      );
+      const customEntry = this.registerMovableObject(customBlock, blockId, customColliderIndex);
+      if (customEntry) {
+        customEntry.isHostCustomPaintBlock = true;
+        customEntry.defaultVisible = false;
+        customEntry.defaultScale = customBlock.scale.clone();
+        customEntry.defaultPosition = customBlock.position.clone();
+        this.parkMovableObjectCollider(customEntry);
       }
     }
 
@@ -7967,6 +8009,25 @@ export class GameRuntime {
     if (this.editorSettingsApplyBtnEl) {
       this.editorSettingsApplyBtnEl.disabled = controlsBusy;
     }
+    const hostCustomTotal = this.getHostCustomPaintBlockEntries().length;
+    const hostCustomAvailable = this.getHostCustomPaintBlockAvailableCount();
+    const hostCustomDisabled = controlsBusy || hostCustomAvailable <= 0;
+    if (this.hostGrayObjectWidthInputEl) {
+      this.hostGrayObjectWidthInputEl.disabled = controlsBusy;
+    }
+    if (this.hostGrayObjectHeightInputEl) {
+      this.hostGrayObjectHeightInputEl.disabled = controlsBusy;
+    }
+    if (this.hostGrayObjectDepthInputEl) {
+      this.hostGrayObjectDepthInputEl.disabled = controlsBusy;
+    }
+    if (this.hostGrayObjectAddBtnEl) {
+      const nextLabel = `앞에 오브젝트 추가 (${hostCustomAvailable}/${hostCustomTotal})`;
+      if (this.hostGrayObjectAddBtnEl.textContent !== nextLabel) {
+        this.hostGrayObjectAddBtnEl.textContent = nextLabel;
+      }
+      this.hostGrayObjectAddBtnEl.disabled = hostCustomDisabled;
+    }
     this.syncObjectEditorSettingsUi();
     for (const button of this.hostRightVideoQuickButtons ?? []) {
       button.disabled = controlsBusy;
@@ -8613,6 +8674,7 @@ export class GameRuntime {
     if (this.mobilePromoPlaceBtnEl) {
       this.mobilePromoPlaceBtnEl.classList.toggle("active", Boolean(this.mobileEnabled && panelVisible));
     }
+    document.body.classList.toggle("promo-desktop-open", Boolean(desktopPanelVisible));
 
     const connected = Boolean(this.socket && this.networkConnected);
     const busy = this.promoSetInFlight || this.promoRemoveInFlight;
@@ -10754,12 +10816,10 @@ export class GameRuntime {
 
       if (event.code === "KeyY" && this.canUseGameplayControls() && !this.mobileEnabled) {
         event.preventDefault();
-        if (!this.promoPanelDesktopOpen) {
-          this.setPromoPanelDesktopOpen(true, { syncUi: true });
-          this.setPromoPanelStatus("패널 열림 · Y 키로 앞에 배치+저장");
+        if (!this.hasHostPrivilege()) {
           return;
         }
-        this.requestPromoUpsert({ placeInFront: true });
+        this.requestHostCustomPaintBlockAdd();
         return;
       }
 
@@ -11716,6 +11776,19 @@ export class GameRuntime {
     this.editorModeObjBtnEl?.addEventListener("click", () => {
       this.setEditorMode("obj");
     });
+    this.hostGrayObjectAddBtnEl?.addEventListener("click", () => {
+      this.requestHostCustomPaintBlockAdd();
+    });
+    const handleHostGraySizeEnter = (event) => {
+      if (event.code !== "Enter") {
+        return;
+      }
+      event.preventDefault();
+      this.requestHostCustomPaintBlockAdd();
+    };
+    this.hostGrayObjectWidthInputEl?.addEventListener("keydown", handleHostGraySizeEnter);
+    this.hostGrayObjectHeightInputEl?.addEventListener("keydown", handleHostGraySizeEnter);
+    this.hostGrayObjectDepthInputEl?.addEventListener("keydown", handleHostGraySizeEnter);
   }
 
   resolveUiElements() {
@@ -12089,6 +12162,18 @@ export class GameRuntime {
     }
     if (!this.editorSettingsApplyBtnEl) {
       this.editorSettingsApplyBtnEl = document.getElementById("editor-settings-apply");
+    }
+    if (!this.hostGrayObjectWidthInputEl) {
+      this.hostGrayObjectWidthInputEl = document.getElementById("host-gray-object-width");
+    }
+    if (!this.hostGrayObjectHeightInputEl) {
+      this.hostGrayObjectHeightInputEl = document.getElementById("host-gray-object-height");
+    }
+    if (!this.hostGrayObjectDepthInputEl) {
+      this.hostGrayObjectDepthInputEl = document.getElementById("host-gray-object-depth");
+    }
+    if (!this.hostGrayObjectAddBtnEl) {
+      this.hostGrayObjectAddBtnEl = document.getElementById("host-gray-object-add");
     }
     this.chalkColorButtons = Array.from(document.querySelectorAll(".chalk-color[data-color]"));
     this.toolButtons = Array.from(document.querySelectorAll(".tool-slot[data-tool]"));
@@ -12907,11 +12992,8 @@ export class GameRuntime {
     }
 
     if (hostname.endsWith("github.io")) {
-      const exampleUrl = `${window.location.origin}${window.location.pathname}?server=https://emptines-chat.onrender.com`;
-      return pushEndpointError(
-        `서버 링크가 없습니다. ${exampleUrl} 형식으로 접속하세요.`,
-        true
-      );
+      const defaultPagesEndpoint = "https://emptines-chat.onrender.com";
+      return normalizeEndpoint(defaultPagesEndpoint, "기본 Pages 서버");
     }
 
     return `${protocol}//${hostname}`;
@@ -14611,6 +14693,10 @@ export class GameRuntime {
     if (!mesh || !targetLabel) {
       return;
     }
+    if (!mesh.visible) {
+      targetLabel.visible = false;
+      return;
+    }
     mesh.updateMatrixWorld(true);
     this.securityTestBounds.setFromObject(mesh);
     if (this.securityTestBounds.isEmpty()) {
@@ -14696,6 +14782,9 @@ export class GameRuntime {
       mesh,
       colliderIndex: normalizedColliderIndex,
       defaultPosition: mesh.position.clone(),
+      defaultScale: mesh.scale.clone(),
+      defaultVisible: mesh.visible !== false,
+      isHostCustomPaintBlock: false,
       _savedHighlightMaterials: null,
       _savedEmissive: null,
       _savedEmissiveIntensity: null
@@ -14717,10 +14806,13 @@ export class GameRuntime {
       return false;
     }
     const mesh = entry.mesh;
+    if (!mesh.visible) {
+      return this.parkMovableObjectCollider(entry);
+    }
     mesh.updateMatrixWorld(true);
     const worldBounds = new THREE.Box3().setFromObject(mesh);
     if (worldBounds.isEmpty()) {
-      return false;
+      return this.parkMovableObjectCollider(entry);
     }
 
     collider.minX = worldBounds.min.x;
@@ -14730,6 +14822,33 @@ export class GameRuntime {
     collider.minY = worldBounds.min.y - 0.05;
     collider.maxY = worldBounds.max.y + 0.05;
     return true;
+  }
+
+  parkMovableObjectCollider(entry) {
+    const colliderIndex = Math.trunc(Number(entry?.colliderIndex));
+    const collider = this.staticWorldColliders[colliderIndex];
+    if (!collider) {
+      return false;
+    }
+    collider.minX = 1000000;
+    collider.maxX = 1000000.2;
+    collider.minZ = 1000000;
+    collider.maxZ = 1000000.2;
+    collider.minY = -1000000;
+    collider.maxY = -999900;
+    return true;
+  }
+
+  setMovableObjectVisibility(entry, visible) {
+    if (!entry?.mesh) {
+      return false;
+    }
+    const nextVisible = Boolean(visible);
+    entry.mesh.visible = nextVisible;
+    if (nextVisible) {
+      return this.updateMovableObjectCollider(entry);
+    }
+    return this.parkMovableObjectCollider(entry);
   }
 
   updateObjEditorMouseFromClient(clientX, clientY) {
@@ -14994,10 +15113,15 @@ export class GameRuntime {
         continue;
       }
       const pos = entry.mesh.position;
+      const scale = entry.mesh.scale;
       payload[entry.id] = {
         x: Math.round((Number(pos.x) || 0) * 1000) / 1000,
         y: Math.round((Number(pos.y) || 0) * 1000) / 1000,
-        z: Math.round((Number(pos.z) || 0) * 1000) / 1000
+        z: Math.round((Number(pos.z) || 0) * 1000) / 1000,
+        sx: Math.round((Number(scale.x) || 1) * 1000) / 1000,
+        sy: Math.round((Number(scale.y) || 1) * 1000) / 1000,
+        sz: Math.round((Number(scale.z) || 1) * 1000) / 1000,
+        visible: entry.mesh.visible !== false
       };
     }
     return payload;
@@ -15058,18 +15182,40 @@ export class GameRuntime {
       const position = source[entry.id];
       const hasServerPosition = position && typeof position === "object";
       const fallback = entry.defaultPosition ?? entry.mesh.position;
+      const fallbackScale = entry.defaultScale ?? entry.mesh.scale;
+      const fallbackVisible = typeof entry.defaultVisible === "boolean" ? entry.defaultVisible : true;
       let x = Number.NaN;
       let y = Number.NaN;
       let z = Number.NaN;
+      let sx = Number.NaN;
+      let sy = Number.NaN;
+      let sz = Number.NaN;
+      let visible = null;
       if (hasServerPosition) {
         x = Number(position?.x);
         y = Number(position?.y);
         z = Number(position?.z);
+        sx = Number(position?.sx);
+        sy = Number(position?.sy);
+        sz = Number(position?.sz);
+        if (typeof position?.visible === "boolean") {
+          visible = position.visible;
+        } else if (position?.visible === 1 || position?.visible === "1") {
+          visible = true;
+        } else if (position?.visible === 0 || position?.visible === "0") {
+          visible = false;
+        } else {
+          visible = true;
+        }
       } else if (!hasAnySourceEntries) {
         // Full-empty state means explicit reset to map defaults.
         x = Number(fallback?.x);
         y = Number(fallback?.y);
         z = Number(fallback?.z);
+        sx = Number(fallbackScale?.x);
+        sy = Number(fallbackScale?.y);
+        sz = Number(fallbackScale?.z);
+        visible = fallbackVisible;
       } else {
         // Partial updates should not snap unspecified objects back to defaults.
         continue;
@@ -15078,7 +15224,22 @@ export class GameRuntime {
         continue;
       }
       entry.mesh.position.set(x, y, z);
-      this.updateMovableObjectCollider(entry);
+      if (Number.isFinite(sx) && Number.isFinite(sy) && Number.isFinite(sz)) {
+        entry.mesh.scale.set(
+          THREE.MathUtils.clamp(sx, OBJECT_EDITOR_MIN_SCALE, HOST_CUSTOM_BLOCK_MAX_SIZE),
+          THREE.MathUtils.clamp(sy, OBJECT_EDITOR_MIN_SCALE, HOST_CUSTOM_BLOCK_MAX_SIZE),
+          THREE.MathUtils.clamp(sz, OBJECT_EDITOR_MIN_SCALE, HOST_CUSTOM_BLOCK_MAX_SIZE)
+        );
+      }
+      if (visible === null) {
+        if (entry.mesh.visible) {
+          this.updateMovableObjectCollider(entry);
+        } else {
+          this.parkMovableObjectCollider(entry);
+        }
+      } else {
+        this.setMovableObjectVisibility(entry, visible);
+      }
       this.updateSecurityTestLabelForEntry(entry);
     }
     this.updateObjEditorInfoEl(this.objEditorSelected);
@@ -15297,6 +15458,88 @@ export class GameRuntime {
     this.indexPlatformSpatialEntry(p);
     this.updatePlatformEditorCount();
     this.savePlatforms();
+  }
+
+  getHostCustomPaintBlockEntries() {
+    return this.movableObjects.filter((entry) => entry?.isHostCustomPaintBlock && entry?.mesh);
+  }
+
+  getHostCustomPaintBlockAvailableCount() {
+    return this.getHostCustomPaintBlockEntries().filter((entry) => entry.mesh.visible !== true).length;
+  }
+
+  normalizeHostCustomBlockSize(rawValue, fallback = HOST_CUSTOM_BLOCK_DEFAULT_SIZE) {
+    const parsed = Number(rawValue);
+    if (!Number.isFinite(parsed)) {
+      return fallback;
+    }
+    const clamped = THREE.MathUtils.clamp(parsed, HOST_CUSTOM_BLOCK_MIN_SIZE, HOST_CUSTOM_BLOCK_MAX_SIZE);
+    return Math.round(clamped * 10) / 10;
+  }
+
+  getHostCustomBlockSizeFromPanel() {
+    const width = this.normalizeHostCustomBlockSize(this.hostGrayObjectWidthInputEl?.value);
+    const height = this.normalizeHostCustomBlockSize(this.hostGrayObjectHeightInputEl?.value);
+    const depth = this.normalizeHostCustomBlockSize(this.hostGrayObjectDepthInputEl?.value);
+    if (this.hostGrayObjectWidthInputEl) {
+      this.hostGrayObjectWidthInputEl.value = width.toFixed(1);
+    }
+    if (this.hostGrayObjectHeightInputEl) {
+      this.hostGrayObjectHeightInputEl.value = height.toFixed(1);
+    }
+    if (this.hostGrayObjectDepthInputEl) {
+      this.hostGrayObjectDepthInputEl.value = depth.toFixed(1);
+    }
+    return { width, height, depth };
+  }
+
+  requestHostCustomPaintBlockAdd() {
+    if (!this.hasHostPrivilege()) {
+      this.appendChatLine("", "회색 오브젝트 추가는 방장만 가능합니다.", "system");
+      return false;
+    }
+    const entries = this.getHostCustomPaintBlockEntries();
+    if (!entries.length) {
+      this.appendChatLine("", "추가 가능한 회색 오브젝트 슬롯이 없습니다.", "system");
+      return false;
+    }
+    const targetEntry = entries.find((entry) => entry.mesh.visible !== true) ?? null;
+    if (!targetEntry) {
+      this.appendChatLine("", `회색 오브젝트 최대 개수(${entries.length})에 도달했습니다.`, "system");
+      return false;
+    }
+
+    const { width, height, depth } = this.getHostCustomBlockSizeFromPanel();
+    const direction = this.editorPreviewDirection;
+    if (this.camera?.getWorldDirection) {
+      this.camera.getWorldDirection(direction);
+      direction.y = 0;
+    } else {
+      direction.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+    }
+    if (direction.lengthSq() < 0.0001) {
+      direction.set(0, 0, -1);
+    } else {
+      direction.normalize();
+    }
+    const spawnDistance = THREE.MathUtils.clamp(Math.max(width, depth) * 1.1 + 3.4, 4, 20);
+    const footY = this.playerPosition.y - GAME_CONSTANTS.PLAYER_HEIGHT;
+    const spawnX = Math.round((this.playerPosition.x + direction.x * spawnDistance) * 2) / 2;
+    const spawnZ = Math.round((this.playerPosition.z + direction.z * spawnDistance) * 2) / 2;
+    const spawnY = Math.round((footY + height * 0.5) * 2) / 2;
+
+    targetEntry.mesh.scale.set(width, height, depth);
+    targetEntry.mesh.position.set(spawnX, spawnY, spawnZ);
+    this.setMovableObjectVisibility(targetEntry, true);
+    this.updateSecurityTestLabelForEntry(targetEntry);
+    if (this.objEditorActive) {
+      this.selectObjEditorEntry(targetEntry);
+    }
+    this.updateObjEditorInfoEl(this.objEditorSelected);
+    this.markObjectStateDirty();
+    this.saveObjectPositions({ announceErrors: true, forceFlush: true });
+    this.syncHostControls();
+    return true;
   }
 
   undoLastPlatform() {
