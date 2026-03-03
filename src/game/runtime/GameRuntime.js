@@ -7809,6 +7809,9 @@ export class GameRuntime {
   }
 
   canMovePlayer() {
+    if (this.socketEndpointLinkRequired) {
+      return false;
+    }
     if (this.isMobilePortraitBlocked()) {
       return false;
     }
@@ -14891,18 +14894,57 @@ export class GameRuntime {
     }
 
     const query = new URLSearchParams(window.location.search);
-    const queryEndpoint = String(
-      query.get("server") ?? query.get("socket") ?? query.get("ws") ?? ""
-    ).trim();
+    const queryEndpoint = String(query.get("server") ?? "").trim();
+    const hasSocketAliasParam = query.has("socket") || query.has("ws");
+    const allowedQueryKeys = new Set(["server", "name", "host", "isHost", "hostKey", "host_key"]);
+    if (isGithubPagesHost) {
+      for (const key of query.keys()) {
+        if (!allowedQueryKeys.has(key)) {
+          return pushEndpointError("허용된 접속 링크만 사용할 수 있습니다.", true);
+        }
+      }
+      if (hasSocketAliasParam) {
+        return pushEndpointError("허용된 접속 링크만 사용할 수 있습니다.", true);
+      }
+      if (!queryEndpoint) {
+        return pushEndpointError("허용된 접속 링크로 접속하세요.", true);
+      }
+    }
     if (queryEndpoint) {
       const normalizedQueryEndpoint = normalizeEndpoint(queryEndpoint, "URL server 파라미터");
       if (!normalizedQueryEndpoint) {
         return null;
       }
       if (isGithubPagesHost) {
+        const canonicalEndpoint = normalizeEndpoint(pagesCanonicalEndpoint, "기본 Pages 서버");
+        if (!canonicalEndpoint) {
+          return null;
+        }
         const queryOrigin = normalizeOrigin(normalizedQueryEndpoint);
+        const canonicalOrigin = normalizeOrigin(canonicalEndpoint);
         if (queryOrigin === pagesLegacyOrigin) {
-          return normalizeEndpoint(pagesCanonicalEndpoint, "기본 Pages 서버");
+          return pushEndpointError("구 링크는 차단되었습니다. 새 링크로 접속하세요.", true);
+        }
+        if (!queryOrigin || queryOrigin !== canonicalOrigin) {
+          return pushEndpointError("허용된 접속 링크로 접속하세요.", true);
+        }
+        const hostQueryValue = String(query.get("host") ?? query.get("isHost") ?? "")
+          .trim()
+          .toLowerCase();
+        const hasHostQueryParam = hostQueryValue.length > 0;
+        const isHostLink =
+          hostQueryValue === "1" || hostQueryValue === "true" || hostQueryValue === "yes";
+        const hostKeyValue = String(
+          query.get("hostKey") ?? query.get("host_key") ?? ""
+        ).trim();
+        if (hasHostQueryParam && !isHostLink) {
+          return pushEndpointError("허용된 접속 링크로 접속하세요.", true);
+        }
+        if (isHostLink && !hostKeyValue) {
+          return pushEndpointError("호스트 링크가 올바르지 않습니다.", true);
+        }
+        if (!isHostLink && hostKeyValue) {
+          return pushEndpointError("플레이어 링크가 올바르지 않습니다.", true);
         }
       }
       return normalizedQueryEndpoint;
@@ -16516,6 +16558,9 @@ export class GameRuntime {
     }
 
     if (!this.networkConnected) {
+      if (this.socketEndpointLinkRequired) {
+        return "링크 차단 / 새 링크 사용";
+      }
       return this.socketEndpoint ? "오프라인" : "오프라인 / 서버 필요";
     }
     if (this.pointerLockSupported && !this.pointerLocked && !this.mobileEnabled) {
