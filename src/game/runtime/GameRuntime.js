@@ -515,6 +515,14 @@ export class GameRuntime {
     this.netPingTimer = null;
     this.netPingNonce = 0;
     this.netPingPending = new Map();
+    this.clientRttMs = 0;
+    this.clientRttSmoothedMs = 0;
+    this.movementSubstepMaxMobile = 1 / 55;
+    this.movementSubstepMaxDesktop = 1 / 45;
+    this.movementSubstepMaxCountMobile = 6;
+    this.movementSubstepMaxCountDesktop = 4;
+    this.authoritativeCorrectionStepCapMobile = 0.22;
+    this.authoritativeCorrectionStepCapDesktop = 0.36;
     this.remoteLabelDistanceSq =
       Math.pow(Number(RUNTIME_TUNING.REMOTE_LABEL_MAX_DISTANCE) || 42, 2);
     this.remoteMeshDistanceSq =
@@ -14513,6 +14521,8 @@ export class GameRuntime {
       this.lastAckInputSeq = 0;
       this.pendingInputQueue.length = 0;
       this.netPingPending.clear();
+      this.clientRttMs = 0;
+      this.clientRttSmoothedMs = 0;
       this.clearChatLogs({ clearSeenIds: true });
       this.lastChatSendAt = 0;
       this.lastChatHistoryRequestAt = 0;
@@ -14589,6 +14599,8 @@ export class GameRuntime {
       this.pendingJumpInput = false;
       this.pendingInputQueue.length = 0;
       this.netPingPending.clear();
+      this.clientRttMs = 0;
+      this.clientRttSmoothedMs = 0;
       this.lastChatSendAt = 0;
       this.stopNetworkPing();
       this.authoritativeSyncGraceUntil = 0;
@@ -14647,6 +14659,8 @@ export class GameRuntime {
       this.lastSentInput = null;
       this.pendingJumpInput = false;
       this.pendingInputQueue.length = 0;
+      this.clientRttMs = 0;
+      this.clientRttSmoothedMs = 0;
       this.authoritativeSyncGraceUntil = 0;
       this.lastChatSendAt = 0;
       this.clearRemotePlayers();
@@ -14748,6 +14762,11 @@ export class GameRuntime {
       }
       this.netPingPending.delete(id);
       const rttMs = Math.max(0, performance.now() - sentAt);
+      this.clientRttMs = rttMs;
+      this.clientRttSmoothedMs =
+        this.clientRttSmoothedMs > 0
+          ? THREE.MathUtils.lerp(this.clientRttSmoothedMs, rttMs, 0.25)
+          : rttMs;
       if (this.socket && this.networkConnected) {
         this.socket.emit("net:rtt", { rttMs: Math.round(rttMs) });
       }
@@ -15052,6 +15071,13 @@ export class GameRuntime {
     const recentlyMoving = now - this.lastActiveMoveInputAt < 240;
     const inReconnectStateSyncGrace =
       this.pendingAuthoritativeStateSync && now < this.authoritativeSyncGraceUntil;
+    const measuredRttMs = Math.max(
+      0,
+      Number(this.clientRttSmoothedMs) || Number(this.clientRttMs) || 0
+    );
+    const rttFactor = this.mobileEnabled
+      ? THREE.MathUtils.clamp((measuredRttMs - 70) / 210, 0, 1)
+      : THREE.MathUtils.clamp((measuredRttMs - 90) / 260, 0, 1);
 
     // XZ-only error for snap decision: ignore Y so a jump doesn't cause a snap.
     const xzErrorSq = dx * dx + dz * dz;
@@ -15076,9 +15102,14 @@ export class GameRuntime {
     }
 
     // Soften correction while actively moving to avoid visible tug-of-war on higher RTT links.
-    const xzThresholdSq = recentlyMoving ? 1.44 : 0.36;
+    let xzThresholdSq = recentlyMoving ? 1.44 : 0.36;
+    if (this.mobileEnabled) {
+      xzThresholdSq *= 1 + rttFactor * 2.2;
+    } else {
+      xzThresholdSq *= 1 + rttFactor * 0.8;
+    }
     if (xzErrorSq > xzThresholdSq) {
-      const alpha = recentlyMoving
+      const baseAlpha = recentlyMoving
         ? xzErrorSq > 9
           ? 0.09
           : 0.04
@@ -15087,8 +15118,22 @@ export class GameRuntime {
           : xzErrorSq > 2.25
             ? 0.09
             : 0.05;
-      this.playerPosition.x += dx * alpha;
-      this.playerPosition.z += dz * alpha;
+      const latencyDampen = this.mobileEnabled
+        ? THREE.MathUtils.clamp(0.9 - rttFactor * 0.42, 0.42, 0.9)
+        : THREE.MathUtils.clamp(1 - rttFactor * 0.22, 0.7, 1);
+      let correctionX = dx * (baseAlpha * latencyDampen);
+      let correctionZ = dz * (baseAlpha * latencyDampen);
+      const correctionLen = Math.hypot(correctionX, correctionZ);
+      const correctionStepCap = this.mobileEnabled
+        ? this.authoritativeCorrectionStepCapMobile
+        : this.authoritativeCorrectionStepCapDesktop;
+      if (correctionLen > correctionStepCap && correctionStepCap > 0.001) {
+        const scale = correctionStepCap / correctionLen;
+        correctionX *= scale;
+        correctionZ *= scale;
+      }
+      this.playerPosition.x += correctionX;
+      this.playerPosition.z += correctionZ;
     }
 
     // Y correction only when server is ABOVE client (client fell through floor).
@@ -15267,15 +15312,40 @@ export class GameRuntime {
   }
 
   tick(delta) {
-    this.elapsedSeconds += delta;
-    this.mobileUiRefreshClock += delta;
-    this.spatialAudioMixClock += delta;
+    const safeDelta = THREE.MathUtils.clamp(Number(delta) || 0, 0, 0.2);
+    if (safeDelta <= 0) {
+      return;
+    }
+
+    this.elapsedSeconds += safeDelta;
+    this.mobileUiRefreshClock += safeDelta;
+    this.spatialAudioMixClock += safeDelta;
     this.applyPendingMouseLookInput();
-    this.updateMovement(delta);
-    this.updateHubFlow(delta);
-    this.updateChalkPickupPrompt(delta);
-    this.updateSurfacePaintPrompt(delta);
-    this.updatePortalTimeBillboard(delta);
+    const movementSubstepMax = this.mobileEnabled
+      ? this.movementSubstepMaxMobile
+      : this.movementSubstepMaxDesktop;
+    const movementStep = Math.max(1 / 180, Number(movementSubstepMax) || 1 / 60);
+    const maxMovementSubsteps = Math.max(
+      1,
+      Math.trunc(
+        this.mobileEnabled ? this.movementSubstepMaxCountMobile : this.movementSubstepMaxCountDesktop
+      ) || 1
+    );
+    let movementRemaining = safeDelta;
+    let movementSubsteps = 0;
+    while (movementRemaining > 0 && movementSubsteps < maxMovementSubsteps) {
+      const dt = Math.min(movementRemaining, movementStep);
+      this.updateMovement(dt);
+      movementRemaining -= dt;
+      movementSubsteps += 1;
+    }
+    if (movementRemaining > 0) {
+      this.updateMovement(movementRemaining);
+    }
+    this.updateHubFlow(safeDelta);
+    this.updateChalkPickupPrompt(safeDelta);
+    this.updateSurfacePaintPrompt(safeDelta);
+    this.updatePortalTimeBillboard(safeDelta);
     if (this.mobileUiRefreshClock >= 0.12) {
       this.mobileUiRefreshClock = 0;
       this.syncMobileUiState();
@@ -15287,7 +15357,7 @@ export class GameRuntime {
       recentLookInputMs < this.dynamicResolutionInputQuietMs
         ? this.cloudUpdateTurningInterval
         : this.cloudUpdateInterval;
-    this.cloudUpdateClock += Math.max(0, Number(delta) || 0);
+    this.cloudUpdateClock += safeDelta;
     if (this.cloudUpdateClock >= cloudInterval) {
       this.updateCloudLayer(this.cloudUpdateClock);
       this.cloudUpdateClock = 0;
@@ -15296,30 +15366,30 @@ export class GameRuntime {
       recentLookInputMs < this.dynamicResolutionInputQuietMs
         ? this.oceanUpdateTurningInterval
         : this.oceanUpdateInterval;
-    this.oceanUpdateClock += Math.max(0, Number(delta) || 0);
+    this.oceanUpdateClock += safeDelta;
     if (this.oceanUpdateClock >= oceanInterval) {
       this.updateOcean(this.oceanUpdateClock);
       this.oceanUpdateClock = 0;
     }
-    this.updateRemotePlayers(delta);
+    this.updateRemotePlayers(safeDelta);
     this.updateLocalChatBubble();
-    this.emitLocalSync(delta);
+    this.emitLocalSync(safeDelta);
     if (this.spatialAudioMixClock >= this.spatialAudioMixInterval) {
       this.spatialAudioMixClock = 0;
       this.updateSpatialAudioMix();
     }
-    this.updateDynamicResolution(delta);
-    this.updateHud(delta);
+    this.updateDynamicResolution(safeDelta);
+    this.updateHud(safeDelta);
     this.updatePlatformEditor();
-    this.updatePlatformStateAutosave(delta);
-    this.updateRopeStateAutosave(delta);
-    this.updateObjectStateAutosave(delta);
-    this.updateRopeProximity(delta);
+    this.updatePlatformStateAutosave(safeDelta);
+    this.updateRopeStateAutosave(safeDelta);
+    this.updateObjectStateAutosave(safeDelta);
+    this.updateRopeProximity(safeDelta);
     this.updatePromoPlacementPreview();
     this.updateHostCustomBlockPlacementPreview();
-    this.updatePromoLinkPrompt(delta);
+    this.updatePromoLinkPrompt(safeDelta);
     if (this.securityTestState?.enabled) {
-      this.securityTestLabelRefreshClock += delta;
+      this.securityTestLabelRefreshClock += safeDelta;
       if (this.securityTestLabelRefreshClock >= this.securityTestLabelRefreshInterval) {
         this.securityTestLabelRefreshClock = 0;
         this.updateSecurityTestObjectLabelPositions();
@@ -16427,8 +16497,8 @@ export class GameRuntime {
   }
 
   loop() {
-    // Reduce drift when FPS drops by allowing larger catch-up step.
-    const delta = Math.min(this.clock.getDelta(), 0.15);
+    // Keep a tighter cap on mobile to reduce one-frame movement jumps on frame drops.
+    const delta = Math.min(this.clock.getDelta(), this.mobileEnabled ? 0.12 : 0.15);
     this.tick(delta);
     if (this.composer) {
       this.composer.render();
