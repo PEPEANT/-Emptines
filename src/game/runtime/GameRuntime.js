@@ -84,7 +84,7 @@ const RIGHT_BILLBOARD_VIDEO_ID_LOOKUP = Object.freeze(
 );
 const MAX_LEFT_BILLBOARD_IMAGE_CHARS = 4_200_000;
 const DEFAULT_PORTAL_TARGET_URL =
-  "http://localhost:5173/?server=http://localhost:3001&name=PLAYER";
+  "https://reclaim-fps.vercel.app/";
 const A_ZONE_FIXED_PORTAL_TARGET_URL = "https://reclaim-fps.vercel.app/";
 const A_ZONE_FIXED_PORTAL_IMAGE_URL = new URL("../../../png/REC_FPS.png", import.meta.url).href;
 const BOX_FACE_KEYS = ["px", "nx", "py", "ny", "pz", "nz"];
@@ -587,7 +587,7 @@ export class GameRuntime {
     this.portalCloseInFlight = false;
     this.portalScheduleSetInFlight = false;
     this.portalSchedule = {
-      mode: "idle",
+      mode: "open_manual",
       startAtMs: 0,
       openUntilMs: 0,
       remainingSec: 0,
@@ -784,8 +784,8 @@ export class GameRuntime {
     );
     this.aZonePortalFloorPosition = new THREE.Vector3(-60, 0.08, 0);
     this.aZonePortalRadius = Math.max(2.2, this.portalRadius * 0.88);
-    this.portalPhase = this.hubFlowEnabled ? "cooldown" : "idle";
-    this.portalPhaseClock = this.portalCooldownSeconds;
+    this.portalPhase = this.hubFlowEnabled ? "open" : "idle";
+    this.portalPhaseClock = 0;
     this.portalTransitioning = false;
     this.portalPulseClock = 0;
     this.portalBillboardUpdateClock = 0;

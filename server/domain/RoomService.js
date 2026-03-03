@@ -310,7 +310,7 @@ function normalizeSharedAudioName(rawValue) {
 
 function createPortalScheduleState() {
   return {
-    mode: "idle",
+    mode: "open_manual",
     startAtMs: 0,
     openUntilMs: 0,
     remainingSec: 0,
