@@ -8099,7 +8099,9 @@ export class GameRuntime {
 
     this.updatePortalPhase(delta);
     this.updatePortalVisual();
-    if (!this.portalTransitioning && this.isPlayerInPortalZone()) {
+    const schedule = this.getPortalScheduleComputed();
+    const portalOpenNow = schedule.mode === "open" || schedule.mode === "open_manual";
+    if (portalOpenNow && !this.portalTransitioning && this.isPlayerInPortalZone()) {
       const destination = this.buildPortalTransferUrl();
       if (destination) {
         this.triggerPortalTransfer(destination);
