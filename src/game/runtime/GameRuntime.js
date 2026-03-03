@@ -105,6 +105,9 @@ const PROMO_MIN_SCALE = 0.35;
 const PROMO_MAX_SCALE = 42;
 const PROMO_MAX_MEDIA_BYTES = 6 * 1024 * 1024;
 const PROMO_LINK_INTERACT_RADIUS = 4.2;
+const PROMO_BLOCK_BASE_SIZE = 2.4;
+const PROMO_BLOCK_FACE_INSET = 0.2;
+const PROMO_BLOCK_FACE_GAP = 0.08;
 
 function resolveRuntimeAssetUrl(relativePath) {
   const normalized = String(relativePath ?? "").trim().replace(/^\/+/, "");
@@ -9067,7 +9070,13 @@ export class GameRuntime {
     }
     if (panelVisible) {
       this.initPromoDrawCanvasIfNeeded();
-      if (!hasOwnPromo && connected && !busy && !this.promoPlacementPreviewActive) {
+      if (
+        !hasOwnPromo &&
+        connected &&
+        !busy &&
+        !this.promoPlacementPreviewActive &&
+        !this.hostCustomBlockPlacementPreviewActive
+      ) {
         this.beginPromoPlacementPreview({ announce: false, syncUi: false });
       }
     }
@@ -9324,11 +9333,9 @@ export class GameRuntime {
       return this.promoPlacementPreviewMesh;
     }
 
-    const bodyWidth = 2.7;
-    const bodyHeight = 1.75;
-    const bodyDepth = 0.46;
-    const panelWidth = bodyWidth * 0.86;
-    const panelHeight = bodyHeight * 0.74;
+    const bodySize = PROMO_BLOCK_BASE_SIZE;
+    const panelWidth = Math.max(0.5, bodySize - PROMO_BLOCK_FACE_INSET * 2);
+    const panelHeight = Math.max(0.5, bodySize - PROMO_BLOCK_FACE_INSET * 2);
 
     const group = new THREE.Group();
     const bodyMaterial = new THREE.MeshStandardMaterial({
@@ -9341,7 +9348,7 @@ export class GameRuntime {
       roughness: 0.56,
       metalness: 0.06
     });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(bodyWidth, bodyHeight, bodyDepth), bodyMaterial);
+    const body = new THREE.Mesh(new THREE.BoxGeometry(bodySize, bodySize, bodySize), bodyMaterial);
     body.renderOrder = 26;
     body.castShadow = false;
     body.receiveShadow = false;
@@ -9355,7 +9362,7 @@ export class GameRuntime {
       toneMapped: false
     });
     const panel = new THREE.Mesh(new THREE.PlaneGeometry(panelWidth, panelHeight), panelMaterial);
-    panel.position.set(0, 0, bodyDepth * 0.5 + 0.014);
+    panel.position.set(0, 0, bodySize * 0.5 + 0.014);
     panel.renderOrder = 27;
 
     const edgeMaterial = new THREE.LineBasicMaterial({
@@ -9365,7 +9372,7 @@ export class GameRuntime {
       toneMapped: false
     });
     const edges = new THREE.LineSegments(
-      new THREE.EdgesGeometry(new THREE.BoxGeometry(bodyWidth, bodyHeight, bodyDepth)),
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(bodySize, bodySize, bodySize)),
       edgeMaterial
     );
     edges.renderOrder = 28;
@@ -9438,7 +9445,7 @@ export class GameRuntime {
     this.promoPlacementPreviewBlockReason = blockReason;
     this.promoPlacementPreviewTransform = transform;
 
-    const bodyHeight = 1.75 * scale;
+    const bodyHeight = PROMO_BLOCK_BASE_SIZE * scale;
     preview.position.set(transform.x, transform.y + bodyHeight * 0.5, transform.z);
     preview.rotation.set(0, this.normalizePromoYaw(transform.yaw, 0), 0);
     preview.scale.set(scale, scale, scale);
@@ -9449,6 +9456,9 @@ export class GameRuntime {
   beginPromoPlacementPreview({ announce = true, syncUi = true } = {}) {
     if (this.getOwnPromoObject()) {
       return false;
+    }
+    if (this.hostCustomBlockPlacementPreviewActive) {
+      this.clearHostCustomBlockPlacementPreview({ syncUi: true });
     }
     if (this.promoPlacementPreviewActive) {
       return true;
@@ -9464,7 +9474,7 @@ export class GameRuntime {
     if (announce) {
       this.appendChatLine(
         "",
-        "배치 미리보기 시작: 휠(PC)/크기 슬라이더(모바일) 조절 후 배치 버튼으로 확정",
+        "배치 미리보기 시작: 휠(PC)/크기 슬라이더(모바일) 조절 후 클릭 또는 배치 버튼으로 확정",
         "system"
       );
     }
@@ -9804,45 +9814,33 @@ export class GameRuntime {
 
   createPromoBlockVisual(entry) {
     const safeScale = THREE.MathUtils.clamp(Number(entry.scale) || 1, PROMO_MIN_SCALE, PROMO_MAX_SCALE);
-    const bodyWidth = 2.7 * safeScale;
-    const bodyHeight = 1.75 * safeScale;
-    const bodyDepth = 0.46 * safeScale;
-    const panelWidth = bodyWidth * 0.86;
-    const panelHeight = bodyHeight * 0.74;
-    const panelDepth = Math.max(0.02 * safeScale, 0.012);
+    const bodySize = PROMO_BLOCK_BASE_SIZE * safeScale;
+    const panelWidth = Math.max(0.45, bodySize - PROMO_BLOCK_FACE_INSET * safeScale * 2);
+    const panelHeight = Math.max(0.45, bodySize - PROMO_BLOCK_FACE_INSET * safeScale * 2);
+    const quadGap = Math.max(PROMO_BLOCK_FACE_GAP * safeScale, 0.02);
+    const quadWidth = Math.max(0.2, (panelWidth - quadGap) * 0.5);
+    const quadHeight = Math.max(0.2, (panelHeight - quadGap) * 0.5);
+    const offsetX = (quadWidth + quadGap) * 0.5;
+    const offsetY = (quadHeight + quadGap) * 0.5;
+    const quadZ = bodySize * 0.5 + 0.0025;
 
     const group = new THREE.Group();
-    group.position.set(entry.x, entry.y + bodyHeight * 0.5, entry.z);
+    group.position.set(entry.x, entry.y + bodySize * 0.5, entry.z);
     group.rotation.y = this.normalizePromoYaw(entry.yaw, 0);
 
     const body = new THREE.Mesh(
-      new THREE.BoxGeometry(bodyWidth, bodyHeight, bodyDepth),
+      new THREE.BoxGeometry(bodySize, bodySize, bodySize),
       new THREE.MeshStandardMaterial({
-        color: 0xa8adb3,
-        roughness: 0.88,
-        metalness: 0.06,
-        emissive: 0x1f2328,
-        emissiveIntensity: 0.06
+        color: 0xa7adb4,
+        roughness: 0.82,
+        metalness: 0.08,
+        emissive: 0x1e2328,
+        emissiveIntensity: 0.08
       })
     );
     body.castShadow = true;
     body.receiveShadow = true;
     group.add(body);
-
-    const frame = new THREE.Mesh(
-      new THREE.BoxGeometry(panelWidth + 0.11 * safeScale, panelHeight + 0.11 * safeScale, panelDepth),
-      new THREE.MeshStandardMaterial({
-        color: 0x7f868d,
-        roughness: 0.72,
-        metalness: 0.14,
-        emissive: 0x12161a,
-        emissiveIntensity: 0.04
-      })
-    );
-    frame.position.set(0, 0, bodyDepth * 0.5 + panelDepth * 0.45);
-    frame.castShadow = true;
-    frame.receiveShadow = true;
-    group.add(frame);
 
     const screenMaterialTemplate = new THREE.MeshStandardMaterial({
       color: 0xcfd4da,
@@ -9863,12 +9861,6 @@ export class GameRuntime {
       }
     );
     const sharedMap = screenMaterialTemplate.map ?? null;
-    const quadGap = Math.max(0.03 * safeScale, 0.018);
-    const quadWidth = Math.max(0.28, (panelWidth - quadGap) * 0.5);
-    const quadHeight = Math.max(0.24, (panelHeight - quadGap) * 0.5);
-    const offsetX = (quadWidth + quadGap) * 0.5;
-    const offsetY = (quadHeight + quadGap) * 0.5;
-    const quadZ = bodyDepth * 0.5 + panelDepth + 0.002;
     const quadOffsets = [
       { x: -offsetX, y: offsetY, suffix: "q0" },
       { x: offsetX, y: offsetY, suffix: "q1" },
@@ -11816,6 +11808,16 @@ export class GameRuntime {
         this.beginObjEditorDrag(event.clientX, event.clientY);
         return;
       }
+      if (event.button === 0 && this.hostCustomBlockPlacementPreviewActive && this.canMovePlayer()) {
+        event.preventDefault();
+        this.confirmHostCustomBlockPlacementPreview();
+        return;
+      }
+      if (event.button === 0 && this.promoPlacementPreviewActive && this.canMovePlayer()) {
+        event.preventDefault();
+        this.confirmPromoPlacementPreview();
+        return;
+      }
       if (event.button === 0 && this.flyModeActive && this.pointerLocked) {
         if (this.editorMode === "rope") {
           this.placeRopeAtPreview();
@@ -11849,17 +11851,17 @@ export class GameRuntime {
       this.chalkLastStamp = null;
     });
     this.renderer.domElement.addEventListener("wheel", (event) => {
+      if (this.hostCustomBlockPlacementPreviewActive && !this.mobileEnabled && this.canMovePlayer()) {
+        event.preventDefault();
+        const sizeDelta = THREE.MathUtils.clamp(-event.deltaY * 0.003, -0.8, 0.8);
+        this.adjustHostCustomBlockPlacementPreviewSize(sizeDelta);
+        return;
+      }
       if (this.promoPlacementPreviewActive && !this.mobileEnabled && this.canMovePlayer()) {
         event.preventDefault();
         const scaleDelta = THREE.MathUtils.clamp(-event.deltaY * 0.0012, -0.4, 0.4);
         this.adjustPromoPlacementPreviewScale(scaleDelta);
         this.syncPromoPanelUi();
-        return;
-      }
-      if (this.hostCustomBlockPlacementPreviewActive && !this.mobileEnabled && this.canMovePlayer()) {
-        event.preventDefault();
-        const sizeDelta = THREE.MathUtils.clamp(-event.deltaY * 0.003, -0.8, 0.8);
-        this.adjustHostCustomBlockPlacementPreviewSize(sizeDelta);
         return;
       }
       if (!this.flyModeActive) return;
@@ -16446,9 +16448,23 @@ export class GameRuntime {
   }
 
   getHostCustomBlockSizeFromPanel() {
-    const width = this.normalizeHostCustomBlockSize(this.hostGrayObjectWidthInputEl?.value);
-    const height = this.normalizeHostCustomBlockSize(this.hostGrayObjectHeightInputEl?.value);
-    const depth = this.normalizeHostCustomBlockSize(this.hostGrayObjectDepthInputEl?.value);
+    const candidateValues = [
+      this.hostGrayObjectWidthInputEl?.value,
+      this.hostGrayObjectHeightInputEl?.value,
+      this.hostGrayObjectDepthInputEl?.value
+    ];
+    let sourceSize = Number.NaN;
+    for (const rawValue of candidateValues) {
+      const parsed = Number(rawValue);
+      if (Number.isFinite(parsed)) {
+        sourceSize = parsed;
+        break;
+      }
+    }
+    const uniformSize = this.normalizeHostCustomBlockSize(sourceSize);
+    const width = uniformSize;
+    const height = uniformSize;
+    const depth = uniformSize;
     if (this.hostGrayObjectWidthInputEl) {
       this.hostGrayObjectWidthInputEl.value = width.toFixed(1);
     }
@@ -16579,6 +16595,9 @@ export class GameRuntime {
       }
       return false;
     }
+    if (this.promoPlacementPreviewActive) {
+      this.clearPromoPlacementPreview({ syncUi: true });
+    }
     this.hostCustomBlockPlacementPreviewActive = true;
     this.hostCustomBlockPlacementPreviewTargetId = String(targetEntry.id ?? "");
     this.ensureHostCustomBlockPlacementPreviewMesh();
@@ -16586,7 +16605,7 @@ export class GameRuntime {
     this.syncHostControls();
     this.appendChatLine(
       "",
-      "회색 오브젝트 미리보기 시작: 휠(PC)/크기 입력(모바일) 조절 후 버튼으로 확정",
+      "회색 오브젝트 미리보기 시작: 휠(PC)/크기 입력(모바일) 조절 후 클릭 또는 버튼으로 확정",
       "system"
     );
     return true;
@@ -16651,9 +16670,11 @@ export class GameRuntime {
       return;
     }
     const size = this.getHostCustomBlockSizeFromPanel();
-    const nextWidth = this.normalizeHostCustomBlockSize(size.width + step, size.width);
-    const nextHeight = this.normalizeHostCustomBlockSize(size.height + step, size.height);
-    const nextDepth = this.normalizeHostCustomBlockSize(size.depth + step, size.depth);
+    const current = Number(size.width) || HOST_CUSTOM_BLOCK_DEFAULT_SIZE;
+    const nextUniform = this.normalizeHostCustomBlockSize(current + step, current);
+    const nextWidth = nextUniform;
+    const nextHeight = nextUniform;
+    const nextDepth = nextUniform;
     if (this.hostGrayObjectWidthInputEl) {
       this.hostGrayObjectWidthInputEl.value = nextWidth.toFixed(1);
     }
