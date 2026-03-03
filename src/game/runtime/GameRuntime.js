@@ -7704,8 +7704,11 @@ export class GameRuntime {
       this.triggerPortalTransfer(this.buildAZonePortalTransferUrl());
       return;
     }
-    if (this.portalPhase === "open" && !this.portalTransitioning && this.isPlayerInPortalZone()) {
-      this.triggerPortalTransfer();
+    if (!this.portalTransitioning && this.isPlayerInPortalZone()) {
+      const destination = this.buildPortalTransferUrl();
+      if (destination) {
+        this.triggerPortalTransfer(destination);
+      }
     }
   }
 
