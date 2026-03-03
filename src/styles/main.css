@@ -2964,20 +2964,3 @@ body.mobile-portrait-lock #host-chat-toggle {
     display: none;
   }
 }
-
-/* Keep host controls always visible regardless of hidden utility classes or portrait lock. */
-#host-controls {
-  display: grid !important;
-}
-
-#host-controls-toggle {
-  display: inline-flex !important;
-}
-
-body.mobile-portrait-lock #host-controls {
-  display: grid !important;
-}
-
-body.mobile-portrait-lock #host-controls-toggle {
-  display: inline-flex !important;
-}

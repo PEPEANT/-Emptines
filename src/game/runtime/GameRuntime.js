@@ -483,7 +483,15 @@ export class GameRuntime {
     this.hostClaimKey = String(
       this.queryParams.get("hostKey") ?? this.queryParams.get("host_key") ?? ""
     ).trim();
-    this.autoHostClaimEnabled = true; // Always auto-claim; server HOST_CLAIM_KEY guards access
+    const hostQueryValue = String(
+      this.queryParams.get("host") ?? this.queryParams.get("isHost") ?? ""
+    )
+      .trim()
+      .toLowerCase();
+    const hostFlagEnabled =
+      hostQueryValue === "1" || hostQueryValue === "true" || hostQueryValue === "yes";
+    // Auto-claim only for explicit host links (or when hostKey is present).
+    this.autoHostClaimEnabled = hostFlagEnabled || Boolean(this.hostClaimKey);
     // Auto-fullscreen is disabled to avoid interrupting host control popups.
     this.autoFullscreenEnabled = false;
     this.fullscreenRestorePending = false;
@@ -8855,7 +8863,7 @@ export class GameRuntime {
     if (!hasHostPrivilege && this.hostCustomBlockPlacementPreviewActive) {
       this.clearHostCustomBlockPlacementPreview({ syncUi: false });
     }
-    const visible = this.hubFlowEnabled && hasHostPrivilege;
+    const visible = hasHostPrivilege;
     const canHostUseChat = this.canUseHostChatShortcut();
     const chatEnabled = this.canUseChatControls();
     this.chatUiEl?.classList.toggle("hidden", !chatEnabled);
@@ -8864,7 +8872,7 @@ export class GameRuntime {
     }
     this.syncChatLiveUi();
     if (this.hostChatToggleBtnEl) {
-      const showHostChatToggle = false;
+      const showHostChatToggle = canHostUseChat;
       this.hostChatToggleBtnEl.classList.toggle("hidden", !showHostChatToggle);
       const hostLabel = this.chatOpen ? "채팅 닫기" : "채팅";
       if (this.hostChatToggleBtnEl.textContent !== hostLabel) {
@@ -8885,7 +8893,7 @@ export class GameRuntime {
       return;
     }
 
-    const canControlPortal = visible;
+    const canControlPortal = hasHostPrivilege;
     const schedule = this.getPortalScheduleComputed();
     const portalOpenNow = schedule.mode === "open" || schedule.mode === "open_manual";
     const canSchedulePortal = canControlPortal && !portalOpenNow;
