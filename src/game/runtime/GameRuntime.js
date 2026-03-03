@@ -359,6 +359,7 @@ export class GameRuntime {
     this.surfacePaintProbeClock = this.surfacePaintProbeIntervalIdle;
     this.surfacePaintPromptEl = null;
     this.surfacePainterEl = null;
+    this.surfacePainterPanelEl = null;
     this.surfacePainterTitleEl = null;
     this.surfacePainterCanvasEl = null;
     this.surfacePainterContext = null;
@@ -376,9 +377,11 @@ export class GameRuntime {
     this.surfacePainterPromoScaleDownBtnEl = null;
     this.surfacePainterPromoScaleUpBtnEl = null;
     this.surfacePainterPromoShareToggleBtnEl = null;
+    this.surfacePainterActionsToggleBtnEl = null;
     this.surfacePainterEraserBtnEl = null;
     this.surfacePainterFillBtnEl = null;
     this.surfacePainterOpen = false;
+    this.surfacePainterActionsCollapsed = false;
     this.surfacePainterDrawing = false;
     this.surfacePainterPointerId = null;
     this.surfacePainterTouchId = null;
@@ -624,6 +627,7 @@ export class GameRuntime {
     this.boundaryWarningEl = document.getElementById("boundary-warning");
     this.surfacePaintPromptEl = document.getElementById("surface-paint-prompt");
     this.surfacePainterEl = document.getElementById("surface-painter");
+    this.surfacePainterPanelEl = document.getElementById("surface-painter-panel");
     this.surfacePainterTitleEl = document.getElementById("surface-painter-title");
     this.surfacePainterCanvasEl = document.getElementById("surface-painter-canvas");
     this.surfacePainterColorInputEl = document.getElementById("surface-painter-color");
@@ -640,6 +644,7 @@ export class GameRuntime {
     this.surfacePainterPromoScaleDownBtnEl = document.getElementById("surface-painter-promo-scale-down");
     this.surfacePainterPromoScaleUpBtnEl = document.getElementById("surface-painter-promo-scale-up");
     this.surfacePainterPromoShareToggleBtnEl = document.getElementById("surface-painter-promo-share-toggle");
+    this.surfacePainterActionsToggleBtnEl = document.getElementById("surface-painter-actions-toggle");
     this.surfacePainterEraserBtnEl = document.getElementById("surface-painter-eraser");
     this.surfacePainterFillBtnEl = document.getElementById("surface-painter-fill");
     this.surfacePainterContext = this.surfacePainterCanvasEl?.getContext?.("2d") ?? null;
@@ -5401,7 +5406,9 @@ export class GameRuntime {
     this.surfacePainterTouchId = null;
     this.surfacePainterTargetId = normalizedId;
     this.surfacePainterSaveInFlight = false;
+    this.surfacePainterActionsCollapsed = false;
     this.updateSurfacePainterSaveAvailability();
+    this.updateSurfacePainterActionsUi();
     this.setSurfacePainterEraserEnabled(false);
     if (this.surfacePainterTitleEl) {
       this.surfacePainterTitleEl.textContent = this.getSurfacePainterTitle(normalizedId);
@@ -5425,6 +5432,7 @@ export class GameRuntime {
       _spActions.style.pointerEvents = "none";
       setTimeout(() => { _spActions.style.pointerEvents = ""; }, 450);
     }
+    this.updateSurfacePainterActionsUi();
     this.syncMobileUiState();
   }
 
@@ -5449,9 +5457,11 @@ export class GameRuntime {
     this.surfacePainterTouchId = null;
     this.surfacePainterTargetId = "";
     this.surfacePainterCanvasLoadNonce += 1;
+    this.surfacePainterActionsCollapsed = false;
     this.resetMobileControlInputState();
     this.surfacePainterEl?.classList.add("hidden");
     this.updateSurfacePainterSaveAvailability();
+    this.updateSurfacePainterActionsUi();
     this.updateSurfacePaintPrompt();
     this.syncMobileUiState();
   }
@@ -5921,6 +5931,29 @@ export class GameRuntime {
         this.surfacePainterPromoShareToggleBtnEl.removeAttribute("title");
       }
     }
+  }
+
+  updateSurfacePainterActionsUi() {
+    const isMobilePainter = Boolean(this.mobileEnabled && this.surfacePainterOpen);
+    const collapsed = Boolean(isMobilePainter && this.surfacePainterActionsCollapsed);
+    this.surfacePainterPanelEl?.classList.toggle("actions-collapsed", collapsed);
+    if (!this.surfacePainterActionsToggleBtnEl) {
+      return;
+    }
+    this.surfacePainterActionsToggleBtnEl.classList.toggle("hidden", !isMobilePainter);
+    this.surfacePainterActionsToggleBtnEl.textContent = collapsed ? "버튼 열기" : "버튼 접기";
+    this.surfacePainterActionsToggleBtnEl.setAttribute(
+      "aria-expanded",
+      collapsed ? "false" : "true"
+    );
+  }
+
+  toggleSurfacePainterActionsCollapsed() {
+    if (!this.surfacePainterOpen || !this.mobileEnabled) {
+      return;
+    }
+    this.surfacePainterActionsCollapsed = !this.surfacePainterActionsCollapsed;
+    this.updateSurfacePainterActionsUi();
   }
 
   isRetryableSurfacePaintError(reason) {
@@ -6845,6 +6878,7 @@ export class GameRuntime {
     if (!visible) {
       this.resetMobileControlInputState();
     }
+    this.updateSurfacePainterActionsUi();
     this.syncPromoPanelUi();
     this.syncChatLiveUi();
   }
@@ -9534,6 +9568,9 @@ export class GameRuntime {
     this.promoPlacementPreviewActive = true;
     this.promoPlacementPreviewBlockReason = "";
     this.promoPlacementPreviewTransform = null;
+    if (this.mobileEnabled && !this.promoPanelMobileOpen) {
+      this.setPromoPanelMobileOpen(true, { syncMobileUi: true });
+    }
     this.ensurePromoPlacementPreviewMesh();
     this.updatePromoPlacementPreview();
     if (syncUi) {
@@ -12305,6 +12342,9 @@ export class GameRuntime {
         if (!this.mobileEnabled || !this.canMovePlayer()) {
           return;
         }
+        if (!this.promoPanelMobileOpen) {
+          this.setPromoPanelMobileOpen(true, { syncMobileUi: true });
+        }
         this.requestPromoUpsert({ placeInFront: true, preserveExistingStyle: true });
       });
     }
@@ -12679,6 +12719,9 @@ export class GameRuntime {
     this.surfacePainterEraserBtnEl?.addEventListener("click", () => {
       this.setSurfacePainterEraserEnabled(!this.surfacePainterEraserEnabled);
     });
+    this.surfacePainterActionsToggleBtnEl?.addEventListener("click", () => {
+      this.toggleSurfacePainterActionsCollapsed();
+    });
 
     const applyEditorSettingsFromPanel = () => {
       const platformLimit = Math.trunc(Number(this.editorPlatformLimitInputEl?.value));
@@ -12856,6 +12899,9 @@ export class GameRuntime {
     if (!this.surfacePainterEl) {
       this.surfacePainterEl = document.getElementById("surface-painter");
     }
+    if (!this.surfacePainterPanelEl) {
+      this.surfacePainterPanelEl = document.getElementById("surface-painter-panel");
+    }
     if (!this.surfacePainterTitleEl) {
       this.surfacePainterTitleEl = document.getElementById("surface-painter-title");
     }
@@ -12913,6 +12959,11 @@ export class GameRuntime {
     if (!this.surfacePainterPromoShareToggleBtnEl) {
       this.surfacePainterPromoShareToggleBtnEl = document.getElementById(
         "surface-painter-promo-share-toggle"
+      );
+    }
+    if (!this.surfacePainterActionsToggleBtnEl) {
+      this.surfacePainterActionsToggleBtnEl = document.getElementById(
+        "surface-painter-actions-toggle"
       );
     }
     if (!this.surfacePainterEraserBtnEl) {

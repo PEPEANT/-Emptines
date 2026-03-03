@@ -1270,6 +1270,18 @@ canvas {
   cursor: pointer;
 }
 
+#surface-painter-actions-toggle {
+  display: none;
+  min-height: 30px;
+  border: 1px solid rgba(164, 204, 236, 0.64);
+  border-radius: 6px;
+  background: rgba(9, 20, 33, 0.84);
+  color: #e2f3ff;
+  font: 700 0.62rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+
 #surface-painter-eraser {
   grid-column: 1 / span 2;
 }
@@ -2632,6 +2644,13 @@ body.is-mobile-ui #mobile-move-stick {
     justify-self: stretch;
   }
 
+  #surface-painter-actions-toggle {
+    display: inline-flex;
+    grid-column: 1 / -1;
+    align-items: center;
+    justify-content: center;
+  }
+
   #surface-painter-actions {
     display: flex;
     flex-wrap: wrap;
@@ -2758,6 +2777,17 @@ body.is-mobile-ui #surface-painter-eraser {
   font-size: 0.56rem;
 }
 
+body.is-mobile-ui #surface-painter-actions-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-height: 26px;
+  height: 26px;
+  padding: 0 10px;
+  font-size: 0.56rem;
+}
+
 /* ③ canvas row — fills all remaining space */
 body.is-mobile-ui #surface-painter-canvas {
   grid-row: 3;
@@ -2779,6 +2809,14 @@ body.is-mobile-ui #surface-painter-actions {
   background: none;
   padding: 0;
   z-index: auto;
+}
+
+body.is-mobile-ui #surface-painter-panel.actions-collapsed {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+body.is-mobile-ui #surface-painter-panel.actions-collapsed #surface-painter-actions {
+  display: none;
 }
 
 body.is-mobile-ui #surface-painter-actions button {
@@ -2897,5 +2935,14 @@ body.mobile-portrait-lock #host-controls-toggle {
     min-width: 0;
     height: 42px;
     font-size: 0.72rem;
+  }
+
+  #surface-painter-panel.actions-collapsed {
+    padding: calc(env(safe-area-inset-top, 0px) + 8px) 10px
+      calc(env(safe-area-inset-bottom, 0px) + 8px);
+  }
+
+  #surface-painter-panel.actions-collapsed #surface-painter-actions {
+    display: none;
   }
 }
