@@ -92,6 +92,16 @@ export function registerSocketHandlers({
       socket.emit("promo:state", { objects: roomService.serializePromoObjects(room) });
     };
 
+    const emitChatHistoryState = () => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        return;
+      }
+      socket.emit("chat:history", {
+        messages: roomService.serializeChatHistory(room)
+      });
+    };
+
     const emitPortalOpenCatchup = () => {
       const room = roomService.getRoomBySocket(socket);
       if (!room) {
@@ -119,6 +129,7 @@ export function registerSocketHandlers({
         emitPortalOpenCatchup();
         emitPromoState();
         emitObjectState();
+        emitChatHistoryState();
       }
       ack(ackFn, result);
       return result;
@@ -141,6 +152,7 @@ export function registerSocketHandlers({
     emitRopeState();
     emitPromoState();
     emitObjectState();
+    emitChatHistoryState();
     roomService.emitRoomList(socket);
 
     socket.on("player:key:set", (payload = {}, ackFn) => {
@@ -177,6 +189,8 @@ export function registerSocketHandlers({
         return;
       }
 
+      const createdAt = Date.now();
+
       socket.data.playerName = safeName;
       player.name = safeName;
       const stateRaw = player?.state && typeof player.state === "object" ? player.state : null;
@@ -194,14 +208,21 @@ export function registerSocketHandlers({
           ? { x: sx, y: sy, z: sz, yaw: syaw, pitch: spitch }
           : null;
 
-      io.to(room.code).emit("chat:message", {
+      const messagePayload = {
         messageId,
         id: socket.id,
         name: safeName,
         text: safeText,
-        state
-      });
+        state,
+        createdAt
+      };
+      roomService.appendChatHistory(room, messagePayload);
+      io.to(room.code).emit("chat:message", messagePayload);
       roomService.emitRoomUpdate(room);
+    });
+
+    socket.on("chat:history:request", () => {
+      emitChatHistoryState();
     });
 
     socket.on("input:cmd", (payload = {}) => {

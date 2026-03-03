@@ -594,6 +594,8 @@ export class GameRuntime {
     this.chatSendMinIntervalMs = 140;
     this.chatSeenMessageIds = new Map();
     this.chatSeenMessageIdTtlMs = 2 * 60 * 1000;
+    this.chatHistoryRequestMinIntervalMs = 600;
+    this.lastChatHistoryRequestAt = 0;
     this.toolUiEl = document.getElementById("tool-ui");
     this.chatUiEl = document.getElementById("chat-ui");
     this.hubFlowUiEl = document.getElementById("hub-flow-ui");
@@ -9065,6 +9067,9 @@ export class GameRuntime {
     }
     if (panelVisible) {
       this.initPromoDrawCanvasIfNeeded();
+      if (!hasOwnPromo && connected && !busy && !this.promoPlacementPreviewActive) {
+        this.beginPromoPlacementPreview({ announce: false, syncUi: false });
+      }
     }
 
     if (this.promoScaleInputEl && document.activeElement !== this.promoScaleInputEl) {
@@ -9441,7 +9446,7 @@ export class GameRuntime {
     this.setPromoPlacementPreviewTint(Boolean(blockReason));
   }
 
-  beginPromoPlacementPreview() {
+  beginPromoPlacementPreview({ announce = true, syncUi = true } = {}) {
     if (this.getOwnPromoObject()) {
       return false;
     }
@@ -9453,12 +9458,16 @@ export class GameRuntime {
     this.promoPlacementPreviewTransform = null;
     this.ensurePromoPlacementPreviewMesh();
     this.updatePromoPlacementPreview();
-    this.syncPromoPanelUi();
-    this.appendChatLine(
-      "",
-      "배치 미리보기 시작: 휠(PC)/크기 슬라이더(모바일) 조절 후 배치 버튼으로 확정",
-      "system"
-    );
+    if (syncUi) {
+      this.syncPromoPanelUi();
+    }
+    if (announce) {
+      this.appendChatLine(
+        "",
+        "배치 미리보기 시작: 휠(PC)/크기 슬라이더(모바일) 조절 후 배치 버튼으로 확정",
+        "system"
+      );
+    }
     return true;
   }
 
@@ -13209,6 +13218,7 @@ export class GameRuntime {
     if (this.chatOpen) {
       this.chalkDrawingActive = false;
       this.chalkLastStamp = null;
+      this.requestChatHistory();
     }
     this.syncMobileUiState();
     this.syncChatLiveUi();
@@ -13517,9 +13527,9 @@ export class GameRuntime {
       this.lastAckInputSeq = 0;
       this.pendingInputQueue.length = 0;
       this.netPingPending.clear();
-      this.chatSeenMessageIds.clear();
-      this.chatMessageSeq = 0;
+      this.clearChatLogs({ clearSeenIds: true });
       this.lastChatSendAt = 0;
+      this.lastChatHistoryRequestAt = 0;
       this.pendingAuthoritativeStateSync = true;
       this.authoritativeSyncGraceUntil = performance.now() + 2200;
       this.updateRoomPlayerSnapshot([]);
@@ -13540,6 +13550,7 @@ export class GameRuntime {
       this.requestPlatformState();
       this.requestRopeState();
       this.requestObjectState();
+      this.requestChatHistory({ force: true });
       if (this.surfacePaintRetryQueue.size > 0) {
         this.scheduleSurfacePaintRetry(240);
       }
@@ -13589,8 +13600,6 @@ export class GameRuntime {
       this.pendingJumpInput = false;
       this.pendingInputQueue.length = 0;
       this.netPingPending.clear();
-      this.chatSeenMessageIds.clear();
-      this.chatMessageSeq = 0;
       this.lastChatSendAt = 0;
       this.stopNetworkPing();
       this.authoritativeSyncGraceUntil = 0;
@@ -13649,8 +13658,6 @@ export class GameRuntime {
       this.pendingJumpInput = false;
       this.pendingInputQueue.length = 0;
       this.authoritativeSyncGraceUntil = 0;
-      this.chatSeenMessageIds.clear();
-      this.chatMessageSeq = 0;
       this.lastChatSendAt = 0;
       this.clearRemotePlayers();
       this.clearPromoObjectVisuals();
@@ -13754,6 +13761,10 @@ export class GameRuntime {
 
     socket.on("chat:message", (payload) => {
       this.handleChatMessage(payload);
+    });
+
+    socket.on("chat:history", (payload = {}) => {
+      this.handleChatHistory(payload);
     });
 
     socket.on("promo:state", (payload = {}) => {
@@ -14702,6 +14713,73 @@ export class GameRuntime {
     const seq = this.chatMessageSeq.toString(36);
     const stamp = Date.now().toString(36);
     return `c_${localId}_${stamp}_${seq}`;
+  }
+
+  clearChatLogs({ clearSeenIds = false } = {}) {
+    this.resolveUiElements();
+    if (this.chatLogEl) {
+      this.chatLogEl.textContent = "";
+    }
+    if (this.chatLiveLogEl) {
+      this.chatLiveLogEl.textContent = "";
+    }
+    if (clearSeenIds) {
+      this.chatSeenMessageIds.clear();
+      this.chatMessageSeq = 0;
+    }
+  }
+
+  requestChatHistory({ force = false } = {}) {
+    if (!this.socket || !this.networkConnected) {
+      return false;
+    }
+    const nowMs = Date.now();
+    if (
+      !force &&
+      nowMs - this.lastChatHistoryRequestAt <
+        Math.max(0, Math.trunc(Number(this.chatHistoryRequestMinIntervalMs) || 0))
+    ) {
+      return false;
+    }
+    this.lastChatHistoryRequestAt = nowMs;
+    this.socket.emit("chat:history:request");
+    return true;
+  }
+
+  handleChatHistory(payload) {
+    const messages = Array.isArray(payload?.messages)
+      ? payload.messages
+      : Array.isArray(payload)
+        ? payload
+        : [];
+    if (!messages.length) {
+      return;
+    }
+
+    for (const entry of messages) {
+      const text = String(entry?.text ?? "").trim().slice(0, 120);
+      if (!text) {
+        continue;
+      }
+      const messageId = this.normalizeChatMessageId(
+        entry?.messageId ?? entry?.clientMessageId ?? ""
+      );
+      const nowMs = Date.now();
+      if (messageId && this.hasSeenChatMessageId(messageId, nowMs)) {
+        continue;
+      }
+      if (messageId) {
+        this.rememberSeenChatMessageId(messageId, nowMs);
+      }
+      const senderId = String(entry?.id ?? "");
+      const senderName = this.formatPlayerName(entry?.name);
+      if (senderId && senderId === this.localPlayerId) {
+        this.localPlayerName = senderName;
+      }
+      const lineType =
+        senderId && this.localPlayerId && senderId === this.localPlayerId ? "self" : "remote";
+      this.appendChatLine(senderName, text, lineType);
+    }
   }
 
   handleChatMessage(payload) {

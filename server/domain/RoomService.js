@@ -58,6 +58,9 @@ const PROMO_BLOCKED_BRIDGE_A_Z = -86;
 const PROMO_BLOCKED_BRIDGE_B_X = 0;
 const PROMO_BLOCKED_BRIDGE_B_Z = -18;
 const PROMO_BLOCKED_BRIDGE_HALF_WIDTH = 7;
+const CHAT_MESSAGE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,80}$/;
+const MAX_CHAT_MESSAGES = 5000;
+const MAX_CHAT_TEXT_CHARS = 200;
 
 function normalizeRoomPortalTarget(rawValue, fallback = "") {
   const text = String(rawValue ?? "").trim().slice(0, 2048);
@@ -86,6 +89,57 @@ function normalizeSurfaceId(rawValue) {
     return "";
   }
   return value;
+}
+
+function normalizeChatActorId(rawValue) {
+  const value = String(rawValue ?? "").trim();
+  if (!value) {
+    return "";
+  }
+  return value.replace(/[^a-zA-Z0-9:_-]/g, "").slice(0, 96);
+}
+
+function normalizeChatMessageId(rawValue) {
+  const value = String(rawValue ?? "").trim();
+  if (!value) {
+    return "";
+  }
+  const normalized = value.replace(/[^a-zA-Z0-9:_-]/g, "").slice(0, 80);
+  if (!normalized || !CHAT_MESSAGE_ID_PATTERN.test(normalized)) {
+    return "";
+  }
+  return normalized;
+}
+
+function normalizeChatText(rawValue) {
+  const value = String(rawValue ?? "").trim().slice(0, MAX_CHAT_TEXT_CHARS);
+  if (!value) {
+    return "";
+  }
+  return value;
+}
+
+function normalizeChatHistoryEntry(rawValue, fallbackCreatedAt = Date.now()) {
+  if (!rawValue || typeof rawValue !== "object") {
+    return null;
+  }
+
+  const messageId = normalizeChatMessageId(rawValue?.messageId ?? rawValue?.clientMessageId ?? "");
+  const text = normalizeChatText(rawValue?.text ?? "");
+  if (!messageId || !text) {
+    return null;
+  }
+
+  return {
+    messageId,
+    id: normalizeChatActorId(rawValue?.id ?? rawValue?.playerId ?? ""),
+    name: sanitizeName(rawValue?.name ?? "PLAYER"),
+    text,
+    createdAt: Math.max(
+      0,
+      Math.trunc(Number(rawValue?.createdAt) || Number(fallbackCreatedAt) || Date.now())
+    )
+  };
 }
 
 function getPromoOwnerKeyFromSurfaceId(rawSurfaceId, promoMap = null) {
@@ -455,6 +509,7 @@ function createPersistentRoom(code, defaultPortalTargetUrl) {
     sharedMusic: createSharedMusicState(),
     securityTest: createSecurityTestState(),
     surfacePaint: new Map(),
+    chatHistory: [],
     promoObjects: new Map(),
     objectEditor: createObjectEditorState(),
     objectPositions: {},
@@ -559,9 +614,11 @@ export class RoomService {
     const platformRevision = normalizeStateRevision(parsed?.platformRevision, 0);
     const ropeRevision = normalizeStateRevision(parsed?.ropeRevision, 0);
     const objectRevision = normalizeStateRevision(parsed?.objectRevision, 0);
+    const chatHistorySource = Array.isArray(parsed?.chatHistory) ? parsed.chatHistory : [];
     const leftBillboard = this.serializeLeftBillboard({ leftBillboard: parsed?.leftBillboard });
     const rightBillboard = this.serializeRightBillboard({ rightBillboard: parsed?.rightBillboard });
     const restored = new Map();
+    const restoredChatHistory = [];
     for (const entry of surfaces) {
       const surfaceId = normalizeSurfaceId(entry?.surfaceId);
       const paintEntry = normalizeSurfacePaintEntry(entry, savedAt);
@@ -570,9 +627,21 @@ export class RoomService {
       }
       restored.set(surfaceId, paintEntry);
     }
+    for (const entry of chatHistorySource) {
+      const normalized = normalizeChatHistoryEntry(entry, savedAt);
+      if (!normalized) {
+        continue;
+      }
+      restoredChatHistory.push(normalized);
+      if (restoredChatHistory.length >= MAX_CHAT_MESSAGES) {
+        break;
+      }
+    }
+    restoredChatHistory.sort((a, b) => a.createdAt - b.createdAt);
 
     const room = this.getDefaultRoom();
     room.surfacePaint = restored;
+    room.chatHistory = restoredChatHistory;
     room.leftBillboard = leftBillboard;
     room.rightBillboard = rightBillboard;
     room.objectEditor = normalizeObjectEditorState(parsed?.objectEditor, room.objectEditor);
@@ -647,6 +716,7 @@ export class RoomService {
       savedAt: Date.now(),
       defaultRoomCode: this.defaultRoomCode,
       surfaces: this.serializeSurfacePaint(room),
+      chatHistory: this.serializeChatHistory(room),
       leftBillboard: this.serializeLeftBillboard(room),
       rightBillboard: this.serializeRightBillboard(room),
       platforms: this.serializePlatforms(room),
@@ -755,6 +825,55 @@ export class RoomService {
 
   emitRoomUpdate(room) {
     this.io.to(room.code).emit("room:update", this.serializeRoom(room));
+  }
+
+  serializeChatHistory(room) {
+    if (!room || typeof room !== "object") {
+      return [];
+    }
+    const source = Array.isArray(room.chatHistory) ? room.chatHistory : [];
+    const sanitized = [];
+    for (const entry of source) {
+      const normalized = normalizeChatHistoryEntry(entry);
+      if (!normalized) {
+        continue;
+      }
+      sanitized.push(normalized);
+    }
+    sanitized.sort((a, b) => a.createdAt - b.createdAt);
+    if (sanitized.length > MAX_CHAT_MESSAGES) {
+      sanitized.splice(0, sanitized.length - MAX_CHAT_MESSAGES);
+    }
+    room.chatHistory = sanitized;
+    return sanitized;
+  }
+
+  appendChatHistory(room, rawEntry, { persist = true } = {}) {
+    if (!room || typeof room !== "object") {
+      return { ok: false, error: "room not found" };
+    }
+    const nextEntry = normalizeChatHistoryEntry(rawEntry);
+    if (!nextEntry) {
+      return { ok: false, error: "invalid chat message" };
+    }
+
+    const history = this.serializeChatHistory(room);
+    const duplicate = history.some((entry) => entry.messageId === nextEntry.messageId);
+    if (duplicate) {
+      return { ok: true, changed: false, message: nextEntry };
+    }
+
+    history.push(nextEntry);
+    history.sort((a, b) => a.createdAt - b.createdAt);
+    if (history.length > MAX_CHAT_MESSAGES) {
+      history.splice(0, history.length - MAX_CHAT_MESSAGES);
+    }
+    room.chatHistory = history;
+
+    if (persist) {
+      this.scheduleSurfacePaintSave();
+    }
+    return { ok: true, changed: true, message: nextEntry };
   }
 
   emitPortalTargetUpdate(room) {
