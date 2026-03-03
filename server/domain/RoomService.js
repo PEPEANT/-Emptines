@@ -325,7 +325,7 @@ function normalizePromoMediaDataUrl(rawValue) {
   if (!value || value.length > MAX_PROMO_MEDIA_DATA_URL_CHARS) {
     return "";
   }
-  if (!/^data:(image|video)\/[a-z0-9.+-]+;base64,/i.test(value)) {
+  if (!/^data:image\/png;base64,/i.test(value)) {
     return "";
   }
   return value;
@@ -763,7 +763,7 @@ export class RoomService {
     const mediaDataUrl = normalizePromoMediaDataUrl(source.mediaDataUrl ?? fallback?.mediaDataUrl ?? "");
     let mediaKind = "none";
     if (mediaDataUrl) {
-      mediaKind = /^data:image\//i.test(mediaDataUrl) ? "image" : "video";
+      mediaKind = "image";
     }
 
     return {
@@ -851,6 +851,8 @@ export class RoomService {
       if (!previous.allowOthersDraw) {
         return { ok: false, error: "owner denied edits" };
       }
+    } else if (previous) {
+      return { ok: false, error: "promo placement already used" };
     }
 
     const fallback = previous

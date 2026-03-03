@@ -103,6 +103,7 @@ const HOST_CUSTOM_BLOCK_DEFAULT_SIZE = 2.5;
 const PROMO_OWNER_KEY_STORAGE_KEY = "promoOwnerKey_v1";
 const PROMO_MAX_MEDIA_BYTES = 6 * 1024 * 1024;
 const PROMO_LINK_INTERACT_RADIUS = 4.2;
+const PROMO_ONE_SHOT_PLACEMENT = true;
 
 function resolveRuntimeAssetUrl(relativePath) {
   const normalized = String(relativePath ?? "").trim().replace(/^\/+/, "");
@@ -4729,6 +4730,68 @@ export class GameRuntime {
     }
   }
 
+  getPromoPaintSurfaceBaseId(ownerKey = "") {
+    const safeOwnerKey = String(ownerKey ?? "").trim().replace(/[^a-zA-Z0-9:_-]/g, "").slice(0, 90);
+    if (!safeOwnerKey) {
+      return "";
+    }
+    return `po_${safeOwnerKey}`;
+  }
+
+  getPromoPaintSurfaceId(ownerKey = "") {
+    const baseId = this.getPromoPaintSurfaceBaseId(ownerKey);
+    if (!baseId) {
+      return "";
+    }
+    return `${baseId}:pz`;
+  }
+
+  registerPromoPaintSurface(mesh, ownerKey, width = 2.6, height = 1.5) {
+    if (!mesh) {
+      return "";
+    }
+    const baseId = this.getPromoPaintSurfaceBaseId(ownerKey);
+    const surfaceId = this.getPromoPaintSurfaceId(ownerKey);
+    if (!baseId || !surfaceId) {
+      return "";
+    }
+    mesh.userData.paintSurfaceBaseId = baseId;
+    mesh.userData.paintPreferredFace = "pz";
+    if (!this.paintableSurfaceMeshes.includes(mesh)) {
+      this.paintableSurfaceMeshes.push(mesh);
+    }
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const baseMap = materials[0]?.map ?? null;
+    this.paintableSurfaceMap.set(surfaceId, {
+      mesh,
+      materialIndex: 0,
+      baseMap,
+      surfaceSize: {
+        width: Math.max(0.25, Number(width) || 2.6),
+        height: Math.max(0.25, Number(height) || 1.5)
+      },
+      revision: 0
+    });
+    const existing = this.surfacePaintState.get(surfaceId);
+    if (existing) {
+      this.applySurfacePaintTexture(surfaceId, existing);
+    }
+    return surfaceId;
+  }
+
+  unregisterPromoPaintSurface(surfaceId, mesh) {
+    const normalized = String(surfaceId ?? "").trim();
+    if (normalized) {
+      this.paintableSurfaceMap.delete(normalized);
+    }
+    if (mesh) {
+      const index = this.paintableSurfaceMeshes.indexOf(mesh);
+      if (index >= 0) {
+        this.paintableSurfaceMeshes.splice(index, 1);
+      }
+    }
+  }
+
   getSurfacePaintIdFromIntersection(intersection) {
     const baseId = String(intersection?.object?.userData?.paintSurfaceBaseId ?? "").trim();
     if (!baseId) {
@@ -7892,7 +7955,7 @@ export class GameRuntime {
     }
     this.syncChatLiveUi();
     if (this.hostChatToggleBtnEl) {
-      const showHostChatToggle = canHostUseChat && !this.mobileEnabled && !this.chatOpen;
+      const showHostChatToggle = false;
       this.hostChatToggleBtnEl.classList.toggle("hidden", !showHostChatToggle);
       const hostLabel = this.chatOpen ? "채팅 닫기" : "채팅";
       if (this.hostChatToggleBtnEl.textContent !== hostLabel) {
@@ -8303,8 +8366,8 @@ export class GameRuntime {
       return null;
     }
     const mediaDataUrl = String(rawValue.mediaDataUrl ?? "").trim();
-    const hasMediaData = /^data:(image|video)\/[a-z0-9.+-]+;base64,/i.test(mediaDataUrl);
-    const mediaKind = hasMediaData ? (/^data:image\//i.test(mediaDataUrl) ? "image" : "video") : "none";
+    const hasMediaData = /^data:image\/png;base64,/i.test(mediaDataUrl);
+    const mediaKind = hasMediaData ? "image" : "none";
     return {
       ownerKey,
       ownerName: this.formatPlayerName(rawValue.ownerName ?? "PLAYER"),
@@ -8682,8 +8745,8 @@ export class GameRuntime {
     const scaleValue = own?.scale ?? 1;
     const linkValue = own?.linkUrl ?? "";
     const allowOthersDraw = own?.allowOthersDraw ?? false;
-    const placeBtnLabel = own ? "수정" : "앞에 배치+저장";
-    const mobilePromoLabel = own ? "수정" : "배치";
+    const placeBtnLabel = own ? "배치 완료(1회)" : "앞에 1회 배치";
+    const mobilePromoLabel = own ? "배치 완료" : "1회 배치";
     const prefersTouchUi =
       typeof window !== "undefined" &&
       typeof window.matchMedia === "function" &&
@@ -8798,6 +8861,7 @@ export class GameRuntime {
     }
 
     const disabled = !connected || busy;
+    const oneShotLocked = PROMO_ONE_SHOT_PLACEMENT && Boolean(own);
     this.promoScaleInputEl && (this.promoScaleInputEl.disabled = disabled);
     this.promoLinkInputEl && (this.promoLinkInputEl.disabled = disabled);
     this.promoAllowOthersDrawEl && (this.promoAllowOthersDrawEl.disabled = disabled);
@@ -8809,18 +8873,18 @@ export class GameRuntime {
     this.promoMediaPickBtnEl && (this.promoMediaPickBtnEl.disabled = disabled);
     this.promoMediaFolderBtnEl && (this.promoMediaFolderBtnEl.disabled = disabled || !showFolderPicker);
     this.promoMediaClearBtnEl && (this.promoMediaClearBtnEl.disabled = disabled);
-    this.promoPlaceBtnEl && (this.promoPlaceBtnEl.disabled = disabled);
-    this.promoSaveBtnEl && (this.promoSaveBtnEl.disabled = disabled);
-    this.promoRemoveBtnEl && (this.promoRemoveBtnEl.disabled = disabled);
+    this.promoPlaceBtnEl && (this.promoPlaceBtnEl.disabled = disabled || oneShotLocked);
+    this.promoSaveBtnEl && (this.promoSaveBtnEl.disabled = disabled || oneShotLocked);
+    this.promoRemoveBtnEl && (this.promoRemoveBtnEl.disabled = disabled || oneShotLocked);
 
     if (!connected) {
       this.setPromoPanelStatus("서버 연결 후 사용 가능");
     } else if (busy) {
       this.setPromoPanelStatus("홍보 오브젝트 동기화 중...");
     } else if (own) {
-      this.setPromoPanelStatus("내 오브젝트 배치됨");
+      this.setPromoPanelStatus("내 오브젝트 배치됨 · 1회 제한");
     } else {
-      this.setPromoPanelStatus("내 오브젝트 없음 · 앞에 배치+저장으로 생성");
+      this.setPromoPanelStatus("내 오브젝트 없음 · Y로 1회 배치");
     }
   }
 
@@ -8829,10 +8893,10 @@ export class GameRuntime {
       return;
     }
     const type = String(file.type ?? "").toLowerCase();
-    const isImage = type.startsWith("image/");
-    const isVideo = type.startsWith("video/");
-    if (!isImage && !isVideo) {
-      this.appendChatLine("", "이미지/영상 파일만 지원합니다.", "system");
+    const fileName = String(file.name ?? "").toLowerCase();
+    const isPng = type === "image/png" || fileName.endsWith(".png");
+    if (!isPng) {
+      this.appendChatLine("", "PNG 파일만 지원합니다.", "system");
       return;
     }
     if (Number(file.size) > PROMO_MAX_MEDIA_BYTES) {
@@ -8847,13 +8911,13 @@ export class GameRuntime {
       reader.readAsDataURL(file);
     }).catch(() => "");
 
-    if (!dataUrl || !/^data:(image|video)\/[a-z0-9.+-]+;base64,/i.test(dataUrl)) {
+    if (!dataUrl || !/^data:image\/png;base64,/i.test(dataUrl)) {
       this.appendChatLine("", "미디어 파일을 읽지 못했습니다.", "system");
       return;
     }
     this.promoPendingMedia = {
       dataUrl,
-      kind: isImage ? "image" : "video",
+      kind: "image",
       name: String(file.name ?? "").trim()
     };
     this.promoMediaRemoved = false;
@@ -8884,6 +8948,23 @@ export class GameRuntime {
       x: Math.round(pos.x * 2) / 2,
       y: Math.round((this.playerPosition.y - GAME_CONSTANTS.PLAYER_HEIGHT) * 2) / 2,
       z: Math.round(pos.z * 2) / 2,
+      yaw: Math.round(yaw * 10000) / 10000
+    };
+  }
+
+  getPromoCenterPlacementTransform() {
+    const centerX = Math.round((Number(this.citySpawn?.x) || 0) * 2) / 2;
+    const centerZ = Math.round(((Number(this.citySpawn?.z) || -8) + 4) * 2) / 2;
+    const baseY = Number(this.citySpawn?.y);
+    const groundY = Number.isFinite(baseY)
+      ? baseY - GAME_CONSTANTS.PLAYER_HEIGHT
+      : this.playerPosition.y - GAME_CONSTANTS.PLAYER_HEIGHT;
+    const centerPosition = { x: centerX, z: centerZ };
+    const yaw = this.normalizePromoYaw(this.getLookYaw(centerPosition, this.playerPosition), 0);
+    return {
+      x: centerX,
+      y: Math.round(groundY * 2) / 2,
+      z: centerZ,
       yaw: Math.round(yaw * 10000) / 10000
     };
   }
@@ -8958,7 +9039,7 @@ export class GameRuntime {
     this.socket.emit("promo:state:request");
   }
 
-  requestPromoUpsert({ placeInFront = false } = {}) {
+  requestPromoUpsert({ placeInFront = false, placeAtCenter = false, oncePerPlayer = false } = {}) {
     if (!(this.socket && this.networkConnected)) {
       this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
       return;
@@ -8968,14 +9049,23 @@ export class GameRuntime {
     }
 
     const own = this.getOwnPromoObject();
-    const transform = placeInFront || !own
-      ? this.getPromoPlacementTransform()
-      : {
-          x: own.x,
-          y: own.y,
-          z: own.z,
-          yaw: this.normalizePromoYaw(own.yaw, 0)
-        };
+    if (oncePerPlayer && own) {
+      this.appendChatLine("", "플레이어당 오브젝트 배치는 1회만 가능합니다.", "system");
+      return;
+    }
+    let transform = null;
+    if (placeAtCenter) {
+      transform = this.getPromoCenterPlacementTransform();
+    } else if (placeInFront || !own) {
+      transform = this.getPromoPlacementTransform();
+    } else {
+      transform = {
+        x: own.x,
+        y: own.y,
+        z: own.z,
+        yaw: this.normalizePromoYaw(own.yaw, 0)
+      };
+    }
     const movingToBlockedArea = this.isPromoPlacementBlockedAt(transform);
     const hasPositionChange =
       !own ||
@@ -9012,6 +9102,7 @@ export class GameRuntime {
         linkUrl,
         mediaDataUrl,
         allowOthersDraw,
+        oncePerPlayer: Boolean(oncePerPlayer),
         forceFlush: true
       },
       (response = {}) => {
@@ -9070,6 +9161,7 @@ export class GameRuntime {
     if (!visual) {
       return;
     }
+    this.unregisterPromoPaintSurface(visual.paintSurfaceId, visual.paintSurfaceMesh);
     if (visual.videoEl) {
       try {
         visual.videoEl.pause();
@@ -9183,11 +9275,19 @@ export class GameRuntime {
       screenMaterial.emissiveIntensity = 0.58;
     }
     screenMaterial.needsUpdate = true;
+    const paintSurfaceId = this.registerPromoPaintSurface(
+      screen,
+      entry.ownerKey,
+      boardWidth,
+      boardHeight
+    );
     return {
       group,
       videoEl,
       videoTexture,
-      imageTexture
+      imageTexture,
+      paintSurfaceId,
+      paintSurfaceMesh: screen
     };
   }
 
@@ -10814,12 +10914,9 @@ export class GameRuntime {
         return;
       }
 
-      if (event.code === "KeyY" && this.canUseGameplayControls() && !this.mobileEnabled) {
+      if (event.code === "KeyY" && this.canMovePlayer() && !this.mobileEnabled) {
         event.preventDefault();
-        if (!this.hasHostPrivilege()) {
-          return;
-        }
-        this.requestHostCustomPaintBlockAdd();
+        this.requestPromoUpsert({ placeInFront: true, oncePerPlayer: PROMO_ONE_SHOT_PLACEMENT });
         return;
       }
 
@@ -10836,7 +10933,7 @@ export class GameRuntime {
         }
       }
 
-      if (event.code === "KeyF" && this.canUseGameplayControls()) {
+      if (event.code === "KeyF" && this.canMovePlayer()) {
         event.preventDefault();
         if (this.tryOpenSurfacePainterFromInteraction()) {
           return;
@@ -11342,7 +11439,7 @@ export class GameRuntime {
         if (!this.mobileEnabled || !this.canMovePlayer()) {
           return;
         }
-        this.setPromoPanelMobileOpen(true);
+        this.requestPromoUpsert({ placeInFront: true, oncePerPlayer: PROMO_ONE_SHOT_PLACEMENT });
       });
     }
     if (this.promoScaleInputEl) {
@@ -11376,7 +11473,8 @@ export class GameRuntime {
         const files = Array.from(this.promoMediaFolderInputEl?.files ?? []);
         const target = files.find((file) => {
           const type = String(file?.type ?? "").toLowerCase();
-          return type.startsWith("image/") || type.startsWith("video/");
+          const name = String(file?.name ?? "").toLowerCase();
+          return type === "image/png" || name.endsWith(".png");
         }) ?? null;
         void this.loadPromoMediaFromFile(target);
         this.promoMediaFolderInputEl.value = "";
@@ -11386,7 +11484,7 @@ export class GameRuntime {
       this.clearPromoPendingMedia();
     });
     this.promoPlaceBtnEl?.addEventListener("click", () => {
-      this.requestPromoUpsert({ placeInFront: true });
+      this.requestPromoUpsert({ placeInFront: true, oncePerPlayer: PROMO_ONE_SHOT_PLACEMENT });
     });
     this.promoSaveBtnEl?.addEventListener("click", () => {
       this.requestPromoUpsert({ placeInFront: false });
@@ -15495,6 +15593,9 @@ export class GameRuntime {
 
   requestHostCustomPaintBlockAdd() {
     if (!this.hasHostPrivilege()) {
+      if (this.socket && this.networkConnected) {
+        this.requestHostClaim({ manual: true });
+      }
       this.appendChatLine("", "회색 오브젝트 추가는 방장만 가능합니다.", "system");
       return false;
     }
