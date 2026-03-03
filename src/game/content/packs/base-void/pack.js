@@ -189,7 +189,7 @@ export const BASE_VOID_PACK = {
         cooldownSeconds: 60,
         warningSeconds: 16,
         openSeconds: 24,
-        targetUrl: "https://reclaim-fps.vercel.app/",
+        targetUrl: "https://singularity-ox.onrender.com/?v=08d5432",
         aZoneTargetUrl: "https://reclaim-fps.vercel.app/"
       }
     },

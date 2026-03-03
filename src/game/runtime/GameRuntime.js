@@ -39,7 +39,7 @@ const NPC_GREETING_FOLLOWUP_VIDEO_URL = new URL("../../../mp4/grok-video.webm", 
 const SPAWN_PORTAL_VEIL_REVEAL_VIDEO_URL = new URL("../../../mp4/grok-video00.mp4", import.meta.url).href;
 const ENTRY_BGM_URL = new URL("../../../mp3/TSUKUYOMI.mp3", import.meta.url).href;
 const AD_BILLBOARD_IMAGE_URL = new URL("../../../png/AD.41415786.1.png", import.meta.url).href;
-const PORTAL_TOP_AD_IMAGE_URL = new URL("../../../png/03,03.png", import.meta.url).href;
+const PORTAL_TOP_AD_IMAGE_URL = new URL("../../../png/Gemini01.png", import.meta.url).href;
 const FUTURE_CITY_FIXED_BILLBOARD_IMAGE_URLS = Object.freeze([
   new URL("../../../png/claude.jpg", import.meta.url).href,
   new URL("../../../png/DC.png", import.meta.url).href,
@@ -86,7 +86,7 @@ const MAX_LEFT_BILLBOARD_IMAGE_CHARS = 4_200_000;
 const MAX_BILLBOARD_VIDEO_DATA_URL_CHARS = 30_000_000;
 const MAX_BILLBOARD_VIDEO_BYTES = 20 * 1024 * 1024;
 const DEFAULT_PORTAL_TARGET_URL =
-  "https://reclaim-fps.vercel.app/";
+  "https://singularity-ox.onrender.com/?v=08d5432";
 const A_ZONE_FIXED_PORTAL_TARGET_URL = "https://reclaim-fps.vercel.app/";
 const A_ZONE_FIXED_PORTAL_IMAGE_URL = new URL("../../../png/REC_FPS.png", import.meta.url).href;
 const BOX_FACE_KEYS = ["px", "nx", "py", "ny", "pz", "nz"];
