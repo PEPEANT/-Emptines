@@ -14872,7 +14872,17 @@ export class GameRuntime {
         return pushEndpointError(`${sourceLabel} 주소를 확인하세요.`, true);
       }
     };
-
+    const normalizeOrigin = (raw) => {
+      try {
+        return new URL(String(raw ?? "").trim()).origin.toLowerCase();
+      } catch {
+        return "";
+      }
+    };
+    const pagesCanonicalEndpoint = "https://emptines-chat-2.onrender.com";
+    const pagesLegacyEndpoint = "https://emptines-chat.onrender.com";
+    const pagesLegacyOrigin = normalizeOrigin(pagesLegacyEndpoint);
+    const isGithubPagesHost = String(window.location.hostname ?? "").endsWith("github.io");
     const envEndpoint = String(
       import.meta.env?.VITE_SOCKET_ENDPOINT ?? import.meta.env?.VITE_CHAT_SERVER ?? ""
     ).trim();
@@ -14885,7 +14895,17 @@ export class GameRuntime {
       query.get("server") ?? query.get("socket") ?? query.get("ws") ?? ""
     ).trim();
     if (queryEndpoint) {
-      return normalizeEndpoint(queryEndpoint, "URL server 파라미터");
+      const normalizedQueryEndpoint = normalizeEndpoint(queryEndpoint, "URL server 파라미터");
+      if (!normalizedQueryEndpoint) {
+        return null;
+      }
+      if (isGithubPagesHost) {
+        const queryOrigin = normalizeOrigin(normalizedQueryEndpoint);
+        if (queryOrigin === pagesLegacyOrigin) {
+          return normalizeEndpoint(pagesCanonicalEndpoint, "기본 Pages 서버");
+        }
+      }
+      return normalizedQueryEndpoint;
     }
 
     const globalEndpoint = String(window.__EMPTINES_SOCKET_ENDPOINT ?? "").trim();
@@ -14904,7 +14924,7 @@ export class GameRuntime {
     }
 
     if (hostname.endsWith("github.io")) {
-      const defaultPagesEndpoint = "https://emptines-chat.onrender.com";
+      const defaultPagesEndpoint = pagesCanonicalEndpoint;
       return normalizeEndpoint(defaultPagesEndpoint, "기본 Pages 서버");
     }
 
