@@ -794,6 +794,8 @@ export class GameRuntime {
     this.portalPhase = this.hubFlowEnabled ? "open" : "idle";
     this.portalPhaseClock = 0;
     this.portalTransitioning = false;
+    this.portalTransferReturnStage = null;
+    this.portalTransferBlockedUntil = 0;
     this.portalPulseClock = 0;
     this.portalBillboardUpdateClock = 0;
     this.portalBillboardUpdateInterval = 0.4;
@@ -7629,7 +7631,10 @@ export class GameRuntime {
 
     // Keep portal transfer unconditional across hub-flow stages.
     if (!this.portalTransitioning && this.isPlayerInAZonePortalZone()) {
-      this.triggerPortalTransfer(this.buildAZonePortalTransferUrl());
+      this.triggerPortalTransfer(this.buildAZonePortalTransferUrl(), {
+        immediate: true,
+        transitionText: "FPS 포탈 이동 중..."
+      });
       return;
     }
 
@@ -8156,8 +8161,12 @@ export class GameRuntime {
     return this.normalizePortalTargetUrl(this.aZonePortalTargetUrl, "");
   }
 
-  triggerPortalTransfer(overrideDestination = "") {
+  triggerPortalTransfer(overrideDestination = "", options = null) {
     if (this.portalTransitioning) {
+      return;
+    }
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    if (now < (Number(this.portalTransferBlockedUntil) || 0)) {
       return;
     }
 
@@ -8173,15 +8182,79 @@ export class GameRuntime {
       return;
     }
 
+    const previousStage = this.flowStage;
+    const immediate = Boolean(options?.immediate);
+    const transitionText = String(options?.transitionText ?? "").trim() || "포탈 이동 중...";
+
     this.portalTransitioning = true;
+    this.portalTransferReturnStage = previousStage;
     this.flowStage = "portal_transfer";
     this.hud.setStatus(this.getStatusText());
     this.syncGameplayUiForFlow();
-    this.setPortalTransition(true, "포탈 이동 중...");
+    this.setPortalTransition(true, transitionText);
 
-    window.setTimeout(() => {
-      window.location.assign(destination);
-    }, 780);
+    const sourceHref =
+      typeof window !== "undefined" && window.location?.href
+        ? String(window.location.href)
+        : "";
+    const recoverFromBlockedTransfer = () => {
+      if (!this.portalTransitioning) {
+        return;
+      }
+      this.portalTransitioning = false;
+      this.portalTransferBlockedUntil =
+        (typeof performance !== "undefined" ? performance.now() : Date.now()) + 1800;
+      const restoreStage =
+        String(this.portalTransferReturnStage ?? "").trim() || "city_live";
+      this.portalTransferReturnStage = null;
+      this.flowStage = restoreStage;
+      this.hud.setStatus(this.getStatusText());
+      this.syncGameplayUiForFlow();
+      this.setPortalTransition(false, "");
+      this.appendChatLine("", "포탈 이동이 차단되었습니다. 다시 진입해 주세요.", "system");
+    };
+
+    const tryNavigate = () => {
+      try {
+        window.location.assign(destination);
+      } catch {
+        // Some webviews block scripted assign; fallback below.
+      }
+
+      window.setTimeout(() => {
+        if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+          return;
+        }
+        if (
+          sourceHref &&
+          typeof window !== "undefined" &&
+          String(window.location.href) !== sourceHref
+        ) {
+          return;
+        }
+        try {
+          window.location.replace(destination);
+        } catch {
+          recoverFromBlockedTransfer();
+        }
+      }, 160);
+
+      window.setTimeout(() => {
+        if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+          return;
+        }
+        if (
+          sourceHref &&
+          typeof window !== "undefined" &&
+          String(window.location.href) !== sourceHref
+        ) {
+          return;
+        }
+        recoverFromBlockedTransfer();
+      }, 1900);
+    };
+
+    window.setTimeout(tryNavigate, immediate ? 0 : 780);
   }
 
   syncPlayerNameIfConnected() {
