@@ -2867,7 +2867,6 @@ body.mobile-portrait-lock #chat-ui,
 body.mobile-portrait-lock #chat-live-feed,
 body.mobile-portrait-lock #promo-panel,
 body.mobile-portrait-lock #promo-link-prompt,
-body.mobile-portrait-lock #host-controls,
 body.mobile-portrait-lock #player-roster,
 body.mobile-portrait-lock #hub-flow-ui,
 body.mobile-portrait-lock #nickname-gate,
@@ -2881,8 +2880,7 @@ body.mobile-portrait-lock #settings-btn,
 body.mobile-portrait-lock #settings-panel,
 body.mobile-portrait-lock #graphics-toggle,
 body.mobile-portrait-lock #graphics-controls,
-body.mobile-portrait-lock #host-chat-toggle,
-body.mobile-portrait-lock #host-controls-toggle {
+body.mobile-portrait-lock #host-chat-toggle {
   display: none !important;
 }
 
@@ -2965,4 +2963,21 @@ body.mobile-portrait-lock #host-controls-toggle {
   #surface-painter-panel.actions-collapsed #surface-painter-actions {
     display: none;
   }
+}
+
+/* Keep host controls always visible regardless of hidden utility classes or portrait lock. */
+#host-controls {
+  display: grid !important;
+}
+
+#host-controls-toggle {
+  display: inline-flex !important;
+}
+
+body.mobile-portrait-lock #host-controls {
+  display: grid !important;
+}
+
+body.mobile-portrait-lock #host-controls-toggle {
+  display: inline-flex !important;
 }
