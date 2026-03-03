@@ -105,9 +105,9 @@ const PROMO_MIN_SCALE = 0.35;
 const PROMO_MAX_SCALE = 42;
 const PROMO_MAX_MEDIA_BYTES = 6 * 1024 * 1024;
 const PROMO_LINK_INTERACT_RADIUS = 4.2;
-const PROMO_BLOCK_BASE_SIZE = 2.4;
-const PROMO_BLOCK_FACE_INSET = 0.2;
-const PROMO_BLOCK_FACE_GAP = 0.08;
+const PROMO_BLOCK_WIDTH = 2.8;
+const PROMO_BLOCK_HEIGHT = 2.2;
+const PROMO_BLOCK_DEPTH = 1.8;
 
 function resolveRuntimeAssetUrl(relativePath) {
   const normalized = String(relativePath ?? "").trim().replace(/^\/+/, "");
@@ -318,6 +318,8 @@ export class GameRuntime {
     this.promoOwnerKey = this.getOrCreatePromoOwnerKey();
     this.promoObjects = new Map();
     this.promoObjectVisuals = new Map();
+    this.promoCollisionBoxes = [];
+    this.promoPlatformCandidateBuffer = [];
     this.promoSetInFlight = false;
     this.promoRemoveInFlight = false;
     this.promoPendingMedia = {
@@ -5757,14 +5759,14 @@ export class GameRuntime {
     this.requestPromoUpsert({ placeInFront: true, preserveExistingStyle: true });
   }
 
-  requestPromoRemoveFromSurfacePainter() {
+  requestPromoRemoveFromSurfacePainter({ startPlacementPreview = true } = {}) {
     const blockedReason = this.getSurfacePainterPromoBlockedReason();
     if (blockedReason) {
       this.appendChatLine("", blockedReason, "system");
       return;
     }
     this.closeSurfacePainter();
-    this.requestPromoRemove();
+    this.requestPromoRemove({ startPlacementPreviewOnSuccess: Boolean(startPlacementPreview) });
   }
 
   requestPromoScaleFromSurfacePainter(delta = 0) {
@@ -5794,6 +5796,15 @@ export class GameRuntime {
       preserveExistingStyle: true,
       scaleOverride: nextScale
     });
+  }
+
+  handleSurfacePainterDeleteAction() {
+    const promoOwnerKey = this.getSurfacePainterPromoOwnerKey();
+    if (promoOwnerKey) {
+      this.requestPromoRemoveFromSurfacePainter({ startPlacementPreview: true });
+      return;
+    }
+    this.clearSurfacePainterCanvas();
   }
 
   getSurfacePaintSaveBlockedReason() {
@@ -9333,9 +9344,9 @@ export class GameRuntime {
       return this.promoPlacementPreviewMesh;
     }
 
-    const bodySize = PROMO_BLOCK_BASE_SIZE;
-    const panelWidth = Math.max(0.5, bodySize - PROMO_BLOCK_FACE_INSET * 2);
-    const panelHeight = Math.max(0.5, bodySize - PROMO_BLOCK_FACE_INSET * 2);
+    const bodyWidth = PROMO_BLOCK_WIDTH;
+    const bodyHeight = PROMO_BLOCK_HEIGHT;
+    const bodyDepth = PROMO_BLOCK_DEPTH;
 
     const group = new THREE.Group();
     const bodyMaterial = new THREE.MeshStandardMaterial({
@@ -9348,22 +9359,10 @@ export class GameRuntime {
       roughness: 0.56,
       metalness: 0.06
     });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(bodySize, bodySize, bodySize), bodyMaterial);
+    const body = new THREE.Mesh(new THREE.BoxGeometry(bodyWidth, bodyHeight, bodyDepth), bodyMaterial);
     body.renderOrder = 26;
     body.castShadow = false;
     body.receiveShadow = false;
-
-    const panelMaterial = new THREE.MeshBasicMaterial({
-      color: 0x31ff9d,
-      transparent: true,
-      opacity: 0.26,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-      toneMapped: false
-    });
-    const panel = new THREE.Mesh(new THREE.PlaneGeometry(panelWidth, panelHeight), panelMaterial);
-    panel.position.set(0, 0, bodySize * 0.5 + 0.014);
-    panel.renderOrder = 27;
 
     const edgeMaterial = new THREE.LineBasicMaterial({
       color: 0xcaffea,
@@ -9372,15 +9371,14 @@ export class GameRuntime {
       toneMapped: false
     });
     const edges = new THREE.LineSegments(
-      new THREE.EdgesGeometry(new THREE.BoxGeometry(bodySize, bodySize, bodySize)),
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(bodyWidth, bodyHeight, bodyDepth)),
       edgeMaterial
     );
     edges.renderOrder = 28;
 
-    group.add(body, panel, edges);
+    group.add(body, edges);
     group.visible = false;
     group.userData.previewBodyMaterial = bodyMaterial;
-    group.userData.previewPanelMaterial = panelMaterial;
     group.userData.previewEdgeMaterial = edgeMaterial;
     this.scene.add(group);
     this.promoPlacementPreviewMesh = group;
@@ -9394,14 +9392,12 @@ export class GameRuntime {
       return;
     }
     const bodyMaterial = preview.userData.previewBodyMaterial;
-    const panelMaterial = preview.userData.previewPanelMaterial;
     const edgeMaterial = preview.userData.previewEdgeMaterial;
     const baseColor = blocked ? 0xff5f72 : 0x31ff9d;
     const edgeColor = blocked ? 0xffd2d8 : 0xcaffea;
 
     bodyMaterial?.color?.setHex?.(baseColor);
     bodyMaterial?.emissive?.setHex?.(baseColor);
-    panelMaterial?.color?.setHex?.(baseColor);
     edgeMaterial?.color?.setHex?.(edgeColor);
   }
 
@@ -9445,7 +9441,7 @@ export class GameRuntime {
     this.promoPlacementPreviewBlockReason = blockReason;
     this.promoPlacementPreviewTransform = transform;
 
-    const bodyHeight = PROMO_BLOCK_BASE_SIZE * scale;
+    const bodyHeight = PROMO_BLOCK_HEIGHT * scale;
     preview.position.set(transform.x, transform.y + bodyHeight * 0.5, transform.z);
     preview.rotation.set(0, this.normalizePromoYaw(transform.yaw, 0), 0);
     preview.scale.set(scale, scale, scale);
@@ -9699,7 +9695,7 @@ export class GameRuntime {
     );
   }
 
-  requestPromoRemove() {
+  requestPromoRemove({ startPlacementPreviewOnSuccess = false } = {}) {
     if (!(this.socket && this.networkConnected)) {
       this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
       return;
@@ -9722,7 +9718,21 @@ export class GameRuntime {
         name: ""
       };
       this.promoMediaRemoved = false;
+      const ownOwnerKey = String(this.promoOwnerKey ?? "").trim();
+      if (ownOwnerKey) {
+        this.disposePromoObjectVisual(ownOwnerKey);
+        this.promoObjects.delete(ownOwnerKey);
+      }
+      this.rebuildPromoCollisionBoxes();
       this.requestPromoState();
+      if (startPlacementPreviewOnSuccess) {
+        const started = this.beginPromoPlacementPreview({ announce: true, syncUi: true });
+        if (!started) {
+          window.setTimeout(() => {
+            this.beginPromoPlacementPreview({ announce: false, syncUi: true });
+          }, 180);
+        }
+      }
       this.syncPromoPanelUi();
     });
   }
@@ -9767,6 +9777,8 @@ export class GameRuntime {
     for (const ownerKey of this.promoObjectVisuals.keys()) {
       this.disposePromoObjectVisual(ownerKey);
     }
+    this.promoCollisionBoxes = [];
+    this.promoPlatformCandidateBuffer.length = 0;
   }
 
   createPromoScreenMediaResources(
@@ -9814,76 +9826,57 @@ export class GameRuntime {
 
   createPromoBlockVisual(entry) {
     const safeScale = THREE.MathUtils.clamp(Number(entry.scale) || 1, PROMO_MIN_SCALE, PROMO_MAX_SCALE);
-    const bodySize = PROMO_BLOCK_BASE_SIZE * safeScale;
-    const panelWidth = Math.max(0.45, bodySize - PROMO_BLOCK_FACE_INSET * safeScale * 2);
-    const panelHeight = Math.max(0.45, bodySize - PROMO_BLOCK_FACE_INSET * safeScale * 2);
-    const quadGap = Math.max(PROMO_BLOCK_FACE_GAP * safeScale, 0.02);
-    const quadWidth = Math.max(0.2, (panelWidth - quadGap) * 0.5);
-    const quadHeight = Math.max(0.2, (panelHeight - quadGap) * 0.5);
-    const offsetX = (quadWidth + quadGap) * 0.5;
-    const offsetY = (quadHeight + quadGap) * 0.5;
-    const quadZ = bodySize * 0.5 + 0.0025;
+    const bodyWidth = PROMO_BLOCK_WIDTH * safeScale;
+    const bodyHeight = PROMO_BLOCK_HEIGHT * safeScale;
+    const bodyDepth = PROMO_BLOCK_DEPTH * safeScale;
+    const surfaceBaseId = this.getPromoPaintSurfaceBaseId(entry.ownerKey);
 
     const group = new THREE.Group();
-    group.position.set(entry.x, entry.y + bodySize * 0.5, entry.z);
+    group.position.set(entry.x, entry.y + bodyHeight * 0.5, entry.z);
     group.rotation.y = this.normalizePromoYaw(entry.yaw, 0);
 
-    const body = new THREE.Mesh(
-      new THREE.BoxGeometry(bodySize, bodySize, bodySize),
-      new THREE.MeshStandardMaterial({
-        color: 0xa7adb4,
-        roughness: 0.82,
-        metalness: 0.08,
-        emissive: 0x1e2328,
-        emissiveIntensity: 0.08
-      })
+    const bodyMaterialTemplate = new THREE.MeshStandardMaterial({
+      color: 0xa7adb4,
+      roughness: 0.82,
+      metalness: 0.08,
+      emissive: 0x1e2328,
+      emissiveIntensity: 0.08
+    });
+    bodyMaterialTemplate.toneMapped = true;
+    const { videoEl, videoTexture, imageTexture } = this.createPromoScreenMediaResources(
+      entry,
+      bodyMaterialTemplate,
+      {
+        videoEmissive: 0.08,
+        imageEmissive: 0.1,
+        emptyColor: 0xa7adb4,
+        emptyEmissive: 0.08
+      }
     );
+
+    const body = surfaceBaseId
+      ? this.createPaintableBoxMesh(
+          new THREE.BoxGeometry(bodyWidth, bodyHeight, bodyDepth),
+          bodyMaterialTemplate,
+          surfaceBaseId
+        )
+      : new THREE.Mesh(
+          new THREE.BoxGeometry(bodyWidth, bodyHeight, bodyDepth),
+          bodyMaterialTemplate.clone()
+        );
     body.castShadow = true;
     body.receiveShadow = true;
     group.add(body);
 
-    const screenMaterialTemplate = new THREE.MeshStandardMaterial({
-      color: 0xcfd4da,
-      emissive: 0x1f2226,
-      emissiveIntensity: 0.04,
-      roughness: 0.62,
-      metalness: 0.02
-    });
-    screenMaterialTemplate.toneMapped = true;
-    const { videoEl, videoTexture, imageTexture } = this.createPromoScreenMediaResources(
-      entry,
-      screenMaterialTemplate,
-      {
-        videoEmissive: 0.08,
-        imageEmissive: 0.1,
-        emptyColor: 0xcfd4da,
-        emptyEmissive: 0.04
-      }
-    );
-    const sharedMap = screenMaterialTemplate.map ?? null;
-    const quadOffsets = [
-      { x: -offsetX, y: offsetY, suffix: "q0" },
-      { x: offsetX, y: offsetY, suffix: "q1" },
-      { x: -offsetX, y: -offsetY, suffix: "q2" },
-      { x: offsetX, y: -offsetY, suffix: "q3" }
-    ];
     const paintSurfaceEntries = [];
-    for (const quad of quadOffsets) {
-      const material = screenMaterialTemplate.clone();
-      material.map = sharedMap;
-      material.needsUpdate = true;
-      const screen = new THREE.Mesh(new THREE.PlaneGeometry(quadWidth, quadHeight), material);
-      screen.position.set(quad.x, quad.y, quadZ);
-      screen.receiveShadow = true;
-      group.add(screen);
-      const surfaceId = this.registerPromoPaintSurface(
-        screen,
-        entry.ownerKey,
-        quadWidth,
-        quadHeight,
-        quad.suffix
-      );
-      paintSurfaceEntries.push({ surfaceId, mesh: screen });
+    if (surfaceBaseId) {
+      // Keep painting focused on side faces (left/right/front/back).
+      this.paintableSurfaceMap.delete(`${surfaceBaseId}:py`);
+      this.paintableSurfaceMap.delete(`${surfaceBaseId}:ny`);
+      const sideFaces = ["px", "nx", "pz", "nz"];
+      for (const faceKey of sideFaces) {
+        paintSurfaceEntries.push({ surfaceId: `${surfaceBaseId}:${faceKey}`, mesh: body });
+      }
     }
 
     return {
@@ -10000,11 +9993,57 @@ export class GameRuntime {
     }
 
     this.promoObjects = nextMap;
+    this.rebuildPromoCollisionBoxes();
     if (this.promoPlacementPreviewActive && this.getOwnPromoObject()) {
       this.clearPromoPlacementPreview({ syncUi: false });
     }
     this.syncPromoPanelUi();
     this.updatePromoLinkPrompt(0, true);
+  }
+
+  rebuildPromoCollisionBoxes() {
+    const nextBoxes = [];
+    for (const entry of this.promoObjects.values()) {
+      const kind = this.normalizePromoKind(entry?.kind ?? "block", "block");
+      if (kind !== "block") {
+        continue;
+      }
+      const scale = THREE.MathUtils.clamp(Number(entry?.scale) || 1, PROMO_MIN_SCALE, PROMO_MAX_SCALE);
+      const width = PROMO_BLOCK_WIDTH * scale;
+      const height = PROMO_BLOCK_HEIGHT * scale;
+      const depth = PROMO_BLOCK_DEPTH * scale;
+      const centerX = Number(entry?.x);
+      const baseY = Number(entry?.y);
+      const centerZ = Number(entry?.z);
+      if (!Number.isFinite(centerX) || !Number.isFinite(baseY) || !Number.isFinite(centerZ)) {
+        continue;
+      }
+      const yaw = this.normalizePromoYaw(entry?.yaw, 0);
+      const halfW = width * 0.5;
+      const halfD = depth * 0.5;
+      const absCos = Math.abs(Math.cos(yaw));
+      const absSin = Math.abs(Math.sin(yaw));
+      const aabbHalfX = halfW * absCos + halfD * absSin;
+      const aabbHalfZ = halfW * absSin + halfD * absCos;
+      const platform = {
+        x: centerX,
+        y: baseY + height * 0.5,
+        z: centerZ,
+        w: aabbHalfX * 2,
+        h: height,
+        d: aabbHalfZ * 2
+      };
+      nextBoxes.push({
+        minX: centerX - aabbHalfX,
+        maxX: centerX + aabbHalfX,
+        minZ: centerZ - aabbHalfZ,
+        maxZ: centerZ + aabbHalfZ,
+        minY: baseY,
+        maxY: baseY + height,
+        platform
+      });
+    }
+    this.promoCollisionBoxes = nextBoxes;
   }
 
   openNearestPromoLink() {
@@ -11797,6 +11836,16 @@ export class GameRuntime {
       this.hud.setStatus(this.getStatusText());
     });
     this.renderer.domElement.addEventListener("mousedown", (event) => {
+      if (event.button === 0 && this.promoPlacementPreviewActive && this.canMovePlayer()) {
+        event.preventDefault();
+        this.confirmPromoPlacementPreview();
+        return;
+      }
+      if (event.button === 0 && this.hostCustomBlockPlacementPreviewActive && this.canMovePlayer()) {
+        event.preventDefault();
+        this.confirmHostCustomBlockPlacementPreview();
+        return;
+      }
       if (
         event.button === 0 &&
         this.flyModeActive &&
@@ -11806,16 +11855,6 @@ export class GameRuntime {
       ) {
         event.preventDefault();
         this.beginObjEditorDrag(event.clientX, event.clientY);
-        return;
-      }
-      if (event.button === 0 && this.hostCustomBlockPlacementPreviewActive && this.canMovePlayer()) {
-        event.preventDefault();
-        this.confirmHostCustomBlockPlacementPreview();
-        return;
-      }
-      if (event.button === 0 && this.promoPlacementPreviewActive && this.canMovePlayer()) {
-        event.preventDefault();
-        this.confirmPromoPlacementPreview();
         return;
       }
       if (event.button === 0 && this.flyModeActive && this.pointerLocked) {
@@ -11851,17 +11890,17 @@ export class GameRuntime {
       this.chalkLastStamp = null;
     });
     this.renderer.domElement.addEventListener("wheel", (event) => {
-      if (this.hostCustomBlockPlacementPreviewActive && !this.mobileEnabled && this.canMovePlayer()) {
-        event.preventDefault();
-        const sizeDelta = THREE.MathUtils.clamp(-event.deltaY * 0.003, -0.8, 0.8);
-        this.adjustHostCustomBlockPlacementPreviewSize(sizeDelta);
-        return;
-      }
       if (this.promoPlacementPreviewActive && !this.mobileEnabled && this.canMovePlayer()) {
         event.preventDefault();
         const scaleDelta = THREE.MathUtils.clamp(-event.deltaY * 0.0012, -0.4, 0.4);
         this.adjustPromoPlacementPreviewScale(scaleDelta);
         this.syncPromoPanelUi();
+        return;
+      }
+      if (this.hostCustomBlockPlacementPreviewActive && !this.mobileEnabled && this.canMovePlayer()) {
+        event.preventDefault();
+        const sizeDelta = THREE.MathUtils.clamp(-event.deltaY * 0.003, -0.8, 0.8);
+        this.adjustHostCustomBlockPlacementPreviewSize(sizeDelta);
         return;
       }
       if (!this.flyModeActive) return;
@@ -12226,7 +12265,7 @@ export class GameRuntime {
       this.requestPromoUpsert({ placeInFront: false });
     });
     this.promoRemoveBtnEl?.addEventListener("click", () => {
-      this.requestPromoRemove();
+      this.requestPromoRemove({ startPlacementPreviewOnSuccess: true });
     });
     if (this.promoLinkInputEl) {
       this.promoLinkInputEl.addEventListener("keydown", (event) => {
@@ -12499,7 +12538,7 @@ export class GameRuntime {
     }
 
     this.surfacePainterClearBtnEl?.addEventListener("click", () => {
-      this.clearSurfacePainterCanvas();
+      this.handleSurfacePainterDeleteAction();
     });
     this.surfacePainterCancelBtnEl?.addEventListener("click", () => {
       this.closeSurfacePainter();
@@ -14385,7 +14424,8 @@ export class GameRuntime {
   }
 
   resolveStaticWorldCollisions(position, radius = this.playerCollisionRadius) {
-    if (!position || !this.staticWorldColliders.length) {
+    const promoColliders = Array.isArray(this.promoCollisionBoxes) ? this.promoCollisionBoxes : [];
+    if (!position || (!this.staticWorldColliders.length && promoColliders.length <= 0)) {
       return;
     }
 
@@ -14397,50 +14437,53 @@ export class GameRuntime {
 
     for (let pass = 0; pass < 3; pass += 1) {
       let adjusted = false;
-      for (const collider of this.staticWorldColliders) {
-        if (!collider) {
-          continue;
-        }
-        if (headY < collider.minY || feetY > collider.maxY) {
-          continue;
-        }
-
-        const nearestX = THREE.MathUtils.clamp(position.x, collider.minX, collider.maxX);
-        const nearestZ = THREE.MathUtils.clamp(position.z, collider.minZ, collider.maxZ);
-        let offsetX = position.x - nearestX;
-        let offsetZ = position.z - nearestZ;
-        let distSq = offsetX * offsetX + offsetZ * offsetZ;
-        if (distSq >= radiusSq - epsilon) {
-          continue;
-        }
-
-        if (distSq > epsilon) {
-          const dist = Math.sqrt(distSq);
-          const push = collisionRadius - dist + epsilon;
-          position.x += (offsetX / dist) * push;
-          position.z += (offsetZ / dist) * push;
-        } else {
-          const pushLeft = Math.abs(position.x - collider.minX);
-          const pushRight = Math.abs(collider.maxX - position.x);
-          const pushBack = Math.abs(position.z - collider.minZ);
-          const pushFront = Math.abs(collider.maxZ - position.z);
-          const smallest = Math.min(pushLeft, pushRight, pushBack, pushFront);
-          if (smallest === pushLeft) {
-            position.x = collider.minX - collisionRadius - epsilon;
-          } else if (smallest === pushRight) {
-            position.x = collider.maxX + collisionRadius + epsilon;
-          } else if (smallest === pushBack) {
-            position.z = collider.minZ - collisionRadius - epsilon;
-          } else {
-            position.z = collider.maxZ + collisionRadius + epsilon;
+      const colliderGroups = [this.staticWorldColliders, promoColliders];
+      for (const colliders of colliderGroups) {
+        for (const collider of colliders) {
+          if (!collider) {
+            continue;
           }
-        }
+          if (headY < collider.minY || feetY > collider.maxY) {
+            continue;
+          }
 
-        offsetX = position.x - nearestX;
-        offsetZ = position.z - nearestZ;
-        distSq = offsetX * offsetX + offsetZ * offsetZ;
-        if (distSq < radiusSq) {
-          adjusted = true;
+          const nearestX = THREE.MathUtils.clamp(position.x, collider.minX, collider.maxX);
+          const nearestZ = THREE.MathUtils.clamp(position.z, collider.minZ, collider.maxZ);
+          let offsetX = position.x - nearestX;
+          let offsetZ = position.z - nearestZ;
+          let distSq = offsetX * offsetX + offsetZ * offsetZ;
+          if (distSq >= radiusSq - epsilon) {
+            continue;
+          }
+
+          if (distSq > epsilon) {
+            const dist = Math.sqrt(distSq);
+            const push = collisionRadius - dist + epsilon;
+            position.x += (offsetX / dist) * push;
+            position.z += (offsetZ / dist) * push;
+          } else {
+            const pushLeft = Math.abs(position.x - collider.minX);
+            const pushRight = Math.abs(collider.maxX - position.x);
+            const pushBack = Math.abs(position.z - collider.minZ);
+            const pushFront = Math.abs(collider.maxZ - position.z);
+            const smallest = Math.min(pushLeft, pushRight, pushBack, pushFront);
+            if (smallest === pushLeft) {
+              position.x = collider.minX - collisionRadius - epsilon;
+            } else if (smallest === pushRight) {
+              position.x = collider.maxX + collisionRadius + epsilon;
+            } else if (smallest === pushBack) {
+              position.z = collider.minZ - collisionRadius - epsilon;
+            } else {
+              position.z = collider.maxZ + collisionRadius + epsilon;
+            }
+          }
+
+          offsetX = position.x - nearestX;
+          offsetZ = position.z - nearestZ;
+          distSq = offsetX * offsetX + offsetZ * offsetZ;
+          if (distSq < radiusSq) {
+            adjusted = true;
+          }
         }
       }
 
@@ -14540,6 +14583,15 @@ export class GameRuntime {
           this.playerPosition.x,
           this.playerPosition.z
         );
+        const promoPlatforms = this.getNearbyPromoPlatformCandidates(
+          this.playerPosition.x,
+          this.playerPosition.z
+        );
+        if (promoPlatforms.length > 0) {
+          for (const promoPlatform of promoPlatforms) {
+            candidatePlatforms.push(promoPlatform);
+          }
+        }
         for (const p of candidatePlatforms) {
           const halfW = Math.max(0.1, Number(p.w) || 0) * 0.5 + 0.28;
           const halfD = Math.max(0.1, Number(p.d) || 0) * 0.5 + 0.28;
@@ -16327,9 +16379,9 @@ export class GameRuntime {
           this.platformEditorSize.d
         );
         const mat = new THREE.MeshStandardMaterial({
-          color: 0x00e5cc,
-          emissive: 0x00e5cc,
-          emissiveIntensity: 0.7,
+          color: 0xa7adb4,
+          emissive: 0x1e2328,
+          emissiveIntensity: 0.28,
           opacity: 0.42,
           transparent: true,
         });
@@ -16712,11 +16764,11 @@ export class GameRuntime {
   spawnPlatformMesh(p) {
     const geo = new THREE.BoxGeometry(p.w, p.h, p.d);
     const mat = new THREE.MeshStandardMaterial({
-      color: 0x00e5cc,
-      emissive: 0x00e5cc,
-      emissiveIntensity: 0.32,
-      roughness: 0.3,
-      metalness: 0.1,
+      color: 0xa7adb4,
+      emissive: 0x1e2328,
+      emissiveIntensity: 0.12,
+      roughness: 0.64,
+      metalness: 0.06,
     });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(p.x, p.y, p.z);
@@ -16839,6 +16891,32 @@ export class GameRuntime {
           candidates.push(platform);
         }
       }
+    }
+    return candidates;
+  }
+
+  getNearbyPromoPlatformCandidates(x, z) {
+    const candidates = this.promoPlatformCandidateBuffer;
+    candidates.length = 0;
+    if (!Array.isArray(this.promoCollisionBoxes) || this.promoCollisionBoxes.length === 0) {
+      return candidates;
+    }
+    const px = Number(x) || 0;
+    const pz = Number(z) || 0;
+    for (const collider of this.promoCollisionBoxes) {
+      const platform = collider?.platform;
+      if (!platform) {
+        continue;
+      }
+      const halfW = Math.max(0.1, Number(platform.w) || 0) * 0.5 + 0.9;
+      const halfD = Math.max(0.1, Number(platform.d) || 0) * 0.5 + 0.9;
+      if (
+        Math.abs(px - (Number(platform.x) || 0)) > halfW ||
+        Math.abs(pz - (Number(platform.z) || 0)) > halfD
+      ) {
+        continue;
+      }
+      candidates.push(platform);
     }
     return candidates;
   }
