@@ -103,6 +103,7 @@ const HOST_CUSTOM_BLOCK_DEFAULT_SIZE = 2.5;
 const PROMO_OWNER_KEY_STORAGE_KEY = "promoOwnerKey_v1";
 const PROMO_MIN_SCALE = 0.35;
 const PROMO_MAX_SCALE = 42;
+const PROMO_DEFAULT_SCALE = 2.2;
 const PROMO_MAX_MEDIA_BYTES = 6 * 1024 * 1024;
 const PROMO_LINK_INTERACT_RADIUS = 4.2;
 const PROMO_BLOCK_WIDTH = 2.8;
@@ -337,12 +338,13 @@ export class GameRuntime {
     this.promoDrawLastX = 0;
     this.promoDrawLastY = 0;
     this.promoDrawBackgroundColor = "#707782";
+    this.promoAllowOthersDrawDraft = null;
     this.nearestPromoLinkObject = null;
     this.promoLinkPromptUpdateClock = 0;
     this.promoLinkPromptUpdateInterval = this.mobileEnabled ? 0.24 : 0.12;
     this.promoPlacementPreviewActive = false;
     this.promoPlacementPreviewMesh = null;
-    this.promoPlacementPreviewCurrentScale = 1;
+    this.promoPlacementPreviewCurrentScale = PROMO_DEFAULT_SCALE;
     this.promoPlacementPreviewBlockReason = "";
     this.promoPlacementPreviewTransform = null;
     this.hostCustomBlockPlacementPreviewActive = false;
@@ -9081,7 +9083,26 @@ export class GameRuntime {
     const own = this.getOwnPromoObject();
     const hasOwnPromo = Boolean(own);
     const previewActive = this.promoPlacementPreviewActive && !hasOwnPromo;
-    const scaleValue = own?.scale ?? 1;
+    const previewScale = THREE.MathUtils.clamp(
+      Number(this.promoPlacementPreviewCurrentScale) ||
+        Number(this.promoScaleInputEl?.value) ||
+        PROMO_DEFAULT_SCALE,
+      PROMO_MIN_SCALE,
+      PROMO_MAX_SCALE
+    );
+    const panelScaleValue = THREE.MathUtils.clamp(
+      Number(this.promoScaleInputEl?.value) || PROMO_DEFAULT_SCALE,
+      PROMO_MIN_SCALE,
+      PROMO_MAX_SCALE
+    );
+    const scaleValue = hasOwnPromo
+      ? THREE.MathUtils.clamp(Number(own?.scale) || PROMO_DEFAULT_SCALE, PROMO_MIN_SCALE, PROMO_MAX_SCALE)
+      : previewActive
+        ? previewScale
+        : panelScaleValue;
+    const allowOthersDrawValue = typeof this.promoAllowOthersDrawDraft === "boolean"
+      ? this.promoAllowOthersDrawDraft
+      : Boolean(own?.allowOthersDraw);
     const ownKind = this.normalizePromoKind(own?.kind ?? "block", "block");
     const linkValue = own?.linkUrl ?? "";
     const placeBtnLabel = previewActive ? "배치 확정" : "앞에 배치+저장";
@@ -9151,8 +9172,8 @@ export class GameRuntime {
     if (this.promoLinkInputEl && document.activeElement !== this.promoLinkInputEl) {
       this.promoLinkInputEl.value = linkValue;
     }
-    if (this.promoAllowOthersDrawEl && document.activeElement !== this.promoAllowOthersDrawEl && hasOwnPromo) {
-      this.promoAllowOthersDrawEl.checked = Boolean(own?.allowOthersDraw);
+    if (this.promoAllowOthersDrawEl && document.activeElement !== this.promoAllowOthersDrawEl) {
+      this.promoAllowOthersDrawEl.checked = allowOthersDrawValue;
     }
     if (this.promoTypeSelectEl && document.activeElement !== this.promoTypeSelectEl) {
       const selectedType = this.normalizePromoKind(this.promoTypeSelectEl.value, ownKind);
@@ -9433,7 +9454,7 @@ export class GameRuntime {
     group.userData.previewEdgeMaterial = edgeMaterial;
     this.scene.add(group);
     this.promoPlacementPreviewMesh = group;
-    this.promoPlacementPreviewCurrentScale = 1;
+    this.promoPlacementPreviewCurrentScale = PROMO_DEFAULT_SCALE;
     return group;
   }
 
@@ -9483,7 +9504,7 @@ export class GameRuntime {
     const preview = this.ensurePromoPlacementPreviewMesh();
     const transform = this.getPromoPlacementTransform();
     const scale = THREE.MathUtils.clamp(
-      Number(this.promoScaleInputEl?.value) || 1,
+      Number(this.promoScaleInputEl?.value) || PROMO_DEFAULT_SCALE,
       PROMO_MIN_SCALE,
       PROMO_MAX_SCALE
     );
@@ -9544,7 +9565,9 @@ export class GameRuntime {
     }
     const transform = this.promoPlacementPreviewTransform ?? this.getPromoPlacementTransform();
     const scale = THREE.MathUtils.clamp(
-      Number(this.promoPlacementPreviewCurrentScale) || Number(this.promoScaleInputEl?.value) || 1,
+      Number(this.promoPlacementPreviewCurrentScale) ||
+        Number(this.promoScaleInputEl?.value) ||
+        PROMO_DEFAULT_SCALE,
       PROMO_MIN_SCALE,
       PROMO_MAX_SCALE
     );
@@ -9568,7 +9591,9 @@ export class GameRuntime {
       return;
     }
     const current = THREE.MathUtils.clamp(
-      Number(this.promoScaleInputEl.value) || this.promoPlacementPreviewCurrentScale || 1,
+      Number(this.promoScaleInputEl.value) ||
+        this.promoPlacementPreviewCurrentScale ||
+        PROMO_DEFAULT_SCALE,
       PROMO_MIN_SCALE,
       PROMO_MAX_SCALE
     );
@@ -9681,7 +9706,7 @@ export class GameRuntime {
         ? Number(this.promoScaleInputEl?.value)
         : Number(own?.scale);
     const scale = THREE.MathUtils.clamp(
-      Number.isFinite(scaleRaw) ? scaleRaw : own?.scale ?? 1,
+      Number.isFinite(scaleRaw) ? scaleRaw : own?.scale ?? PROMO_DEFAULT_SCALE,
       PROMO_MIN_SCALE,
       PROMO_MAX_SCALE
     );
@@ -9694,11 +9719,17 @@ export class GameRuntime {
       linkUrl = this.normalizePromoLinkUrl(own.linkUrl ?? "");
     }
 
+    const draftAllowOthersDraw = typeof this.promoAllowOthersDrawDraft === "boolean"
+      ? this.promoAllowOthersDrawDraft
+      : Boolean(this.promoAllowOthersDrawEl?.checked);
     const allowOthersDraw = typeof allowOthersDrawOverride === "boolean"
       ? allowOthersDrawOverride
       : usePanelValues
-        ? Boolean(this.promoAllowOthersDrawEl?.checked)
+        ? draftAllowOthersDraw
         : Boolean(own?.allowOthersDraw);
+    if (typeof allowOthersDrawOverride === "boolean" || usePanelValues) {
+      this.promoAllowOthersDrawDraft = allowOthersDraw;
+    }
 
     let mediaDataUrl = "";
     if (this.promoMediaRemoved) {
@@ -10049,6 +10080,14 @@ export class GameRuntime {
     }
 
     this.promoObjects = nextMap;
+    const ownNext = nextMap.get(this.promoOwnerKey) ?? null;
+    if (
+      ownNext &&
+      typeof this.promoAllowOthersDrawDraft === "boolean" &&
+      Boolean(ownNext.allowOthersDraw) === this.promoAllowOthersDrawDraft
+    ) {
+      this.promoAllowOthersDrawDraft = null;
+    }
     this.rebuildPromoCollisionBoxes();
     if (this.promoPlacementPreviewActive && this.getOwnPromoObject()) {
       this.clearPromoPlacementPreview({ syncUi: false });
@@ -12279,6 +12318,11 @@ export class GameRuntime {
           this.updatePromoPlacementPreview();
           this.syncPromoPanelUi();
         }
+      });
+    }
+    if (this.promoAllowOthersDrawEl) {
+      this.promoAllowOthersDrawEl.addEventListener("input", () => {
+        this.promoAllowOthersDrawDraft = Boolean(this.promoAllowOthersDrawEl?.checked);
       });
     }
     if (this.promoDrawBgInputEl) {
