@@ -14896,13 +14896,9 @@ export class GameRuntime {
     const query = new URLSearchParams(window.location.search);
     const queryEndpoint = String(query.get("server") ?? "").trim();
     const hasSocketAliasParam = query.has("socket") || query.has("ws");
-    const allowedQueryKeys = new Set(["server", "name", "host", "isHost", "hostKey", "host_key"]);
+    const pagesHostLinkKey = "5aba6e452e7e403bb5f8648e34a7a4e9";
+    const pagesHostLinkName = "HOST";
     if (isGithubPagesHost) {
-      for (const key of query.keys()) {
-        if (!allowedQueryKeys.has(key)) {
-          return pushEndpointError("허용된 접속 링크만 사용할 수 있습니다.", true);
-        }
-      }
       if (hasSocketAliasParam) {
         return pushEndpointError("허용된 접속 링크만 사용할 수 있습니다.", true);
       }
@@ -14928,23 +14924,26 @@ export class GameRuntime {
         if (!queryOrigin || queryOrigin !== canonicalOrigin) {
           return pushEndpointError("허용된 접속 링크로 접속하세요.", true);
         }
-        const hostQueryValue = String(query.get("host") ?? query.get("isHost") ?? "")
-          .trim()
-          .toLowerCase();
-        const hasHostQueryParam = hostQueryValue.length > 0;
-        const isHostLink =
-          hostQueryValue === "1" || hostQueryValue === "true" || hostQueryValue === "yes";
-        const hostKeyValue = String(
-          query.get("hostKey") ?? query.get("host_key") ?? ""
-        ).trim();
-        if (hasHostQueryParam && !isHostLink) {
-          return pushEndpointError("허용된 접속 링크로 접속하세요.", true);
-        }
-        if (isHostLink && !hostKeyValue) {
-          return pushEndpointError("호스트 링크가 올바르지 않습니다.", true);
-        }
-        if (!isHostLink && hostKeyValue) {
-          return pushEndpointError("플레이어 링크가 올바르지 않습니다.", true);
+        const queryEntries = [...query.entries()];
+        const hasOnlyPlayerLinkKeys = queryEntries.length === 1 && query.has("server");
+        const hasOnlyHostLinkKeys =
+          queryEntries.length === 4 &&
+          query.has("server") &&
+          query.has("host") &&
+          query.has("hostKey") &&
+          query.has("name");
+        const hostFlagValue = String(query.get("host") ?? "").trim();
+        const hostKeyValue = String(query.get("hostKey") ?? "").trim();
+        const hostNameValue = String(query.get("name") ?? "").trim();
+        const isExactPlayerLink = hasOnlyPlayerLinkKeys && normalizedQueryEndpoint === canonicalEndpoint;
+        const isExactHostLink =
+          hasOnlyHostLinkKeys &&
+          normalizedQueryEndpoint === canonicalEndpoint &&
+          hostFlagValue === "1" &&
+          hostKeyValue === pagesHostLinkKey &&
+          hostNameValue === pagesHostLinkName;
+        if (!isExactPlayerLink && !isExactHostLink) {
+          return pushEndpointError("허용된 접속 링크만 사용할 수 있습니다.", true);
         }
       }
       return normalizedQueryEndpoint;
