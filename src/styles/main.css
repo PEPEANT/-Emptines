@@ -1258,8 +1258,8 @@ canvas {
   width: 100%;
 }
 
+#surface-painter-fill,
 #surface-painter-eraser {
-  grid-column: 1 / span 2;
   min-height: 30px;
   border: 1px solid rgba(164, 204, 236, 0.64);
   border-radius: 6px;
@@ -1270,34 +1270,29 @@ canvas {
   cursor: pointer;
 }
 
+#surface-painter-eraser {
+  grid-column: 1 / span 2;
+}
+
+#surface-painter-fill {
+  grid-column: 3 / span 2;
+}
+
 #surface-painter-eraser.active {
   border-color: rgba(255, 214, 150, 0.92);
   background: rgba(67, 43, 13, 0.86);
   color: #ffe3b8;
 }
 
-.surface-painter-check {
-  grid-column: 3 / span 2;
-  justify-self: end;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: #bde1ff;
-  font: 700 0.64rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
-  letter-spacing: 0.04em;
-}
-
-.surface-painter-check input {
-  accent-color: #79cfff;
-}
-
 #surface-painter-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
 }
 
 #surface-painter-actions button {
+  flex: 0 0 auto;
   min-width: 86px;
   height: 34px;
   border: 1px solid rgba(169, 205, 236, 0.64);
@@ -2631,13 +2626,15 @@ body.is-mobile-ui #mobile-move-stick {
     padding-right: 2px;
   }
 
-  #surface-painter-eraser,
-  .surface-painter-check {
+  #surface-painter-fill,
+  #surface-painter-eraser {
     grid-column: 1 / -1;
     justify-self: stretch;
   }
 
   #surface-painter-actions {
+    display: flex;
+    flex-wrap: wrap;
     justify-content: stretch;
     position: sticky;
     bottom: 0;
@@ -2652,7 +2649,7 @@ body.is-mobile-ui #mobile-move-stick {
   }
 
   #surface-painter-actions button {
-    flex: 1;
+    flex: 1 1 calc(33.333% - 6px);
     min-width: 0;
     height: 32px;
     font-size: 0.64rem;
@@ -2750,6 +2747,7 @@ body.is-mobile-ui #surface-painter-size {
   max-width: 120px;
 }
 
+body.is-mobile-ui #surface-painter-fill,
 body.is-mobile-ui #surface-painter-eraser {
   grid-column: unset;
   justify-self: unset;
@@ -2758,13 +2756,6 @@ body.is-mobile-ui #surface-painter-eraser {
   height: 26px;
   padding: 0 9px;
   font-size: 0.56rem;
-}
-
-body.is-mobile-ui .surface-painter-check {
-  grid-column: unset;
-  justify-self: unset;
-  font-size: 0.54rem;
-  flex-shrink: 0;
 }
 
 /* ③ canvas row — fills all remaining space */
@@ -2781,9 +2772,9 @@ body.is-mobile-ui #surface-painter-canvas {
 /* ④ actions row — flex, 저장 prominent */
 body.is-mobile-ui #surface-painter-actions {
   grid-row: 4;
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 5px;
-  align-items: stretch;
   position: static;
   background: none;
   padding: 0;
@@ -2791,9 +2782,8 @@ body.is-mobile-ui #surface-painter-actions {
 }
 
 body.is-mobile-ui #surface-painter-actions button {
-  flex: 1;
   min-width: 0;
-  width: auto;
+  width: 100%;
   height: 40px;
   font-size: 0.6rem;
   letter-spacing: 0.04em;
@@ -2801,7 +2791,7 @@ body.is-mobile-ui #surface-painter-actions button {
 
 /* Save button: most prominent */
 body.is-mobile-ui #surface-painter-save {
-  flex: 2;
+  grid-column: span 2;
   background: rgba(14, 42, 66, 0.95);
   border-color: rgba(100, 184, 255, 0.7);
   color: #c4e4ff;
@@ -2810,7 +2800,7 @@ body.is-mobile-ui #surface-painter-save {
 
 /* Cancel: slightly wider than others */
 body.is-mobile-ui #surface-painter-cancel {
-  flex: 1.5;
+  grid-column: span 1;
 }
 
 body.mobile-portrait-lock #tool-ui,
@@ -2880,8 +2870,8 @@ body.mobile-portrait-lock #host-controls-toggle {
     padding-right: 2px;
   }
 
-  #surface-painter-eraser,
-  .surface-painter-check {
+  #surface-painter-fill,
+  #surface-painter-eraser {
     grid-column: 1 / -1;
     justify-self: stretch;
   }

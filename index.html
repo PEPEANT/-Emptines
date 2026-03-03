@@ -278,14 +278,13 @@
       </div>
       <div class="promo-panel-row">
         <label for="promo-scale">크기</label>
-        <input id="promo-scale" type="range" min="0.35" max="24" step="0.05" value="1" />
+        <input id="promo-scale" type="range" min="0.35" max="42" step="0.05" value="1" />
         <span id="promo-scale-value">1.00x</span>
       </div>
       <div class="promo-panel-row">
         <label for="promo-shape">타입</label>
         <select id="promo-shape">
           <option value="block">회색 오브젝트</option>
-          <option value="sign">표지판</option>
         </select>
         <span aria-hidden="true"></span>
       </div>
@@ -297,10 +296,6 @@
         placeholder="https://example.com (비워도 됨)"
         autocomplete="off"
       />
-      <label class="promo-panel-check" for="promo-allow-others-draw">
-        <input id="promo-allow-others-draw" type="checkbox" />
-        다른 플레이어 내 오브젝트 수정(그리기) 허용
-      </label>
       <label class="promo-panel-label" for="promo-draw-canvas">캔버스(네모 오브젝트 확장판)</label>
       <div id="promo-draw-wrap">
         <canvas id="promo-draw-canvas" width="1024" height="576" aria-label="홍보 오브젝트 캔버스"></canvas>
@@ -402,7 +397,7 @@
     </div>
 
     <div id="promo-link-prompt" class="hidden" aria-live="polite">
-      <span id="promo-link-prompt-text"><kbd>R</kbd> 사이트 열기</span>
+      <span id="promo-link-prompt-text">사이트 열기</span>
       <button id="promo-open-link-btn" type="button">열기</button>
     </div>
 
@@ -417,13 +412,14 @@
           <input id="surface-painter-size" type="range" min="2" max="28" step="1" value="8" />
           <label for="surface-painter-bg">배경</label>
           <input id="surface-painter-bg" type="color" value="#ffffff" />
+          <button id="surface-painter-fill" type="button">적용</button>
           <button id="surface-painter-eraser" type="button" aria-pressed="false">지우개</button>
-          <label class="surface-painter-check" for="surface-painter-apply-all">
-            <input id="surface-painter-apply-all" type="checkbox" />
-            전체면 적용
-          </label>
         </div>
         <div id="surface-painter-actions">
+          <button id="surface-painter-promo-reposition" class="hidden" type="button">재배치</button>
+          <button id="surface-painter-promo-remove" class="hidden" type="button">철거</button>
+          <button id="surface-painter-promo-scale-down" class="hidden" type="button">축소</button>
+          <button id="surface-painter-promo-scale-up" class="hidden" type="button">확대</button>
           <button id="surface-painter-export" type="button">PNG 내보내기</button>
           <button id="surface-painter-import" type="button">PNG 불러오기</button>
           <input id="surface-painter-import-file" class="hidden" type="file" accept=".png,image/png" />

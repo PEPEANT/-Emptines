@@ -88,6 +88,32 @@ function normalizeSurfaceId(rawValue) {
   return value;
 }
 
+function getPromoOwnerKeyFromSurfaceId(rawSurfaceId, promoMap = null) {
+  const surfaceId = normalizeSurfaceId(rawSurfaceId);
+  if (!surfaceId || !surfaceId.startsWith("po_")) {
+    return "";
+  }
+  const surfaceBaseId = String(surfaceId.split(":")[0] ?? "").trim();
+  if (!surfaceBaseId.startsWith("po_")) {
+    return "";
+  }
+
+  const rawOwnerKey = surfaceBaseId.slice(3);
+  const directOwnerKey = normalizePromoOwnerKey(rawOwnerKey);
+  const strippedOwnerKey = normalizePromoOwnerKey(rawOwnerKey.replace(/_q[0-3]$/i, ""));
+
+  if (promoMap instanceof Map) {
+    if (directOwnerKey && promoMap.has(directOwnerKey)) {
+      return directOwnerKey;
+    }
+    if (strippedOwnerKey && promoMap.has(strippedOwnerKey)) {
+      return strippedOwnerKey;
+    }
+  }
+
+  return strippedOwnerKey || directOwnerKey || "";
+}
+
 function normalizeSurfaceImageDataUrl(rawValue) {
   const value = String(rawValue ?? "").trim();
   if (!value || value.length > MAX_SURFACE_IMAGE_CHARS) {
@@ -334,7 +360,7 @@ function normalizePromoMediaDataUrl(rawValue) {
 function normalizePromoScale(rawValue, fallback = 1) {
   const parsed = Number(rawValue);
   const safe = Number.isFinite(parsed) ? parsed : Number(fallback) || 1;
-  return Math.max(0.35, Math.min(24, safe));
+  return Math.max(0.35, Math.min(42, safe));
 }
 
 function normalizePromoYaw(rawValue, fallback = 0) {
@@ -354,12 +380,12 @@ function normalizePromoAxis(rawValue, fallback = 0, min = -2000, max = 2000) {
   return Math.max(min, Math.min(max, safe));
 }
 
-function normalizePromoKind(rawValue, fallback = "block") {
+function normalizePromoKind(rawValue) {
   const value = String(rawValue ?? "").trim().toLowerCase();
-  if (value === "sign" || value === "block") {
-    return value;
+  if (value === "block") {
+    return "block";
   }
-  return String(fallback ?? "").trim().toLowerCase() === "sign" ? "sign" : "block";
+  return "block";
 }
 
 function getPromoPlacementBlockReason(x, z) {
@@ -825,7 +851,7 @@ export class RoomService {
       linkUrl: normalizePromoUrl(source.linkUrl ?? fallback?.linkUrl ?? ""),
       mediaDataUrl,
       mediaKind,
-      allowOthersDraw: Boolean(source.allowOthersDraw ?? fallback?.allowOthersDraw ?? false),
+      allowOthersDraw: false,
       updatedAt: Math.max(
         0,
         Math.trunc(Number(source.updatedAt) || Number(fallback?.updatedAt) || Date.now())
@@ -893,12 +919,7 @@ export class RoomService {
     const previous = map.get(targetOwnerKey) ?? null;
 
     if (targetOwnerKey !== actorKey) {
-      if (!previous) {
-        return { ok: false, error: "target not found" };
-      }
-      if (!previous.allowOthersDraw) {
-        return { ok: false, error: "owner denied edits" };
-      }
+      return { ok: false, error: "owner denied edits" };
     }
 
     const fallback = previous
@@ -971,7 +992,7 @@ export class RoomService {
     if (!previous) {
       return { ok: true, changed: false };
     }
-    if (targetOwnerKey !== actorKey && !previous.allowOthersDraw) {
+    if (targetOwnerKey !== actorKey) {
       return { ok: false, error: "owner denied edits" };
     }
     map.delete(targetOwnerKey);
@@ -1445,7 +1466,7 @@ export class RoomService {
     return list;
   }
 
-  setSurfacePaint(room, rawSurfaceId, rawImageDataUrl) {
+  setSurfacePaint(room, rawSurfaceId, rawImageDataUrl, actorOwnerKey = "") {
     if (!room) {
       return { ok: false, error: "room not found" };
     }
@@ -1458,6 +1479,18 @@ export class RoomService {
     const imageDataUrl = normalizeSurfaceImageDataUrl(rawImageDataUrl);
     if (!imageDataUrl) {
       return { ok: false, error: "invalid image data" };
+    }
+
+    const promoMap = this.getPromoObjectsMap(room);
+    const promoOwnerKey = getPromoOwnerKeyFromSurfaceId(surfaceId, promoMap);
+    if (promoOwnerKey) {
+      const actorKey = normalizePromoOwnerKey(actorOwnerKey);
+      if (!actorKey) {
+        return { ok: false, error: "invalid owner key" };
+      }
+      if (actorKey !== promoOwnerKey) {
+        return { ok: false, error: "owner denied edits" };
+      }
     }
 
     if (!room.surfacePaint || typeof room.surfacePaint.set !== "function") {

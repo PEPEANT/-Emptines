@@ -101,6 +101,8 @@ const HOST_CUSTOM_BLOCK_MIN_SIZE = 0.5;
 const HOST_CUSTOM_BLOCK_MAX_SIZE = 18;
 const HOST_CUSTOM_BLOCK_DEFAULT_SIZE = 2.5;
 const PROMO_OWNER_KEY_STORAGE_KEY = "promoOwnerKey_v1";
+const PROMO_MIN_SCALE = 0.35;
+const PROMO_MAX_SCALE = 42;
 const PROMO_MAX_MEDIA_BYTES = 6 * 1024 * 1024;
 const PROMO_LINK_INTERACT_RADIUS = 4.2;
 
@@ -333,6 +335,15 @@ export class GameRuntime {
     this.nearestPromoLinkObject = null;
     this.promoLinkPromptUpdateClock = 0;
     this.promoLinkPromptUpdateInterval = this.mobileEnabled ? 0.24 : 0.12;
+    this.promoPlacementPreviewActive = false;
+    this.promoPlacementPreviewMesh = null;
+    this.promoPlacementPreviewCurrentScale = 1;
+    this.promoPlacementPreviewBlockReason = "";
+    this.promoPlacementPreviewTransform = null;
+    this.hostCustomBlockPlacementPreviewActive = false;
+    this.hostCustomBlockPlacementPreviewMesh = null;
+    this.hostCustomBlockPlacementPreviewTargetId = "";
+    this.hostCustomBlockPlacementPreviewTransform = null;
     this.surfacePaintRaycaster = new THREE.Raycaster();
     this.surfacePaintAimPoint = new THREE.Vector2(0, 0);
     this.surfacePaintTarget = null;
@@ -353,8 +364,12 @@ export class GameRuntime {
     this.surfacePainterClearBtnEl = null;
     this.surfacePainterCancelBtnEl = null;
     this.surfacePainterSaveBtnEl = null;
+    this.surfacePainterPromoRepositionBtnEl = null;
+    this.surfacePainterPromoRemoveBtnEl = null;
+    this.surfacePainterPromoScaleDownBtnEl = null;
+    this.surfacePainterPromoScaleUpBtnEl = null;
     this.surfacePainterEraserBtnEl = null;
-    this.surfacePainterApplyAllEl = null;
+    this.surfacePainterFillBtnEl = null;
     this.surfacePainterOpen = false;
     this.surfacePainterDrawing = false;
     this.surfacePainterPointerId = null;
@@ -373,6 +388,7 @@ export class GameRuntime {
     this.socketEndpointLinkRequired = false;
     this.surfacePainterEraserEnabled = false;
     this.surfacePainterCanvasLoadNonce = 0;
+    this.surfacePainterCanvasBgColor = "#ffffff";
     this.surfacePaintProbeWorldPosition = new THREE.Vector3();
     this.surfacePaintProbeCameraLocal = new THREE.Vector3();
     this.surfacePaintProbeForwardVector = new THREE.Vector3();
@@ -609,8 +625,12 @@ export class GameRuntime {
     this.surfacePainterClearBtnEl = document.getElementById("surface-painter-clear");
     this.surfacePainterCancelBtnEl = document.getElementById("surface-painter-cancel");
     this.surfacePainterSaveBtnEl = document.getElementById("surface-painter-save");
+    this.surfacePainterPromoRepositionBtnEl = document.getElementById("surface-painter-promo-reposition");
+    this.surfacePainterPromoRemoveBtnEl = document.getElementById("surface-painter-promo-remove");
+    this.surfacePainterPromoScaleDownBtnEl = document.getElementById("surface-painter-promo-scale-down");
+    this.surfacePainterPromoScaleUpBtnEl = document.getElementById("surface-painter-promo-scale-up");
     this.surfacePainterEraserBtnEl = document.getElementById("surface-painter-eraser");
-    this.surfacePainterApplyAllEl = document.getElementById("surface-painter-apply-all");
+    this.surfacePainterFillBtnEl = document.getElementById("surface-painter-fill");
     this.surfacePainterContext = this.surfacePainterCanvasEl?.getContext?.("2d") ?? null;
     this.promoPanelEl = document.getElementById("promo-panel");
     this.promoPanelCloseBtnEl = document.getElementById("promo-panel-close");
@@ -4738,24 +4758,34 @@ export class GameRuntime {
     return `po_${safeOwnerKey}`;
   }
 
-  getPromoPaintSurfaceId(ownerKey = "") {
+  getPromoPaintSurfaceId(ownerKey = "", surfaceSuffix = "") {
     const baseId = this.getPromoPaintSurfaceBaseId(ownerKey);
     if (!baseId) {
       return "";
     }
-    return `${baseId}:pz`;
+    const suffix = String(surfaceSuffix ?? "")
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]/g, "")
+      .slice(0, 24);
+    const scopedBaseId = suffix ? `${baseId}_${suffix}` : baseId;
+    return `${scopedBaseId}:pz`;
   }
 
-  registerPromoPaintSurface(mesh, ownerKey, width = 2.6, height = 1.5) {
+  registerPromoPaintSurface(mesh, ownerKey, width = 2.6, height = 1.5, surfaceSuffix = "") {
     if (!mesh) {
       return "";
     }
     const baseId = this.getPromoPaintSurfaceBaseId(ownerKey);
-    const surfaceId = this.getPromoPaintSurfaceId(ownerKey);
+    const suffix = String(surfaceSuffix ?? "")
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]/g, "")
+      .slice(0, 24);
+    const scopedBaseId = suffix ? `${baseId}_${suffix}` : baseId;
+    const surfaceId = this.getPromoPaintSurfaceId(ownerKey, suffix);
     if (!baseId || !surfaceId) {
       return "";
     }
-    mesh.userData.paintSurfaceBaseId = baseId;
+    mesh.userData.paintSurfaceBaseId = scopedBaseId;
     mesh.userData.paintPreferredFace = "pz";
     if (!this.paintableSurfaceMeshes.includes(mesh)) {
       this.paintableSurfaceMeshes.push(mesh);
@@ -5111,7 +5141,11 @@ export class GameRuntime {
     const canvas = this.surfacePainterCanvasEl;
     // Cancel any in-flight image restore from a previous open/clear cycle.
     const loadNonce = ++this.surfacePainterCanvasLoadNonce;
-    const bgColor = String(this.surfacePainterBgColorInputEl?.value ?? "#ffffff");
+    const bgColor = this.normalizeSurfacePainterColor(
+      this.surfacePainterBgColorInputEl?.value,
+      "#ffffff"
+    );
+    this.surfacePainterCanvasBgColor = bgColor;
     context.save();
     context.globalCompositeOperation = "source-over";
     context.globalAlpha = 1;
@@ -5131,6 +5165,108 @@ export class GameRuntime {
       context.drawImage(image, 0, 0, canvas.width, canvas.height);
     };
     image.src = imageDataUrl;
+  }
+
+  normalizeSurfacePainterColor(rawValue, fallback = "#ffffff") {
+    const value = String(rawValue ?? "").trim().toLowerCase();
+    if (/^#[0-9a-f]{6}$/.test(value)) {
+      return value;
+    }
+    if (/^#[0-9a-f]{3}$/.test(value)) {
+      return `#${value[1]}${value[1]}${value[2]}${value[2]}${value[3]}${value[3]}`;
+    }
+    const safeFallback = String(fallback ?? "").trim().toLowerCase();
+    if (/^#[0-9a-f]{6}$/.test(safeFallback)) {
+      return safeFallback;
+    }
+    return "#ffffff";
+  }
+
+  getSurfacePainterColorRgb(rawColor, fallback = "#ffffff") {
+    const normalized = this.normalizeSurfacePainterColor(rawColor, fallback);
+    return {
+      r: parseInt(normalized.slice(1, 3), 16),
+      g: parseInt(normalized.slice(3, 5), 16),
+      b: parseInt(normalized.slice(5, 7), 16)
+    };
+  }
+
+  applySurfacePainterBackgroundColor() {
+    if (!this.surfacePainterOpen || !this.surfacePainterCanvasEl) {
+      return;
+    }
+    if (!this.surfacePainterContext) {
+      this.surfacePainterContext = this.surfacePainterCanvasEl.getContext("2d");
+    }
+    const context = this.surfacePainterContext;
+    if (!context) {
+      return;
+    }
+
+    const nextColor = this.normalizeSurfacePainterColor(
+      this.surfacePainterBgColorInputEl?.value,
+      this.surfacePainterCanvasBgColor || "#ffffff"
+    );
+    const previousColor = this.normalizeSurfacePainterColor(
+      this.surfacePainterCanvasBgColor,
+      "#ffffff"
+    );
+    if (nextColor === previousColor) {
+      return;
+    }
+
+    // Background color changes should apply immediately while preserving drawn strokes.
+    this.surfacePainterCanvasLoadNonce += 1;
+    const canvas = this.surfacePainterCanvasEl;
+    const previousRgb = this.getSurfacePainterColorRgb(previousColor, "#ffffff");
+    const nextRgb = this.getSurfacePainterColorRgb(nextColor, previousColor);
+    try {
+      const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+      for (let index = 0; index < data.length; index += 4) {
+        const alpha = data[index + 3];
+        if (
+          alpha === 255 &&
+          data[index] === previousRgb.r &&
+          data[index + 1] === previousRgb.g &&
+          data[index + 2] === previousRgb.b
+        ) {
+          data[index] = nextRgb.r;
+          data[index + 1] = nextRgb.g;
+          data[index + 2] = nextRgb.b;
+        }
+      }
+      context.putImageData(imageData, 0, 0);
+    } catch {
+      // getImageData can fail on tainted canvas; keep editor usable.
+    }
+    this.surfacePainterCanvasBgColor = nextColor;
+  }
+
+  fillSurfacePainterWithBrushColor() {
+    if (!this.surfacePainterOpen || !this.surfacePainterCanvasEl) {
+      return;
+    }
+    if (!this.surfacePainterContext) {
+      this.surfacePainterContext = this.surfacePainterCanvasEl.getContext("2d");
+    }
+    const context = this.surfacePainterContext;
+    if (!context) {
+      return;
+    }
+    const canvas = this.surfacePainterCanvasEl;
+    const fillColor = this.normalizeSurfacePainterColor(
+      this.surfacePainterColorInputEl?.value,
+      "#111111"
+    );
+    this.surfacePainterCanvasLoadNonce += 1;
+    context.save();
+    context.globalCompositeOperation = "source-over";
+    context.globalAlpha = 1;
+    context.fillStyle = fillColor;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.restore();
+    this.surfacePainterCanvasBgColor = fillColor;
   }
 
   getSurfacePainterPngFilename(surfaceId = "") {
@@ -5256,9 +5392,6 @@ export class GameRuntime {
     this.surfacePainterSaveInFlight = false;
     this.updateSurfacePainterSaveAvailability();
     this.setSurfacePainterEraserEnabled(false);
-    if (this.surfacePainterApplyAllEl) {
-      this.surfacePainterApplyAllEl.checked = false;
-    }
     if (this.surfacePainterTitleEl) {
       this.surfacePainterTitleEl.textContent = this.getSurfacePainterTitle(normalizedId);
     }
@@ -5364,22 +5497,7 @@ export class GameRuntime {
       }
       return targetIds.length > 0 ? targetIds : [normalized];
     }
-    if (!this.surfacePainterApplyAllEl?.checked) {
-      return [normalized];
-    }
-    const separatorIndex = normalized.indexOf(":");
-    if (separatorIndex <= 0) {
-      return [normalized];
-    }
-    const baseId = normalized.slice(0, separatorIndex);
-    const targetIds = [];
-    for (const faceKey of BOX_FACE_KEYS) {
-      const faceId = `${baseId}:${faceKey}`;
-      if (this.paintableSurfaceMap.has(faceId)) {
-        targetIds.push(faceId);
-      }
-    }
-    return targetIds.length > 0 ? targetIds : [normalized];
+    return [normalized];
   }
 
   getSurfacePainterBrushSize() {
@@ -5587,9 +5705,99 @@ export class GameRuntime {
     return Boolean(this.socket && this.networkConnected && this.socketEndpoint);
   }
 
+  getSurfacePainterPromoOwnerKey(surfaceId = this.surfacePainterTargetId) {
+    const normalized = String(surfaceId ?? "").trim();
+    if (!normalized.startsWith("po_")) {
+      return "";
+    }
+    const baseId = normalized.split(":")[0] ?? "";
+    if (!baseId.startsWith("po_")) {
+      return "";
+    }
+    const ownerWithSuffix = baseId.slice(3);
+    return ownerWithSuffix.replace(/_q[0-3]$/i, "");
+  }
+
+  getSurfacePainterPromoTarget() {
+    const ownerKey = this.getSurfacePainterPromoOwnerKey();
+    if (!ownerKey) {
+      return null;
+    }
+    return this.promoObjects.get(ownerKey) ?? null;
+  }
+
+  getSurfacePainterPromoBlockedReason() {
+    const ownerKey = this.getSurfacePainterPromoOwnerKey();
+    if (!ownerKey) {
+      return "홍보 오브젝트 표면에서만 사용 가능합니다.";
+    }
+    if (ownerKey !== String(this.promoOwnerKey ?? "")) {
+      return "내 오브젝트에서만 사용할 수 있습니다.";
+    }
+    if (!(this.socket && this.networkConnected)) {
+      return "서버 연결 후 사용 가능합니다.";
+    }
+    if (this.promoSetInFlight || this.promoRemoveInFlight) {
+      return "오브젝트 반영 중입니다.";
+    }
+    return "";
+  }
+
+  requestPromoRepositionFromSurfacePainter() {
+    const blockedReason = this.getSurfacePainterPromoBlockedReason();
+    if (blockedReason) {
+      this.appendChatLine("", blockedReason, "system");
+      return;
+    }
+    this.requestPromoUpsert({ placeInFront: true, preserveExistingStyle: true });
+  }
+
+  requestPromoRemoveFromSurfacePainter() {
+    const blockedReason = this.getSurfacePainterPromoBlockedReason();
+    if (blockedReason) {
+      this.appendChatLine("", blockedReason, "system");
+      return;
+    }
+    this.closeSurfacePainter();
+    this.requestPromoRemove();
+  }
+
+  requestPromoScaleFromSurfacePainter(delta = 0) {
+    const blockedReason = this.getSurfacePainterPromoBlockedReason();
+    if (blockedReason) {
+      this.appendChatLine("", blockedReason, "system");
+      return;
+    }
+    const target = this.getSurfacePainterPromoTarget();
+    if (!target) {
+      return;
+    }
+    const step = Number(delta);
+    if (!Number.isFinite(step) || Math.abs(step) < 0.0001) {
+      return;
+    }
+    const nextScale = THREE.MathUtils.clamp(
+      (Number(target.scale) || 1) + step,
+      PROMO_MIN_SCALE,
+      PROMO_MAX_SCALE
+    );
+    if (Math.abs(nextScale - (Number(target.scale) || 1)) < 0.0001) {
+      return;
+    }
+    this.requestPromoUpsert({
+      placeInFront: false,
+      preserveExistingStyle: true,
+      scaleOverride: nextScale
+    });
+  }
+
   getSurfacePaintSaveBlockedReason() {
     if (this.surfacePainterSaveInFlight) {
       return "그림 저장 중입니다.";
+    }
+    const promoOwnerKey = this.getSurfacePainterPromoOwnerKey();
+    if (promoOwnerKey && promoOwnerKey !== String(this.promoOwnerKey ?? "")) {
+      return "다른 플레이어 오브젝트는 수정할 수 없습니다.";
     }
     if (!this.socketEndpoint) {
       const endpointError = String(this.socketEndpointValidationError ?? "").trim();
@@ -5621,6 +5829,31 @@ export class GameRuntime {
       this.surfacePainterSaveBtnEl.title = blockedReason;
     } else {
       this.surfacePainterSaveBtnEl.removeAttribute("title");
+    }
+
+    const promoButtons = [
+      this.surfacePainterPromoRepositionBtnEl,
+      this.surfacePainterPromoRemoveBtnEl,
+      this.surfacePainterPromoScaleDownBtnEl,
+      this.surfacePainterPromoScaleUpBtnEl
+    ];
+    const promoOwnerKey = this.getSurfacePainterPromoOwnerKey();
+    const showPromoButtons =
+      this.surfacePainterOpen &&
+      Boolean(promoOwnerKey) &&
+      promoOwnerKey === String(this.promoOwnerKey ?? "");
+    const promoBlockedReason = this.getSurfacePainterPromoBlockedReason();
+    for (const button of promoButtons) {
+      if (!button) {
+        continue;
+      }
+      button.classList.toggle("hidden", !showPromoButtons);
+      button.disabled = Boolean(promoBlockedReason);
+      if (promoBlockedReason) {
+        button.title = promoBlockedReason;
+      } else {
+        button.removeAttribute("title");
+      }
     }
   }
 
@@ -7972,6 +8205,9 @@ export class GameRuntime {
 
   syncHostControls() {
     const hasHostPrivilege = this.hasHostPrivilege();
+    if (!hasHostPrivilege && this.hostCustomBlockPlacementPreviewActive) {
+      this.clearHostCustomBlockPlacementPreview({ syncUi: false });
+    }
     const visible = this.hubFlowEnabled && hasHostPrivilege;
     const canHostUseChat = this.canUseHostChatShortcut();
     const chatEnabled = this.canUseChatControls();
@@ -8100,7 +8336,9 @@ export class GameRuntime {
     }
     const hostCustomTotal = this.getHostCustomPaintBlockEntries().length;
     const hostCustomAvailable = this.getHostCustomPaintBlockAvailableCount();
-    const hostCustomDisabled = controlsBusy || hostCustomAvailable <= 0;
+    const hostCustomPreviewActive = this.hostCustomBlockPlacementPreviewActive;
+    const hostCustomDisabled =
+      controlsBusy || (hostCustomAvailable <= 0 && !hostCustomPreviewActive);
     if (this.hostGrayObjectWidthInputEl) {
       this.hostGrayObjectWidthInputEl.disabled = controlsBusy;
     }
@@ -8111,7 +8349,9 @@ export class GameRuntime {
       this.hostGrayObjectDepthInputEl.disabled = controlsBusy;
     }
     if (this.hostGrayObjectAddBtnEl) {
-      const nextLabel = `앞에 오브젝트 추가 (${hostCustomAvailable}/${hostCustomTotal})`;
+      const nextLabel = hostCustomPreviewActive
+        ? `오브젝트 배치 확정 (${hostCustomAvailable}/${hostCustomTotal})`
+        : `앞에 오브젝트 추가 (${hostCustomAvailable}/${hostCustomTotal})`;
       if (this.hostGrayObjectAddBtnEl.textContent !== nextLabel) {
         this.hostGrayObjectAddBtnEl.textContent = nextLabel;
       }
@@ -8362,12 +8602,9 @@ export class GameRuntime {
     }
   }
 
-  normalizePromoKind(rawValue, fallback = "block") {
-    const value = String(rawValue ?? "").trim().toLowerCase();
-    if (value === "sign" || value === "block") {
-      return value;
-    }
-    return String(fallback ?? "").trim().toLowerCase() === "sign" ? "sign" : "block";
+  normalizePromoKind(_rawValue, _fallback = "block") {
+    // Promo object shape is intentionally fixed to a clean gray block.
+    return "block";
   }
 
   normalizePromoYaw(rawValue, fallback = 0) {
@@ -8410,7 +8647,7 @@ export class GameRuntime {
       y: THREE.MathUtils.clamp(Number(rawValue.y) || 0, -100, 400),
       z: THREE.MathUtils.clamp(Number(rawValue.z) || 0, -2000, 2000),
       yaw: this.normalizePromoYaw(rawValue.yaw, 0),
-      scale: THREE.MathUtils.clamp(Number(rawValue.scale) || 1, 0.35, 24),
+      scale: THREE.MathUtils.clamp(Number(rawValue.scale) || 1, PROMO_MIN_SCALE, PROMO_MAX_SCALE),
       linkUrl: this.normalizePromoLinkUrl(rawValue.linkUrl ?? ""),
       mediaDataUrl: hasMediaData ? mediaDataUrl : "",
       mediaKind,
@@ -8779,12 +9016,12 @@ export class GameRuntime {
     const busy = this.promoSetInFlight || this.promoRemoveInFlight;
     const own = this.getOwnPromoObject();
     const hasOwnPromo = Boolean(own);
+    const previewActive = this.promoPlacementPreviewActive && !hasOwnPromo;
     const scaleValue = own?.scale ?? 1;
     const ownKind = this.normalizePromoKind(own?.kind ?? "block", "block");
     const linkValue = own?.linkUrl ?? "";
-    const allowOthersDraw = own?.allowOthersDraw ?? false;
-    const placeBtnLabel = "앞에 배치+저장";
-    const mobilePromoLabel = "배치";
+    const placeBtnLabel = previewActive ? "배치 확정" : "앞에 배치+저장";
+    const mobilePromoLabel = previewActive ? "확정" : "배치";
     const prefersTouchUi =
       typeof window !== "undefined" &&
       typeof window.matchMedia === "function" &&
@@ -8844,9 +9081,6 @@ export class GameRuntime {
     if (this.promoTypeSelectEl && document.activeElement !== this.promoTypeSelectEl) {
       const selectedType = this.normalizePromoKind(this.promoTypeSelectEl.value, ownKind);
       this.promoTypeSelectEl.value = hasOwnPromo ? ownKind : selectedType;
-    }
-    if (this.promoAllowOthersDrawEl) {
-      this.promoAllowOthersDrawEl.checked = allowOthersDraw;
     }
     if (this.promoDrawBgInputEl && document.activeElement !== this.promoDrawBgInputEl) {
       this.promoDrawBgInputEl.value = this.normalizePromoDrawBackgroundColor(
@@ -8928,6 +9162,15 @@ export class GameRuntime {
       this.setPromoPanelStatus("서버 연결 후 사용 가능");
     } else if (busy) {
       this.setPromoPanelStatus("홍보 오브젝트 동기화 중...");
+    } else if (previewActive) {
+      const blockReasonMessage = this.getPromoPlacementBlockReasonMessage(
+        this.promoPlacementPreviewBlockReason
+      );
+      if (blockReasonMessage) {
+        this.setPromoPanelStatus(`배치 불가: ${blockReasonMessage}`);
+      } else {
+        this.setPromoPanelStatus("배치 미리보기 중 · 휠/크기 조절 후 배치 확정");
+      }
     } else if (own) {
       this.setPromoPanelStatus("내 오브젝트 배치됨 · Y로 위치 이동 · 가까이서 수정 가능");
     } else {
@@ -9060,6 +9303,221 @@ export class GameRuntime {
       : "";
   }
 
+  getPromoPlacementBlockReasonMessage(blockReason = "") {
+    const reason = String(blockReason ?? "").trim().toLowerCase();
+    if (reason === "spawn") {
+      return "스폰지점에는 설치가 불가능합니다";
+    }
+    if (reason === "bridge") {
+      return "다리 위에는 설치가 불가능합니다";
+    }
+    return "";
+  }
+
+  ensurePromoPlacementPreviewMesh() {
+    if (this.promoPlacementPreviewMesh) {
+      return this.promoPlacementPreviewMesh;
+    }
+
+    const bodyWidth = 2.7;
+    const bodyHeight = 1.75;
+    const bodyDepth = 0.46;
+    const panelWidth = bodyWidth * 0.86;
+    const panelHeight = bodyHeight * 0.74;
+
+    const group = new THREE.Group();
+    const bodyMaterial = new THREE.MeshStandardMaterial({
+      color: 0x31ff9d,
+      emissive: 0x31ff9d,
+      emissiveIntensity: 0.48,
+      transparent: true,
+      opacity: 0.3,
+      depthWrite: false,
+      roughness: 0.56,
+      metalness: 0.06
+    });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(bodyWidth, bodyHeight, bodyDepth), bodyMaterial);
+    body.renderOrder = 26;
+    body.castShadow = false;
+    body.receiveShadow = false;
+
+    const panelMaterial = new THREE.MeshBasicMaterial({
+      color: 0x31ff9d,
+      transparent: true,
+      opacity: 0.26,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      toneMapped: false
+    });
+    const panel = new THREE.Mesh(new THREE.PlaneGeometry(panelWidth, panelHeight), panelMaterial);
+    panel.position.set(0, 0, bodyDepth * 0.5 + 0.014);
+    panel.renderOrder = 27;
+
+    const edgeMaterial = new THREE.LineBasicMaterial({
+      color: 0xcaffea,
+      transparent: true,
+      opacity: 0.95,
+      toneMapped: false
+    });
+    const edges = new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(bodyWidth, bodyHeight, bodyDepth)),
+      edgeMaterial
+    );
+    edges.renderOrder = 28;
+
+    group.add(body, panel, edges);
+    group.visible = false;
+    group.userData.previewBodyMaterial = bodyMaterial;
+    group.userData.previewPanelMaterial = panelMaterial;
+    group.userData.previewEdgeMaterial = edgeMaterial;
+    this.scene.add(group);
+    this.promoPlacementPreviewMesh = group;
+    this.promoPlacementPreviewCurrentScale = 1;
+    return group;
+  }
+
+  setPromoPlacementPreviewTint(blocked = false) {
+    const preview = this.promoPlacementPreviewMesh;
+    if (!preview) {
+      return;
+    }
+    const bodyMaterial = preview.userData.previewBodyMaterial;
+    const panelMaterial = preview.userData.previewPanelMaterial;
+    const edgeMaterial = preview.userData.previewEdgeMaterial;
+    const baseColor = blocked ? 0xff5f72 : 0x31ff9d;
+    const edgeColor = blocked ? 0xffd2d8 : 0xcaffea;
+
+    bodyMaterial?.color?.setHex?.(baseColor);
+    bodyMaterial?.emissive?.setHex?.(baseColor);
+    panelMaterial?.color?.setHex?.(baseColor);
+    edgeMaterial?.color?.setHex?.(edgeColor);
+  }
+
+  clearPromoPlacementPreview({ syncUi = true } = {}) {
+    this.promoPlacementPreviewActive = false;
+    this.promoPlacementPreviewBlockReason = "";
+    this.promoPlacementPreviewTransform = null;
+    if (this.promoPlacementPreviewMesh) {
+      this.promoPlacementPreviewMesh.visible = false;
+    }
+    if (syncUi) {
+      this.syncPromoPanelUi();
+    }
+  }
+
+  updatePromoPlacementPreview() {
+    if (!this.promoPlacementPreviewActive) {
+      if (this.promoPlacementPreviewMesh) {
+        this.promoPlacementPreviewMesh.visible = false;
+      }
+      return;
+    }
+    if (!(this.socket && this.networkConnected)) {
+      this.clearPromoPlacementPreview({ syncUi: true });
+      return;
+    }
+    if (this.getOwnPromoObject()) {
+      this.clearPromoPlacementPreview({ syncUi: true });
+      return;
+    }
+
+    const preview = this.ensurePromoPlacementPreviewMesh();
+    const transform = this.getPromoPlacementTransform();
+    const scale = THREE.MathUtils.clamp(
+      Number(this.promoScaleInputEl?.value) || 1,
+      PROMO_MIN_SCALE,
+      PROMO_MAX_SCALE
+    );
+    const blockReason = this.getPromoPlacementBlockReason(transform);
+    this.promoPlacementPreviewCurrentScale = scale;
+    this.promoPlacementPreviewBlockReason = blockReason;
+    this.promoPlacementPreviewTransform = transform;
+
+    const bodyHeight = 1.75 * scale;
+    preview.position.set(transform.x, transform.y + bodyHeight * 0.5, transform.z);
+    preview.rotation.set(0, this.normalizePromoYaw(transform.yaw, 0), 0);
+    preview.scale.set(scale, scale, scale);
+    preview.visible = true;
+    this.setPromoPlacementPreviewTint(Boolean(blockReason));
+  }
+
+  beginPromoPlacementPreview() {
+    if (this.getOwnPromoObject()) {
+      return false;
+    }
+    if (this.promoPlacementPreviewActive) {
+      return true;
+    }
+    this.promoPlacementPreviewActive = true;
+    this.promoPlacementPreviewBlockReason = "";
+    this.promoPlacementPreviewTransform = null;
+    this.ensurePromoPlacementPreviewMesh();
+    this.updatePromoPlacementPreview();
+    this.syncPromoPanelUi();
+    this.appendChatLine(
+      "",
+      "배치 미리보기 시작: 휠(PC)/크기 슬라이더(모바일) 조절 후 배치 버튼으로 확정",
+      "system"
+    );
+    return true;
+  }
+
+  confirmPromoPlacementPreview() {
+    if (!this.promoPlacementPreviewActive) {
+      return false;
+    }
+    this.updatePromoPlacementPreview();
+    const blockReason = this.promoPlacementPreviewBlockReason;
+    if (blockReason) {
+      const message = this.getPromoPlacementBlockReasonMessage(blockReason);
+      if (message) {
+        this.appendChatLine("", message, "system");
+      }
+      this.syncPromoPanelUi();
+      return true;
+    }
+    const transform = this.promoPlacementPreviewTransform ?? this.getPromoPlacementTransform();
+    const scale = THREE.MathUtils.clamp(
+      Number(this.promoPlacementPreviewCurrentScale) || Number(this.promoScaleInputEl?.value) || 1,
+      PROMO_MIN_SCALE,
+      PROMO_MAX_SCALE
+    );
+    this.clearPromoPlacementPreview({ syncUi: true });
+    this.requestPromoUpsert({
+      placeInFront: false,
+      preserveExistingStyle: true,
+      scaleOverride: scale,
+      transformOverride: transform,
+      skipPlacementPreview: true
+    });
+    return true;
+  }
+
+  adjustPromoPlacementPreviewScale(delta = 0) {
+    if (!this.promoScaleInputEl) {
+      return;
+    }
+    const step = Number(delta);
+    if (!Number.isFinite(step) || Math.abs(step) < 0.0001) {
+      return;
+    }
+    const current = THREE.MathUtils.clamp(
+      Number(this.promoScaleInputEl.value) || this.promoPlacementPreviewCurrentScale || 1,
+      PROMO_MIN_SCALE,
+      PROMO_MAX_SCALE
+    );
+    const next = THREE.MathUtils.clamp(current + step, PROMO_MIN_SCALE, PROMO_MAX_SCALE);
+    if (Math.abs(next - current) < 0.0001) {
+      return;
+    }
+    this.promoScaleInputEl.value = next.toFixed(2);
+    if (this.promoScaleValueEl) {
+      this.promoScaleValueEl.textContent = `${next.toFixed(2)}x`;
+    }
+    this.promoPlacementPreviewCurrentScale = next;
+    this.updatePromoPlacementPreview();
+  }
+
   requestPlatformState() {
     if (!(this.socket && this.networkConnected)) {
       return;
@@ -9088,7 +9546,14 @@ export class GameRuntime {
     this.socket.emit("promo:state:request");
   }
 
-  requestPromoUpsert({ placeInFront = false, placeAtCenter = false, preserveExistingStyle = false } = {}) {
+  requestPromoUpsert({
+    placeInFront = false,
+    placeAtCenter = false,
+    preserveExistingStyle = false,
+    scaleOverride = null,
+    transformOverride = null,
+    skipPlacementPreview = false
+  } = {}) {
     if (!(this.socket && this.networkConnected)) {
       this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
       return;
@@ -9098,8 +9563,27 @@ export class GameRuntime {
     }
 
     const own = this.getOwnPromoObject();
+    if (!own && placeInFront && !placeAtCenter && !skipPlacementPreview) {
+      if (!this.promoPlacementPreviewActive) {
+        this.beginPromoPlacementPreview();
+      } else {
+        this.confirmPromoPlacementPreview();
+      }
+      return;
+    }
+    if (own && this.promoPlacementPreviewActive) {
+      this.clearPromoPlacementPreview({ syncUi: false });
+    }
+
     let transform = null;
-    if (placeAtCenter) {
+    if (transformOverride && typeof transformOverride === "object") {
+      transform = {
+        x: Number(transformOverride.x),
+        y: Number(transformOverride.y),
+        z: Number(transformOverride.z),
+        yaw: this.normalizePromoYaw(transformOverride.yaw, 0)
+      };
+    } else if (placeAtCenter) {
       transform = this.getPromoCenterPlacementTransform();
     } else if (placeInFront || !own) {
       transform = this.getPromoPlacementTransform();
@@ -9117,16 +9601,23 @@ export class GameRuntime {
       Math.abs(Number(transform.x) - Number(own.x)) > 0.001 ||
       Math.abs(Number(transform.z) - Number(own.z)) > 0.001;
     if (blockReason && hasPositionChange) {
-      const reasonMessage =
-        blockReason === "spawn"
-          ? "스폰지점에는 설치가 불가능합니다"
-          : "다리 위에는 설치가 불가능합니다";
+      const reasonMessage = this.getPromoPlacementBlockReasonMessage(blockReason);
       this.appendChatLine("", reasonMessage, "system");
       return;
     }
     const usePanelValues = !(preserveExistingStyle && own);
-    const scaleRaw = usePanelValues ? Number(this.promoScaleInputEl?.value) : Number(own?.scale);
-    const scale = THREE.MathUtils.clamp(Number.isFinite(scaleRaw) ? scaleRaw : own?.scale ?? 1, 0.35, 24);
+    const scaleOverrideValue = Number(scaleOverride);
+    const hasScaleOverride = Number.isFinite(scaleOverrideValue);
+    const scaleRaw = hasScaleOverride
+      ? scaleOverrideValue
+      : usePanelValues
+        ? Number(this.promoScaleInputEl?.value)
+        : Number(own?.scale);
+    const scale = THREE.MathUtils.clamp(
+      Number.isFinite(scaleRaw) ? scaleRaw : own?.scale ?? 1,
+      PROMO_MIN_SCALE,
+      PROMO_MAX_SCALE
+    );
     const kind = usePanelValues
       ? this.normalizePromoKind(this.promoTypeSelectEl?.value ?? own?.kind ?? "block", own?.kind ?? "block")
       : this.normalizePromoKind(own?.kind ?? "block", "block");
@@ -9136,9 +9627,7 @@ export class GameRuntime {
       linkUrl = this.normalizePromoLinkUrl(own.linkUrl ?? "");
     }
 
-    const allowOthersDraw = usePanelValues
-      ? Boolean(this.promoAllowOthersDrawEl?.checked ?? own?.allowOthersDraw ?? false)
-      : Boolean(own?.allowOthersDraw ?? false);
+    const allowOthersDraw = false;
 
     let mediaDataUrl = "";
     if (this.promoMediaRemoved) {
@@ -9228,7 +9717,13 @@ export class GameRuntime {
     if (!visual) {
       return;
     }
-    this.unregisterPromoPaintSurface(visual.paintSurfaceId, visual.paintSurfaceMesh);
+    if (Array.isArray(visual.paintSurfaceEntries) && visual.paintSurfaceEntries.length > 0) {
+      for (const entry of visual.paintSurfaceEntries) {
+        this.unregisterPromoPaintSurface(entry?.surfaceId, entry?.mesh);
+      }
+    } else {
+      this.unregisterPromoPaintSurface(visual.paintSurfaceId, visual.paintSurfaceMesh);
+    }
     if (visual.videoEl) {
       try {
         visual.videoEl.pause();
@@ -9299,7 +9794,7 @@ export class GameRuntime {
   }
 
   createPromoBlockVisual(entry) {
-    const safeScale = THREE.MathUtils.clamp(Number(entry.scale) || 1, 0.35, 24);
+    const safeScale = THREE.MathUtils.clamp(Number(entry.scale) || 1, PROMO_MIN_SCALE, PROMO_MAX_SCALE);
     const bodyWidth = 2.7 * safeScale;
     const bodyHeight = 1.75 * safeScale;
     const bodyDepth = 0.46 * safeScale;
@@ -9340,38 +9835,67 @@ export class GameRuntime {
     frame.receiveShadow = true;
     group.add(frame);
 
-    const screenMaterial = new THREE.MeshStandardMaterial({
+    const screenMaterialTemplate = new THREE.MeshStandardMaterial({
       color: 0xcfd4da,
       emissive: 0x1f2226,
       emissiveIntensity: 0.04,
       roughness: 0.62,
       metalness: 0.02
     });
-    screenMaterial.toneMapped = true;
-    const screen = new THREE.Mesh(new THREE.PlaneGeometry(panelWidth, panelHeight), screenMaterial);
-    screen.position.set(0, 0, bodyDepth * 0.5 + panelDepth + 0.002);
-    screen.receiveShadow = true;
-    group.add(screen);
+    screenMaterialTemplate.toneMapped = true;
+    const { videoEl, videoTexture, imageTexture } = this.createPromoScreenMediaResources(
+      entry,
+      screenMaterialTemplate,
+      {
+        videoEmissive: 0.08,
+        imageEmissive: 0.1,
+        emptyColor: 0xcfd4da,
+        emptyEmissive: 0.04
+      }
+    );
+    const sharedMap = screenMaterialTemplate.map ?? null;
+    const quadGap = Math.max(0.03 * safeScale, 0.018);
+    const quadWidth = Math.max(0.28, (panelWidth - quadGap) * 0.5);
+    const quadHeight = Math.max(0.24, (panelHeight - quadGap) * 0.5);
+    const offsetX = (quadWidth + quadGap) * 0.5;
+    const offsetY = (quadHeight + quadGap) * 0.5;
+    const quadZ = bodyDepth * 0.5 + panelDepth + 0.002;
+    const quadOffsets = [
+      { x: -offsetX, y: offsetY, suffix: "q0" },
+      { x: offsetX, y: offsetY, suffix: "q1" },
+      { x: -offsetX, y: -offsetY, suffix: "q2" },
+      { x: offsetX, y: -offsetY, suffix: "q3" }
+    ];
+    const paintSurfaceEntries = [];
+    for (const quad of quadOffsets) {
+      const material = screenMaterialTemplate.clone();
+      material.map = sharedMap;
+      material.needsUpdate = true;
+      const screen = new THREE.Mesh(new THREE.PlaneGeometry(quadWidth, quadHeight), material);
+      screen.position.set(quad.x, quad.y, quadZ);
+      screen.receiveShadow = true;
+      group.add(screen);
+      const surfaceId = this.registerPromoPaintSurface(
+        screen,
+        entry.ownerKey,
+        quadWidth,
+        quadHeight,
+        quad.suffix
+      );
+      paintSurfaceEntries.push({ surfaceId, mesh: screen });
+    }
 
-    const { videoEl, videoTexture, imageTexture } = this.createPromoScreenMediaResources(entry, screenMaterial, {
-      videoEmissive: 0.08,
-      imageEmissive: 0.1,
-      emptyColor: 0xcfd4da,
-      emptyEmissive: 0.04
-    });
-    const paintSurfaceId = this.registerPromoPaintSurface(screen, entry.ownerKey, panelWidth, panelHeight);
     return {
       group,
       videoEl,
       videoTexture,
       imageTexture,
-      paintSurfaceId,
-      paintSurfaceMesh: screen
+      paintSurfaceEntries
     };
   }
 
   createPromoSignVisual(entry) {
-    const safeScale = THREE.MathUtils.clamp(Number(entry.scale) || 1, 0.35, 24);
+    const safeScale = THREE.MathUtils.clamp(Number(entry.scale) || 1, PROMO_MIN_SCALE, PROMO_MAX_SCALE);
     const boardWidth = 2.6 * safeScale;
     const boardHeight = 1.5 * safeScale;
     const boardDepth = 0.12 * safeScale;
@@ -9420,8 +9944,8 @@ export class GameRuntime {
     group.add(screen);
 
     const { videoEl, videoTexture, imageTexture } = this.createPromoScreenMediaResources(entry, screenMaterial, {
-      videoEmissive: 0.46,
-      imageEmissive: 0.5,
+      videoEmissive: 0.08,
+      imageEmissive: 0.1,
       emptyColor: 0xd9f1ff,
       emptyEmissive: 0.58
     });
@@ -9475,6 +9999,9 @@ export class GameRuntime {
     }
 
     this.promoObjects = nextMap;
+    if (this.promoPlacementPreviewActive && this.getOwnPromoObject()) {
+      this.clearPromoPlacementPreview({ syncUi: false });
+    }
     this.syncPromoPanelUi();
     this.updatePromoLinkPrompt(0, true);
   }
@@ -9544,14 +10071,19 @@ export class GameRuntime {
       this.promoLinkPromptEl.classList.add("hidden");
       return;
     }
+    if (isOwn) {
+      // Own-object editing is handled in the surface painter (F interaction),
+      // so suppress the separate promo-link prompt to avoid overlapping hints.
+      this.nearestPromoLinkObject = null;
+      this.promoLinkPromptEl.classList.add("hidden");
+      return;
+    }
     this.nearestPromoLinkObject = nearest;
     if (this.promoOpenLinkBtnEl) {
-      this.promoOpenLinkBtnEl.textContent = isOwn ? "내 오브젝트 수정" : `${nearest.ownerName} 링크 열기`;
+      this.promoOpenLinkBtnEl.textContent = `${nearest.ownerName} 링크 열기`;
     }
     if (this.promoLinkPromptTextEl) {
-      this.promoLinkPromptTextEl.textContent = isOwn
-        ? "R 키로 내 오브젝트 수정"
-        : `${nearest.ownerName} 링크 열기`;
+      this.promoLinkPromptTextEl.textContent = `${nearest.ownerName} 링크 열기`;
     }
     this.promoLinkPromptEl.classList.remove("hidden");
   }
@@ -11064,6 +11596,18 @@ export class GameRuntime {
         this.setPromoPanelDesktopOpen(false, { syncUi: true });
         return;
       }
+      if (this.promoPlacementPreviewActive && event.code === "Escape") {
+        event.preventDefault();
+        this.clearPromoPlacementPreview({ syncUi: true });
+        this.appendChatLine("", "배치 미리보기를 취소했습니다.", "system");
+        return;
+      }
+      if (this.hostCustomBlockPlacementPreviewActive && event.code === "Escape") {
+        event.preventDefault();
+        this.clearHostCustomBlockPlacementPreview({ syncUi: true });
+        this.appendChatLine("", "회색 오브젝트 미리보기를 취소했습니다.", "system");
+        return;
+      }
 
       if (event.code === "Tab") {
         event.preventDefault();
@@ -11125,13 +11669,6 @@ export class GameRuntime {
         event.preventDefault();
         this.tryClimbRope();
         return;
-      }
-
-      if (event.code === "KeyR" && this.canUseGameplayControls()) {
-        if (this.openNearestPromoLink()) {
-          event.preventDefault();
-          return;
-        }
       }
 
       if (event.code === "KeyG" && this.canUseGameplayControls() && this.hasHostPrivilege()) {
@@ -11303,6 +11840,19 @@ export class GameRuntime {
       this.chalkLastStamp = null;
     });
     this.renderer.domElement.addEventListener("wheel", (event) => {
+      if (this.promoPlacementPreviewActive && !this.mobileEnabled && this.canMovePlayer()) {
+        event.preventDefault();
+        const scaleDelta = THREE.MathUtils.clamp(-event.deltaY * 0.0012, -0.4, 0.4);
+        this.adjustPromoPlacementPreviewScale(scaleDelta);
+        this.syncPromoPanelUi();
+        return;
+      }
+      if (this.hostCustomBlockPlacementPreviewActive && !this.mobileEnabled && this.canMovePlayer()) {
+        event.preventDefault();
+        const sizeDelta = THREE.MathUtils.clamp(-event.deltaY * 0.003, -0.8, 0.8);
+        this.adjustHostCustomBlockPlacementPreviewSize(sizeDelta);
+        return;
+      }
       if (!this.flyModeActive) return;
       if (this.editorMode === "obj" && this.objEditorActive && this.canUseObjectEditor()) {
         event.preventDefault();
@@ -11618,6 +12168,10 @@ export class GameRuntime {
         const value = Number(this.promoScaleInputEl?.value);
         if (this.promoScaleValueEl && Number.isFinite(value)) {
           this.promoScaleValueEl.textContent = `${value.toFixed(2)}x`;
+        }
+        if (this.promoPlacementPreviewActive) {
+          this.updatePromoPlacementPreview();
+          this.syncPromoPanelUi();
         }
       });
     }
@@ -11951,6 +12505,24 @@ export class GameRuntime {
     this.surfacePainterImportInputEl?.addEventListener("change", (event) => {
       this.handleSurfacePainterImportInputChange(event);
     });
+    this.surfacePainterPromoRepositionBtnEl?.addEventListener("click", () => {
+      this.requestPromoRepositionFromSurfacePainter();
+    });
+    this.surfacePainterPromoRemoveBtnEl?.addEventListener("click", () => {
+      this.requestPromoRemoveFromSurfacePainter();
+    });
+    this.surfacePainterPromoScaleDownBtnEl?.addEventListener("click", () => {
+      this.requestPromoScaleFromSurfacePainter(-0.5);
+    });
+    this.surfacePainterPromoScaleUpBtnEl?.addEventListener("click", () => {
+      this.requestPromoScaleFromSurfacePainter(0.5);
+    });
+    this.surfacePainterFillBtnEl?.addEventListener("click", () => {
+      this.fillSurfacePainterWithBrushColor();
+    });
+    this.surfacePainterBgColorInputEl?.addEventListener("input", () => {
+      this.applySurfacePainterBackgroundColor();
+    });
     this.surfacePainterEraserBtnEl?.addEventListener("click", () => {
       this.setSurfacePainterEraserEnabled(!this.surfacePainterEraserEnabled);
     });
@@ -12055,9 +12627,19 @@ export class GameRuntime {
       event.preventDefault();
       this.requestHostCustomPaintBlockAdd();
     };
+    const handleHostGraySizeInput = () => {
+      this.getHostCustomBlockSizeFromPanel();
+      if (this.hostCustomBlockPlacementPreviewActive) {
+        this.updateHostCustomBlockPlacementPreview();
+        this.syncHostControls();
+      }
+    };
     this.hostGrayObjectWidthInputEl?.addEventListener("keydown", handleHostGraySizeEnter);
     this.hostGrayObjectHeightInputEl?.addEventListener("keydown", handleHostGraySizeEnter);
     this.hostGrayObjectDepthInputEl?.addEventListener("keydown", handleHostGraySizeEnter);
+    this.hostGrayObjectWidthInputEl?.addEventListener("input", handleHostGraySizeInput);
+    this.hostGrayObjectHeightInputEl?.addEventListener("input", handleHostGraySizeInput);
+    this.hostGrayObjectDepthInputEl?.addEventListener("input", handleHostGraySizeInput);
   }
 
   resolveUiElements() {
@@ -12157,11 +12739,29 @@ export class GameRuntime {
     if (!this.surfacePainterSaveBtnEl) {
       this.surfacePainterSaveBtnEl = document.getElementById("surface-painter-save");
     }
+    if (!this.surfacePainterPromoRepositionBtnEl) {
+      this.surfacePainterPromoRepositionBtnEl = document.getElementById(
+        "surface-painter-promo-reposition"
+      );
+    }
+    if (!this.surfacePainterPromoRemoveBtnEl) {
+      this.surfacePainterPromoRemoveBtnEl = document.getElementById("surface-painter-promo-remove");
+    }
+    if (!this.surfacePainterPromoScaleDownBtnEl) {
+      this.surfacePainterPromoScaleDownBtnEl = document.getElementById(
+        "surface-painter-promo-scale-down"
+      );
+    }
+    if (!this.surfacePainterPromoScaleUpBtnEl) {
+      this.surfacePainterPromoScaleUpBtnEl = document.getElementById(
+        "surface-painter-promo-scale-up"
+      );
+    }
     if (!this.surfacePainterEraserBtnEl) {
       this.surfacePainterEraserBtnEl = document.getElementById("surface-painter-eraser");
     }
-    if (!this.surfacePainterApplyAllEl) {
-      this.surfacePainterApplyAllEl = document.getElementById("surface-painter-apply-all");
+    if (!this.surfacePainterFillBtnEl) {
+      this.surfacePainterFillBtnEl = document.getElementById("surface-painter-fill");
     }
     if (!this.chatLogEl) {
       this.chatLogEl = document.getElementById("chat-log");
@@ -12853,6 +13453,8 @@ export class GameRuntime {
       this.clearRemotePlayers();
       this.clearPromoObjectVisuals();
       this.promoObjects.clear();
+      this.clearPromoPlacementPreview({ syncUi: false });
+      this.clearHostCustomBlockPlacementPreview({ syncUi: false });
       this.nearestPromoLinkObject = null;
       this.updateRoomPlayerSnapshot([]);
       this.setPlayerRosterVisible(false);
@@ -12923,6 +13525,8 @@ export class GameRuntime {
       this.updateRoomPlayerSnapshot([]);
       this.clearPromoObjectVisuals();
       this.promoObjects.clear();
+      this.clearPromoPlacementPreview({ syncUi: false });
+      this.clearHostCustomBlockPlacementPreview({ syncUi: false });
       this.nearestPromoLinkObject = null;
       this.syncHostControls();
       this.hud.setStatus(this.getStatusText());
@@ -12993,6 +13597,8 @@ export class GameRuntime {
       this.clearRemotePlayers();
       this.clearPromoObjectVisuals();
       this.promoObjects.clear();
+      this.clearPromoPlacementPreview({ syncUi: false });
+      this.clearHostCustomBlockPlacementPreview({ syncUi: false });
       this.nearestPromoLinkObject = null;
       this.updateRoomPlayerSnapshot([]);
       this.setPlayerRosterVisible(false);
@@ -13049,6 +13655,8 @@ export class GameRuntime {
       this.clearRemotePlayers();
       this.clearPromoObjectVisuals();
       this.promoObjects.clear();
+      this.clearPromoPlacementPreview({ syncUi: false });
+      this.clearHostCustomBlockPlacementPreview({ syncUi: false });
       this.nearestPromoLinkObject = null;
       this.updateRoomPlayerSnapshot([]);
       this.setPlayerRosterVisible(false);
@@ -13698,6 +14306,8 @@ export class GameRuntime {
     this.updateRopeStateAutosave(delta);
     this.updateObjectStateAutosave(delta);
     this.updateRopeProximity(delta);
+    this.updatePromoPlacementPreview();
+    this.updateHostCustomBlockPlacementPreview();
     this.updatePromoLinkPrompt(delta);
     if (this.securityTestState?.enabled) {
       this.securityTestLabelRefreshClock += delta;
@@ -15740,6 +16350,14 @@ export class GameRuntime {
     return this.getHostCustomPaintBlockEntries().filter((entry) => entry.mesh.visible !== true).length;
   }
 
+  getAvailableHostCustomPaintBlockEntry() {
+    const entries = this.getHostCustomPaintBlockEntries();
+    if (!entries.length) {
+      return null;
+    }
+    return entries.find((entry) => entry?.mesh?.visible !== true) ?? null;
+  }
+
   normalizeHostCustomBlockSize(rawValue, fallback = HOST_CUSTOM_BLOCK_DEFAULT_SIZE) {
     const parsed = Number(rawValue);
     if (!Number.isFinite(parsed)) {
@@ -15765,26 +16383,7 @@ export class GameRuntime {
     return { width, height, depth };
   }
 
-  requestHostCustomPaintBlockAdd() {
-    if (!this.hasHostPrivilege()) {
-      if (this.socket && this.networkConnected) {
-        this.requestHostClaim({ manual: true });
-      }
-      this.appendChatLine("", "회색 오브젝트 추가는 방장만 가능합니다.", "system");
-      return false;
-    }
-    const entries = this.getHostCustomPaintBlockEntries();
-    if (!entries.length) {
-      this.appendChatLine("", "추가 가능한 회색 오브젝트 슬롯이 없습니다.", "system");
-      return false;
-    }
-    const targetEntry = entries.find((entry) => entry.mesh.visible !== true) ?? null;
-    if (!targetEntry) {
-      this.appendChatLine("", `회색 오브젝트 최대 개수(${entries.length})에 도달했습니다.`, "system");
-      return false;
-    }
-
-    const { width, height, depth } = this.getHostCustomBlockSizeFromPanel();
+  getHostCustomBlockPlacementTransform({ width, height, depth }) {
     const direction = this.editorPreviewDirection;
     if (this.camera?.getWorldDirection) {
       this.camera.getWorldDirection(direction);
@@ -15797,14 +16396,161 @@ export class GameRuntime {
     } else {
       direction.normalize();
     }
+
     const spawnDistance = THREE.MathUtils.clamp(Math.max(width, depth) * 1.1 + 3.4, 4, 20);
     const footY = this.playerPosition.y - GAME_CONSTANTS.PLAYER_HEIGHT;
-    const spawnX = Math.round((this.playerPosition.x + direction.x * spawnDistance) * 2) / 2;
-    const spawnZ = Math.round((this.playerPosition.z + direction.z * spawnDistance) * 2) / 2;
-    const spawnY = Math.round((footY + height * 0.5) * 2) / 2;
+    const x = Math.round((this.playerPosition.x + direction.x * spawnDistance) * 2) / 2;
+    const z = Math.round((this.playerPosition.z + direction.z * spawnDistance) * 2) / 2;
+    const y = Math.round((footY + height * 0.5) * 2) / 2;
+    return { x, y, z };
+  }
+
+  ensureHostCustomBlockPlacementPreviewMesh() {
+    if (this.hostCustomBlockPlacementPreviewMesh) {
+      return this.hostCustomBlockPlacementPreviewMesh;
+    }
+
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x31ff9d,
+      emissive: 0x31ff9d,
+      emissiveIntensity: 0.44,
+      transparent: true,
+      opacity: 0.34,
+      depthWrite: false,
+      roughness: 0.58,
+      metalness: 0.06
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    mesh.visible = false;
+    mesh.renderOrder = 24;
+    this.scene.add(mesh);
+    this.hostCustomBlockPlacementPreviewMesh = mesh;
+    return mesh;
+  }
+
+  clearHostCustomBlockPlacementPreview({ syncUi = true } = {}) {
+    this.hostCustomBlockPlacementPreviewActive = false;
+    this.hostCustomBlockPlacementPreviewTargetId = "";
+    this.hostCustomBlockPlacementPreviewTransform = null;
+    if (this.hostCustomBlockPlacementPreviewMesh) {
+      this.hostCustomBlockPlacementPreviewMesh.visible = false;
+    }
+    if (syncUi) {
+      this.syncHostControls();
+    }
+  }
+
+  updateHostCustomBlockPlacementPreview() {
+    if (!this.hostCustomBlockPlacementPreviewActive) {
+      if (this.hostCustomBlockPlacementPreviewMesh) {
+        this.hostCustomBlockPlacementPreviewMesh.visible = false;
+      }
+      return;
+    }
+    if (!this.hasHostPrivilege()) {
+      this.clearHostCustomBlockPlacementPreview({ syncUi: true });
+      return;
+    }
+
+    const entries = this.getHostCustomPaintBlockEntries();
+    const targetId = String(this.hostCustomBlockPlacementPreviewTargetId ?? "").trim();
+    const targetEntry =
+      entries.find(
+        (entry) => String(entry?.id ?? "").trim() === targetId && entry?.mesh?.visible !== true
+      ) ??
+      entries.find((entry) => entry?.mesh?.visible !== true) ??
+      null;
+    if (!targetEntry) {
+      this.clearHostCustomBlockPlacementPreview({ syncUi: true });
+      return;
+    }
+    this.hostCustomBlockPlacementPreviewTargetId = String(targetEntry.id ?? "");
+    const { width, height, depth } = this.getHostCustomBlockSizeFromPanel();
+    const transform = this.getHostCustomBlockPlacementTransform({ width, height, depth });
+    this.hostCustomBlockPlacementPreviewTransform = {
+      ...transform,
+      width,
+      height,
+      depth
+    };
+
+    const previewMesh = this.ensureHostCustomBlockPlacementPreviewMesh();
+    previewMesh.scale.set(width, height, depth);
+    previewMesh.position.set(transform.x, transform.y, transform.z);
+    previewMesh.visible = true;
+  }
+
+  beginHostCustomBlockPlacementPreview() {
+    if (!this.hasHostPrivilege()) {
+      if (this.socket && this.networkConnected) {
+        this.requestHostClaim({ manual: true });
+      }
+      this.appendChatLine("", "회색 오브젝트 추가는 방장만 가능합니다.", "system");
+      return false;
+    }
+    const targetEntry = this.getAvailableHostCustomPaintBlockEntry();
+    if (!targetEntry) {
+      const total = this.getHostCustomPaintBlockEntries().length;
+      if (total <= 0) {
+        this.appendChatLine("", "추가 가능한 회색 오브젝트 슬롯이 없습니다.", "system");
+      } else {
+        this.appendChatLine("", `회색 오브젝트 최대 개수(${total})에 도달했습니다.`, "system");
+      }
+      return false;
+    }
+    this.hostCustomBlockPlacementPreviewActive = true;
+    this.hostCustomBlockPlacementPreviewTargetId = String(targetEntry.id ?? "");
+    this.ensureHostCustomBlockPlacementPreviewMesh();
+    this.updateHostCustomBlockPlacementPreview();
+    this.syncHostControls();
+    this.appendChatLine(
+      "",
+      "회색 오브젝트 미리보기 시작: 휠(PC)/크기 입력(모바일) 조절 후 버튼으로 확정",
+      "system"
+    );
+    return true;
+  }
+
+  confirmHostCustomBlockPlacementPreview() {
+    if (!this.hostCustomBlockPlacementPreviewActive) {
+      return false;
+    }
+    if (!this.hasHostPrivilege()) {
+      this.clearHostCustomBlockPlacementPreview({ syncUi: true });
+      this.appendChatLine("", "회색 오브젝트 추가는 방장만 가능합니다.", "system");
+      return false;
+    }
+
+    this.updateHostCustomBlockPlacementPreview();
+    const targetId = String(this.hostCustomBlockPlacementPreviewTargetId ?? "").trim();
+    const targetEntry = this.getHostCustomPaintBlockEntries().find(
+      (entry) => String(entry?.id ?? "").trim() === targetId && entry?.mesh
+    );
+    if (!targetEntry || targetEntry.mesh.visible === true) {
+      this.clearHostCustomBlockPlacementPreview({ syncUi: true });
+      this.appendChatLine("", "배치 가능한 회색 오브젝트 슬롯이 없습니다.", "system");
+      return false;
+    }
+
+    const placement = this.hostCustomBlockPlacementPreviewTransform;
+    const { width, height, depth } = this.getHostCustomBlockSizeFromPanel();
+    const hasPlacement =
+      Number.isFinite(Number(placement?.x)) &&
+      Number.isFinite(Number(placement?.y)) &&
+      Number.isFinite(Number(placement?.z));
+    const transform = hasPlacement
+      ? placement
+      : this.getHostCustomBlockPlacementTransform({ width, height, depth });
 
     targetEntry.mesh.scale.set(width, height, depth);
-    targetEntry.mesh.position.set(spawnX, spawnY, spawnZ);
+    targetEntry.mesh.position.set(
+      Number(transform.x) || 0,
+      Number(transform.y) || 0,
+      Number(transform.z) || 0
+    );
     this.setMovableObjectVisibility(targetEntry, true);
     this.updateSecurityTestLabelForEntry(targetEntry);
     if (this.objEditorActive) {
@@ -15813,8 +16559,41 @@ export class GameRuntime {
     this.updateObjEditorInfoEl(this.objEditorSelected);
     this.markObjectStateDirty();
     this.saveObjectPositions({ announceErrors: true, forceFlush: true });
+    this.clearHostCustomBlockPlacementPreview({ syncUi: false });
     this.syncHostControls();
     return true;
+  }
+
+  adjustHostCustomBlockPlacementPreviewSize(delta = 0) {
+    if (!this.hostCustomBlockPlacementPreviewActive) {
+      return;
+    }
+    const step = Number(delta);
+    if (!Number.isFinite(step) || Math.abs(step) < 0.0001) {
+      return;
+    }
+    const size = this.getHostCustomBlockSizeFromPanel();
+    const nextWidth = this.normalizeHostCustomBlockSize(size.width + step, size.width);
+    const nextHeight = this.normalizeHostCustomBlockSize(size.height + step, size.height);
+    const nextDepth = this.normalizeHostCustomBlockSize(size.depth + step, size.depth);
+    if (this.hostGrayObjectWidthInputEl) {
+      this.hostGrayObjectWidthInputEl.value = nextWidth.toFixed(1);
+    }
+    if (this.hostGrayObjectHeightInputEl) {
+      this.hostGrayObjectHeightInputEl.value = nextHeight.toFixed(1);
+    }
+    if (this.hostGrayObjectDepthInputEl) {
+      this.hostGrayObjectDepthInputEl.value = nextDepth.toFixed(1);
+    }
+    this.updateHostCustomBlockPlacementPreview();
+    this.syncHostControls();
+  }
+
+  requestHostCustomPaintBlockAdd() {
+    if (this.hostCustomBlockPlacementPreviewActive) {
+      return this.confirmHostCustomBlockPlacementPreview();
+    }
+    return this.beginHostCustomBlockPlacementPreview();
   }
 
   undoLastPlatform() {

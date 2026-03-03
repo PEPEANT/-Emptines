@@ -262,7 +262,8 @@ export function registerSocketHandlers({
       const result = roomService.setSurfacePaint(
         room,
         payload?.surfaceId,
-        payload?.imageDataUrl ?? payload?.dataUrl ?? ""
+        payload?.imageDataUrl ?? payload?.dataUrl ?? "",
+        socket.data.playerKey ?? ""
       );
       if (!result.ok) {
         ack(ackFn, result);
