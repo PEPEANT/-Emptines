@@ -5372,9 +5372,16 @@ export class GameRuntime {
 
     const filename = String(file.name ?? "").trim();
     const fileType = String(file.type ?? "").trim().toLowerCase();
-    const isPngFile = fileType === "image/png" || filename.toLowerCase().endsWith(".png");
-    if (!isPngFile) {
-      this.appendChatLine("", "PNG 파일만 불러올 수 있습니다.", "system");
+    const lowerName = filename.toLowerCase();
+    const isSupportedImageFile =
+      fileType === "image/png" ||
+      fileType === "image/jpeg" ||
+      fileType === "image/jpg" ||
+      lowerName.endsWith(".png") ||
+      lowerName.endsWith(".jpg") ||
+      lowerName.endsWith(".jpeg");
+    if (!isSupportedImageFile) {
+      this.appendChatLine("", "PNG/JPG 파일만 불러올 수 있습니다.", "system");
       return;
     }
 
@@ -5382,14 +5389,14 @@ export class GameRuntime {
     reader.onload = () => {
       const dataUrl = String(reader.result ?? "").trim();
       if (!dataUrl.startsWith("data:image/")) {
-        this.appendChatLine("", "PNG 파일을 읽지 못했습니다.", "system");
+        this.appendChatLine("", "이미지 파일을 읽지 못했습니다.", "system");
         return;
       }
       this.clearSurfacePainterCanvas(dataUrl);
-      this.appendChatLine("", `PNG 불러오기 완료: ${filename || "image.png"}`, "system");
+      this.appendChatLine("", `이미지 불러오기 완료: ${filename || "image"}`, "system");
     };
     reader.onerror = () => {
-      this.appendChatLine("", "PNG 파일을 읽지 못했습니다.", "system");
+      this.appendChatLine("", "이미지 파일을 읽지 못했습니다.", "system");
     };
     reader.readAsDataURL(file);
   }
