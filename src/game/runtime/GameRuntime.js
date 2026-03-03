@@ -103,7 +103,6 @@ const HOST_CUSTOM_BLOCK_DEFAULT_SIZE = 2.5;
 const PROMO_OWNER_KEY_STORAGE_KEY = "promoOwnerKey_v1";
 const PROMO_MAX_MEDIA_BYTES = 6 * 1024 * 1024;
 const PROMO_LINK_INTERACT_RADIUS = 4.2;
-const PROMO_ONE_SHOT_PLACEMENT = true;
 
 function resolveRuntimeAssetUrl(relativePath) {
   const normalized = String(relativePath ?? "").trim().replace(/^\/+/, "");
@@ -8861,7 +8860,6 @@ export class GameRuntime {
     }
 
     const disabled = !connected || busy;
-    const oneShotLocked = PROMO_ONE_SHOT_PLACEMENT && Boolean(own);
     this.promoScaleInputEl && (this.promoScaleInputEl.disabled = disabled);
     this.promoLinkInputEl && (this.promoLinkInputEl.disabled = disabled);
     this.promoAllowOthersDrawEl && (this.promoAllowOthersDrawEl.disabled = disabled);
@@ -8873,18 +8871,18 @@ export class GameRuntime {
     this.promoMediaPickBtnEl && (this.promoMediaPickBtnEl.disabled = disabled);
     this.promoMediaFolderBtnEl && (this.promoMediaFolderBtnEl.disabled = disabled || !showFolderPicker);
     this.promoMediaClearBtnEl && (this.promoMediaClearBtnEl.disabled = disabled);
-    this.promoPlaceBtnEl && (this.promoPlaceBtnEl.disabled = disabled || oneShotLocked);
-    this.promoSaveBtnEl && (this.promoSaveBtnEl.disabled = disabled || oneShotLocked);
-    this.promoRemoveBtnEl && (this.promoRemoveBtnEl.disabled = disabled || oneShotLocked);
+    this.promoPlaceBtnEl && (this.promoPlaceBtnEl.disabled = disabled);
+    this.promoSaveBtnEl && (this.promoSaveBtnEl.disabled = disabled);
+    this.promoRemoveBtnEl && (this.promoRemoveBtnEl.disabled = disabled);
 
     if (!connected) {
       this.setPromoPanelStatus("서버 연결 후 사용 가능");
     } else if (busy) {
       this.setPromoPanelStatus("홍보 오브젝트 동기화 중...");
     } else if (own) {
-      this.setPromoPanelStatus("내 오브젝트 배치됨 · 1회 제한");
+      this.setPromoPanelStatus("내 오브젝트 배치됨");
     } else {
-      this.setPromoPanelStatus("내 오브젝트 없음 · Y로 1회 배치");
+      this.setPromoPanelStatus("내 오브젝트 없음 · Y로 배치");
     }
   }
 
@@ -8969,11 +8967,11 @@ export class GameRuntime {
     };
   }
 
-  isPromoPlacementBlockedAt(position) {
+  getPromoPlacementBlockReason(position) {
     const x = Number(position?.x);
     const z = Number(position?.z);
     if (!Number.isFinite(x) || !Number.isFinite(z)) {
-      return false;
+      return "";
     }
 
     const spawnCenterX = Number(this.bridgeApproachSpawn?.x) || 0;
@@ -8982,7 +8980,7 @@ export class GameRuntime {
     const spawnDx = x - spawnCenterX;
     const spawnDz = z - spawnCenterZ;
     if (spawnDx * spawnDx + spawnDz * spawnDz <= spawnRadius * spawnRadius) {
-      return true;
+      return "spawn";
     }
 
     const ax = Number(this.bridgeSpawn?.x) || 0;
@@ -8993,14 +8991,14 @@ export class GameRuntime {
     const abz = bz - az;
     const abLenSq = abx * abx + abz * abz;
     if (abLenSq <= 0.001) {
-      return false;
+      return "";
     }
     const apx = x - ax;
     const apz = z - az;
     const rawT = (apx * abx + apz * abz) / abLenSq;
     const bridgeEdgeMargin = 0.08;
     if (rawT < -bridgeEdgeMargin || rawT > 1 + bridgeEdgeMargin) {
-      return false;
+      return "";
     }
     const t = THREE.MathUtils.clamp(rawT, 0, 1);
     const nearestX = ax + abx * t;
@@ -9008,7 +9006,9 @@ export class GameRuntime {
     const lateralDx = x - nearestX;
     const lateralDz = z - nearestZ;
     const bridgeHalfWidth = Math.max(4.8, Number(this.bridgeWidth) * 0.6 + 1.5);
-    return lateralDx * lateralDx + lateralDz * lateralDz <= bridgeHalfWidth * bridgeHalfWidth;
+    return lateralDx * lateralDx + lateralDz * lateralDz <= bridgeHalfWidth * bridgeHalfWidth
+      ? "bridge"
+      : "";
   }
 
   requestPlatformState() {
@@ -9039,7 +9039,7 @@ export class GameRuntime {
     this.socket.emit("promo:state:request");
   }
 
-  requestPromoUpsert({ placeInFront = false, placeAtCenter = false, oncePerPlayer = false } = {}) {
+  requestPromoUpsert({ placeInFront = false, placeAtCenter = false } = {}) {
     if (!(this.socket && this.networkConnected)) {
       this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
       return;
@@ -9049,10 +9049,6 @@ export class GameRuntime {
     }
 
     const own = this.getOwnPromoObject();
-    if (oncePerPlayer && own) {
-      this.appendChatLine("", "플레이어당 오브젝트 배치는 1회만 가능합니다.", "system");
-      return;
-    }
     let transform = null;
     if (placeAtCenter) {
       transform = this.getPromoCenterPlacementTransform();
@@ -9066,13 +9062,17 @@ export class GameRuntime {
         yaw: this.normalizePromoYaw(own.yaw, 0)
       };
     }
-    const movingToBlockedArea = this.isPromoPlacementBlockedAt(transform);
+    const blockReason = this.getPromoPlacementBlockReason(transform);
     const hasPositionChange =
       !own ||
       Math.abs(Number(transform.x) - Number(own.x)) > 0.001 ||
       Math.abs(Number(transform.z) - Number(own.z)) > 0.001;
-    if (movingToBlockedArea && hasPositionChange) {
-      this.appendChatLine("", "스폰 지점/다리 구역에는 홍보 오브젝트를 배치할 수 없습니다.", "system");
+    if (blockReason && hasPositionChange) {
+      const reasonMessage =
+        blockReason === "spawn"
+          ? "스폰지점에는 설치가 불가능합니다"
+          : "다리 위에는 설치가 불가능합니다";
+      this.appendChatLine("", reasonMessage, "system");
       return;
     }
     const scaleRaw = Number(this.promoScaleInputEl?.value);
@@ -9102,13 +9102,19 @@ export class GameRuntime {
         linkUrl,
         mediaDataUrl,
         allowOthersDraw,
-        oncePerPlayer: Boolean(oncePerPlayer),
         forceFlush: true
       },
       (response = {}) => {
         this.promoSetInFlight = false;
         if (!response?.ok) {
-          this.appendChatLine("", `홍보 오브젝트 저장 실패: ${String(response?.error ?? "unknown")}`, "system");
+          const errorText = String(response?.error ?? "unknown");
+          if (errorText === "placement blocked at spawn") {
+            this.appendChatLine("", "스폰지점에는 설치가 불가능합니다", "system");
+          } else if (errorText === "placement blocked on bridge") {
+            this.appendChatLine("", "다리 위에는 설치가 불가능합니다", "system");
+          } else {
+            this.appendChatLine("", `홍보 오브젝트 저장 실패: ${errorText}`, "system");
+          }
           this.syncPromoPanelUi();
           return;
         }
@@ -10916,7 +10922,7 @@ export class GameRuntime {
 
       if (event.code === "KeyY" && this.canMovePlayer() && !this.mobileEnabled) {
         event.preventDefault();
-        this.requestPromoUpsert({ placeInFront: true, oncePerPlayer: PROMO_ONE_SHOT_PLACEMENT });
+        this.requestPromoUpsert({ placeInFront: true });
         return;
       }
 
@@ -11439,7 +11445,7 @@ export class GameRuntime {
         if (!this.mobileEnabled || !this.canMovePlayer()) {
           return;
         }
-        this.requestPromoUpsert({ placeInFront: true, oncePerPlayer: PROMO_ONE_SHOT_PLACEMENT });
+        this.requestPromoUpsert({ placeInFront: true });
       });
     }
     if (this.promoScaleInputEl) {
@@ -11484,7 +11490,7 @@ export class GameRuntime {
       this.clearPromoPendingMedia();
     });
     this.promoPlaceBtnEl?.addEventListener("click", () => {
-      this.requestPromoUpsert({ placeInFront: true, oncePerPlayer: PROMO_ONE_SHOT_PLACEMENT });
+      this.requestPromoUpsert({ placeInFront: true });
     });
     this.promoSaveBtnEl?.addEventListener("click", () => {
       this.requestPromoUpsert({ placeInFront: false });

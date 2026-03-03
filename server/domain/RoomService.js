@@ -354,41 +354,41 @@ function normalizePromoAxis(rawValue, fallback = 0, min = -2000, max = 2000) {
   return Math.max(min, Math.min(max, safe));
 }
 
-function isPromoPlacementBlocked(x, z) {
+function getPromoPlacementBlockReason(x, z) {
   const safeX = Number(x);
   const safeZ = Number(z);
   if (!Number.isFinite(safeX) || !Number.isFinite(safeZ)) {
-    return false;
+    return "";
   }
 
   const spawnDx = safeX - PROMO_BLOCKED_SPAWN_X;
   const spawnDz = safeZ - PROMO_BLOCKED_SPAWN_Z;
   if (spawnDx * spawnDx + spawnDz * spawnDz <= PROMO_BLOCKED_SPAWN_RADIUS * PROMO_BLOCKED_SPAWN_RADIUS) {
-    return true;
+    return "spawn";
   }
 
   const abx = PROMO_BLOCKED_BRIDGE_B_X - PROMO_BLOCKED_BRIDGE_A_X;
   const abz = PROMO_BLOCKED_BRIDGE_B_Z - PROMO_BLOCKED_BRIDGE_A_Z;
   const abLenSq = abx * abx + abz * abz;
   if (abLenSq <= 0.001) {
-    return false;
+    return "";
   }
   const apx = safeX - PROMO_BLOCKED_BRIDGE_A_X;
   const apz = safeZ - PROMO_BLOCKED_BRIDGE_A_Z;
   const rawT = (apx * abx + apz * abz) / abLenSq;
   const edgeMargin = 0.08;
   if (rawT < -edgeMargin || rawT > 1 + edgeMargin) {
-    return false;
+    return "";
   }
   const t = Math.max(0, Math.min(1, rawT));
   const nearX = PROMO_BLOCKED_BRIDGE_A_X + abx * t;
   const nearZ = PROMO_BLOCKED_BRIDGE_A_Z + abz * t;
   const lateralDx = safeX - nearX;
   const lateralDz = safeZ - nearZ;
-  return (
-    lateralDx * lateralDx + lateralDz * lateralDz <=
+  return lateralDx * lateralDx + lateralDz * lateralDz <=
     PROMO_BLOCKED_BRIDGE_HALF_WIDTH * PROMO_BLOCKED_BRIDGE_HALF_WIDTH
-  );
+    ? "bridge"
+    : "";
 }
 
 function normalizeRightBillboardVideoId(rawValue) {
@@ -851,8 +851,6 @@ export class RoomService {
       if (!previous.allowOthersDraw) {
         return { ok: false, error: "owner denied edits" };
       }
-    } else if (previous) {
-      return { ok: false, error: "promo placement already used" };
     }
 
     const fallback = previous
@@ -886,8 +884,14 @@ export class RoomService {
       !previous ||
       Math.abs(Number(normalized.x) - Number(previous.x)) > 0.001 ||
       Math.abs(Number(normalized.z) - Number(previous.z)) > 0.001;
-    if (hasPositionChange && isPromoPlacementBlocked(normalized.x, normalized.z)) {
-      return { ok: false, error: "placement blocked near spawn/bridge" };
+    if (hasPositionChange) {
+      const blockReason = getPromoPlacementBlockReason(normalized.x, normalized.z);
+      if (blockReason === "spawn") {
+        return { ok: false, error: "placement blocked at spawn" };
+      }
+      if (blockReason === "bridge") {
+        return { ok: false, error: "placement blocked on bridge" };
+      }
     }
     if (!previous && map.size >= MAX_PROMO_OBJECTS) {
       return { ok: false, error: "promo object limit reached" };
