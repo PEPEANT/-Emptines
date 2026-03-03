@@ -5598,9 +5598,6 @@ export class GameRuntime {
       }
       return "서버 링크가 필요합니다. ?server=https://... 형식으로 접속하세요.";
     }
-    if (!this.socket || !this.networkConnected) {
-      return "서버 연결 후 저장할 수 있습니다.";
-    }
     return "";
   }
 
@@ -5764,6 +5761,33 @@ export class GameRuntime {
     });
   }
 
+  getSurfacePainterSaveImageDataUrl(maxChars = 4_000_000) {
+    const canvas = this.surfacePainterCanvasEl;
+    if (!canvas) {
+      return "";
+    }
+    const qualities = [0.84, 0.76, 0.68, 0.58, 0.5];
+    let bestEffort = "";
+    for (const quality of qualities) {
+      let dataUrl = "";
+      try {
+        dataUrl = String(canvas.toDataURL("image/jpeg", quality) ?? "");
+      } catch {
+        dataUrl = "";
+      }
+      if (!dataUrl.startsWith("data:image/")) {
+        continue;
+      }
+      if (!bestEffort || dataUrl.length < bestEffort.length) {
+        bestEffort = dataUrl;
+      }
+      if (dataUrl.length <= maxChars) {
+        return dataUrl;
+      }
+    }
+    return bestEffort;
+  }
+
   async saveSurfacePainter() {
     if (!this.surfacePainterOpen || this.surfacePainterSaveInFlight || !this.surfacePainterCanvasEl) {
       return;
@@ -5789,7 +5813,11 @@ export class GameRuntime {
       return;
     }
 
-    const imageDataUrl = this.surfacePainterCanvasEl.toDataURL("image/jpeg", 0.84);
+    const imageDataUrl = this.getSurfacePainterSaveImageDataUrl();
+    if (!imageDataUrl) {
+      this.appendChatLine("", "그림 데이터 인코딩에 실패했습니다.", "system");
+      return;
+    }
     this.surfacePainterSaveInFlight = true;
     this.surfacePaintSendInFlight = true;
     this.updateSurfacePainterSaveAvailability();

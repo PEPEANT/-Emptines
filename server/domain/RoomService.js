@@ -5,7 +5,7 @@ import { mkdir, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve as resolvePath } from "node:path";
 
 const SURFACE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,96}$/;
-const MAX_SURFACE_IMAGE_CHARS = 1_400_000;
+const MAX_SURFACE_IMAGE_CHARS = 4_200_000;
 const RIGHT_BILLBOARD_ALLOWED_VIDEO_IDS = Object.freeze([
   "GROK01",
   "GROK02",
