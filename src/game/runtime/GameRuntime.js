@@ -10992,10 +10992,6 @@ export class GameRuntime {
       this.appendChatLine("", "시작 시간 설정은 방장만 가능합니다.", "system");
       return;
     }
-    if (!this.hubFlowEnabled || this.flowStage !== "city_live") {
-      this.appendChatLine("", "도시 라이브 단계에서만 예약 가능합니다.", "system");
-      return;
-    }
     const computed = this.getPortalScheduleComputed();
     if (computed.mode === "open" || computed.mode === "open_manual") {
       this.appendChatLine("", "포탈이 열려 있는 동안에는 예약을 변경할 수 없습니다. 먼저 닫아주세요.", "system");
@@ -11091,10 +11087,6 @@ export class GameRuntime {
       this.appendChatLine("", "포탈 즉시 개방은 방장만 가능합니다.", "system");
       return;
     }
-    if (!this.hubFlowEnabled || this.flowStage !== "city_live") {
-      this.appendChatLine("", "도시 라이브 단계에서만 포탈 즉시 개방 가능합니다.", "system");
-      return;
-    }
     if (this.portalForceOpenInFlight) {
       return;
     }
@@ -11134,8 +11126,8 @@ export class GameRuntime {
     }
     const computed = this.getPortalScheduleComputed();
     const portalOpenNow = computed.mode === "open" || computed.mode === "open_manual";
-    if ((!this.hubFlowEnabled || this.flowStage !== "city_live") && !portalOpenNow) {
-      this.appendChatLine("", "도시 라이브 단계에서만 포탈 닫기 가능합니다.", "system");
+    if (!portalOpenNow) {
+      this.appendChatLine("", "현재 열린 포탈이 없습니다.", "system");
       return;
     }
     if (this.portalCloseInFlight) {
