@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { unlink } from "node:fs/promises";
+import { resolve as resolvePath } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { io } from "socket.io-client";
 
@@ -102,9 +104,19 @@ async function checkSyntax() {
 
 async function checkSocketServer() {
   const port = 3101 + Math.floor(Math.random() * 2000);
+  const verifyStorePath = resolvePath(
+    process.cwd(),
+    "server",
+    "data",
+    `verify-test-persist-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}.json`
+  );
   const server = spawn(process.execPath, ["server.js"], {
     cwd: process.cwd(),
-    env: { ...process.env, PORT: String(port) },
+    env: {
+      ...process.env,
+      PORT: String(port),
+      SURFACE_PAINT_STORE_PATH: verifyStorePath
+    },
     stdio: ["ignore", "pipe", "pipe"]
   });
 
@@ -195,6 +207,11 @@ async function checkSocketServer() {
       server.kill();
     }
     await sleep(120);
+    try {
+      await unlink(verifyStorePath);
+    } catch {
+      // ignore cleanup errors
+    }
   }
 }
 

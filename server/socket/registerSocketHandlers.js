@@ -276,12 +276,12 @@ export function registerSocketHandlers({
           updatedAt: result.updatedAt,
           authorId: socket.id
         });
-        if (Boolean(payload?.forceFlush) && typeof roomService.flushSurfacePaintToDiskNow === "function") {
-          try {
-            await roomService.flushSurfacePaintToDiskNow();
-          } catch {
-            // ignore immediate flush failures; debounced persistence still applies
-          }
+      }
+      if (Boolean(payload?.forceFlush) && typeof roomService.flushSurfacePaintToDiskNow === "function") {
+        try {
+          await roomService.flushSurfacePaintToDiskNow();
+        } catch {
+          // ignore immediate flush failures; debounced persistence still applies
         }
       }
 

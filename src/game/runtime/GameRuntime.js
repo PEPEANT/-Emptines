@@ -5798,12 +5798,10 @@ export class GameRuntime {
     let failedCount = 0;
     let lastReason = "";
     try {
-      const totalTargets = targetIds.length;
-      for (let index = 0; index < totalTargets; index += 1) {
-        const targetId = targetIds[index];
+      for (const targetId of targetIds) {
         const response = await this.sendSurfacePaintUpdate(targetId, imageDataUrl, {
-          // Explicit save action should be durable even if server exits immediately after.
-          forceFlush: index === totalTargets - 1
+          // Explicit save action should be durable per-surface even during abrupt restarts.
+          forceFlush: true
         });
         if (response?.ok) {
           successCount += 1;

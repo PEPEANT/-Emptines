@@ -474,6 +474,8 @@ export class RoomService {
     this.surfacePaintSaveTimer = null;
     this.surfacePaintSaveInFlight = false;
     this.surfacePaintSaveQueued = false;
+    this.surfacePaintForceNextFlush = false;
+    this.surfacePaintSaveInFlightPromise = null;
     this.getDefaultRoom();
     this.loadSurfacePaintFromDisk();
   }
@@ -531,6 +533,8 @@ export class RoomService {
     const platformRevision = normalizeStateRevision(parsed?.platformRevision, 0);
     const ropeRevision = normalizeStateRevision(parsed?.ropeRevision, 0);
     const objectRevision = normalizeStateRevision(parsed?.objectRevision, 0);
+    const leftBillboard = this.serializeLeftBillboard({ leftBillboard: parsed?.leftBillboard });
+    const rightBillboard = this.serializeRightBillboard({ rightBillboard: parsed?.rightBillboard });
     const restored = new Map();
     for (const entry of surfaces) {
       const surfaceId = normalizeSurfaceId(entry?.surfaceId);
@@ -543,6 +547,8 @@ export class RoomService {
 
     const room = this.getDefaultRoom();
     room.surfacePaint = restored;
+    room.leftBillboard = leftBillboard;
+    room.rightBillboard = rightBillboard;
     room.objectEditor = normalizeObjectEditorState(parsed?.objectEditor, room.objectEditor);
     room.platformRevision = platformRevision;
     room.ropeRevision = ropeRevision;
@@ -578,11 +584,26 @@ export class RoomService {
       return;
     }
     this.surfacePaintSaveQueued = true;
+    this.surfacePaintForceNextFlush = true;
     if (this.surfacePaintSaveTimer) {
       clearTimeout(this.surfacePaintSaveTimer);
       this.surfacePaintSaveTimer = null;
     }
+    if (this.surfacePaintSaveInFlightPromise) {
+      try {
+        await this.surfacePaintSaveInFlightPromise;
+      } catch {
+        // ignore; follow-up flush below still attempts persistence
+      }
+    }
     await this.flushSurfacePaintToDisk();
+    if (this.surfacePaintSaveInFlightPromise) {
+      try {
+        await this.surfacePaintSaveInFlightPromise;
+      } catch {
+        // ignore completion wait errors; caller only needs best-effort durability
+      }
+    }
   }
 
   async flushSurfacePaintToDisk() {
@@ -592,12 +613,16 @@ export class RoomService {
 
     this.surfacePaintSaveInFlight = true;
     this.surfacePaintSaveQueued = false;
+    const forceNextFlush = this.surfacePaintForceNextFlush;
+    this.surfacePaintForceNextFlush = false;
     const room = this.getDefaultRoom();
     const payload = {
       version: SURFACE_PAINT_STORE_VERSION,
       savedAt: Date.now(),
       defaultRoomCode: this.defaultRoomCode,
       surfaces: this.serializeSurfacePaint(room),
+      leftBillboard: this.serializeLeftBillboard(room),
+      rightBillboard: this.serializeRightBillboard(room),
       platforms: this.serializePlatforms(room),
       platformRevision: this.getPlatformRevision(room),
       ropes: this.serializeRopes(room),
@@ -609,25 +634,39 @@ export class RoomService {
     };
     const tmpPath = `${this.surfacePaintStorePath}.tmp`;
 
-    try {
-      await mkdir(dirname(this.surfacePaintStorePath), { recursive: true });
-      await writeFile(tmpPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-      await rename(tmpPath, this.surfacePaintStorePath);
-    } catch (error) {
-      this.log?.warn?.(
-        `[paint] Failed to persist surface store (${this.surfacePaintStorePath}): ${
-          error?.message ?? error
-        }`
-      );
+    const writePromise = (async () => {
       try {
-        await unlink(tmpPath);
-      } catch {
-        // ignore cleanup failures
+        await mkdir(dirname(this.surfacePaintStorePath), { recursive: true });
+        await writeFile(tmpPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+        await rename(tmpPath, this.surfacePaintStorePath);
+      } catch (error) {
+        this.log?.warn?.(
+          `[paint] Failed to persist surface store (${this.surfacePaintStorePath}): ${
+            error?.message ?? error
+          }`
+        );
+        try {
+          await unlink(tmpPath);
+        } catch {
+          // ignore cleanup failures
+        }
       }
+    })();
+    this.surfacePaintSaveInFlightPromise = writePromise;
+
+    try {
+      await writePromise;
     } finally {
       this.surfacePaintSaveInFlight = false;
+      this.surfacePaintSaveInFlightPromise = null;
       if (this.surfacePaintSaveQueued) {
-        this.scheduleSurfacePaintSave();
+        if (this.surfacePaintForceNextFlush || forceNextFlush) {
+          void this.flushSurfacePaintToDisk();
+        } else {
+          this.scheduleSurfacePaintSave();
+        }
+      } else {
+        this.surfacePaintForceNextFlush = false;
       }
     }
   }
@@ -1172,6 +1211,7 @@ export class RoomService {
     room.leftBillboard.mode = "image";
     room.leftBillboard.imageDataUrl = imageDataUrl;
     room.leftBillboard.updatedAt = Date.now();
+    this.scheduleSurfacePaintSave();
 
     return {
       ok: true,
@@ -1200,6 +1240,7 @@ export class RoomService {
     room.leftBillboard.mode = "ad";
     room.leftBillboard.imageDataUrl = "";
     room.leftBillboard.updatedAt = Date.now();
+    this.scheduleSurfacePaintSave();
 
     return {
       ok: true,
@@ -1250,6 +1291,7 @@ export class RoomService {
     room.rightBillboard.mode = "video";
     room.rightBillboard.videoId = videoId;
     room.rightBillboard.updatedAt = Date.now();
+    this.scheduleSurfacePaintSave();
 
     return {
       ok: true,
@@ -1278,6 +1320,7 @@ export class RoomService {
     room.rightBillboard.mode = "ad";
     room.rightBillboard.videoId = "";
     room.rightBillboard.updatedAt = Date.now();
+    this.scheduleSurfacePaintSave();
 
     return {
       ok: true,
