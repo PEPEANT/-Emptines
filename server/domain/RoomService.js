@@ -354,6 +354,14 @@ function normalizePromoAxis(rawValue, fallback = 0, min = -2000, max = 2000) {
   return Math.max(min, Math.min(max, safe));
 }
 
+function normalizePromoKind(rawValue, fallback = "block") {
+  const value = String(rawValue ?? "").trim().toLowerCase();
+  if (value === "sign" || value === "block") {
+    return value;
+  }
+  return String(fallback ?? "").trim().toLowerCase() === "sign" ? "sign" : "block";
+}
+
 function getPromoPlacementBlockReason(x, z) {
   const safeX = Number(x);
   const safeZ = Number(z);
@@ -769,6 +777,7 @@ export class RoomService {
     return {
       ownerKey,
       ownerName: normalizePromoName(source.ownerName ?? fallback?.ownerName ?? "PLAYER"),
+      kind: normalizePromoKind(source.kind ?? fallback?.kind ?? "block"),
       x: normalizePromoAxis(source.x, fallback?.x ?? 0),
       y: normalizePromoAxis(source.y, fallback?.y ?? 0, -100, 400),
       z: normalizePromoAxis(source.z, fallback?.z ?? 0),

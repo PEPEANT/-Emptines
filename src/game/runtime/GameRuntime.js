@@ -616,6 +616,7 @@ export class GameRuntime {
     this.promoPanelCloseBtnEl = document.getElementById("promo-panel-close");
     this.promoScaleInputEl = document.getElementById("promo-scale");
     this.promoScaleValueEl = document.getElementById("promo-scale-value");
+    this.promoTypeSelectEl = document.getElementById("promo-shape");
     this.promoLinkInputEl = document.getElementById("promo-link-url");
     this.promoAllowOthersDrawEl = document.getElementById("promo-allow-others-draw");
     this.promoDrawCanvasEl = document.getElementById("promo-draw-canvas");
@@ -8335,6 +8336,14 @@ export class GameRuntime {
     }
   }
 
+  normalizePromoKind(rawValue, fallback = "block") {
+    const value = String(rawValue ?? "").trim().toLowerCase();
+    if (value === "sign" || value === "block") {
+      return value;
+    }
+    return String(fallback ?? "").trim().toLowerCase() === "sign" ? "sign" : "block";
+  }
+
   normalizePromoYaw(rawValue, fallback = 0) {
     const parsed = Number(rawValue);
     const safe = Number.isFinite(parsed) ? parsed : Number(fallback) || 0;
@@ -8370,6 +8379,7 @@ export class GameRuntime {
     return {
       ownerKey,
       ownerName: this.formatPlayerName(rawValue.ownerName ?? "PLAYER"),
+      kind: this.normalizePromoKind(rawValue.kind ?? "block", "block"),
       x: THREE.MathUtils.clamp(Number(rawValue.x) || 0, -2000, 2000),
       y: THREE.MathUtils.clamp(Number(rawValue.y) || 0, -100, 400),
       z: THREE.MathUtils.clamp(Number(rawValue.z) || 0, -2000, 2000),
@@ -8390,6 +8400,7 @@ export class GameRuntime {
     return [
       entry.ownerKey,
       entry.ownerName,
+      entry.kind,
       entry.x.toFixed(3),
       entry.y.toFixed(3),
       entry.z.toFixed(3),
@@ -8741,11 +8752,13 @@ export class GameRuntime {
     const connected = Boolean(this.socket && this.networkConnected);
     const busy = this.promoSetInFlight || this.promoRemoveInFlight;
     const own = this.getOwnPromoObject();
+    const hasOwnPromo = Boolean(own);
     const scaleValue = own?.scale ?? 1;
+    const ownKind = this.normalizePromoKind(own?.kind ?? "block", "block");
     const linkValue = own?.linkUrl ?? "";
     const allowOthersDraw = own?.allowOthersDraw ?? false;
-    const placeBtnLabel = own ? "배치 완료(1회)" : "앞에 1회 배치";
-    const mobilePromoLabel = own ? "배치 완료" : "1회 배치";
+    const placeBtnLabel = "앞에 배치+저장";
+    const mobilePromoLabel = "배치";
     const prefersTouchUi =
       typeof window !== "undefined" &&
       typeof window.matchMedia === "function" &&
@@ -8777,10 +8790,15 @@ export class GameRuntime {
       this.promoDrawHelpEl.textContent = "네모 캔버스에 그리면 오브젝트 화면으로 저장됩니다";
     }
     if (this.promoPlaceBtnEl) {
+      this.promoPlaceBtnEl.classList.toggle("hidden", hasOwnPromo);
       this.promoPlaceBtnEl.textContent = placeBtnLabel;
     }
     if (this.mobilePromoPlaceBtnEl) {
+      this.mobilePromoPlaceBtnEl.classList.toggle("hidden", hasOwnPromo);
       this.mobilePromoPlaceBtnEl.textContent = mobilePromoLabel;
+    }
+    if (this.promoRemoveBtnEl) {
+      this.promoRemoveBtnEl.textContent = "철거";
     }
     if (panelVisible) {
       this.initPromoDrawCanvasIfNeeded();
@@ -8796,6 +8814,10 @@ export class GameRuntime {
     }
     if (this.promoLinkInputEl && document.activeElement !== this.promoLinkInputEl) {
       this.promoLinkInputEl.value = linkValue;
+    }
+    if (this.promoTypeSelectEl && document.activeElement !== this.promoTypeSelectEl) {
+      const selectedType = this.normalizePromoKind(this.promoTypeSelectEl.value, ownKind);
+      this.promoTypeSelectEl.value = hasOwnPromo ? ownKind : selectedType;
     }
     if (this.promoAllowOthersDrawEl) {
       this.promoAllowOthersDrawEl.checked = allowOthersDraw;
@@ -8861,6 +8883,7 @@ export class GameRuntime {
 
     const disabled = !connected || busy;
     this.promoScaleInputEl && (this.promoScaleInputEl.disabled = disabled);
+    this.promoTypeSelectEl && (this.promoTypeSelectEl.disabled = disabled);
     this.promoLinkInputEl && (this.promoLinkInputEl.disabled = disabled);
     this.promoAllowOthersDrawEl && (this.promoAllowOthersDrawEl.disabled = disabled);
     this.promoDrawColorInputEl && (this.promoDrawColorInputEl.disabled = disabled);
@@ -8880,7 +8903,7 @@ export class GameRuntime {
     } else if (busy) {
       this.setPromoPanelStatus("홍보 오브젝트 동기화 중...");
     } else if (own) {
-      this.setPromoPanelStatus("내 오브젝트 배치됨");
+      this.setPromoPanelStatus("내 오브젝트 배치됨 · Y로 위치 이동 · 가까이서 수정 가능");
     } else {
       this.setPromoPanelStatus("내 오브젝트 없음 · Y로 배치");
     }
@@ -9039,7 +9062,7 @@ export class GameRuntime {
     this.socket.emit("promo:state:request");
   }
 
-  requestPromoUpsert({ placeInFront = false, placeAtCenter = false } = {}) {
+  requestPromoUpsert({ placeInFront = false, placeAtCenter = false, preserveExistingStyle = false } = {}) {
     if (!(this.socket && this.networkConnected)) {
       this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
       return;
@@ -9075,10 +9098,21 @@ export class GameRuntime {
       this.appendChatLine("", reasonMessage, "system");
       return;
     }
-    const scaleRaw = Number(this.promoScaleInputEl?.value);
+    const usePanelValues = !(preserveExistingStyle && own);
+    const scaleRaw = usePanelValues ? Number(this.promoScaleInputEl?.value) : Number(own?.scale);
     const scale = THREE.MathUtils.clamp(Number.isFinite(scaleRaw) ? scaleRaw : own?.scale ?? 1, 0.35, 24);
-    const linkUrl = this.normalizePromoLinkUrl(this.promoLinkInputEl?.value ?? own?.linkUrl ?? "");
-    const allowOthersDraw = Boolean(this.promoAllowOthersDrawEl?.checked ?? own?.allowOthersDraw ?? false);
+    const kind = usePanelValues
+      ? this.normalizePromoKind(this.promoTypeSelectEl?.value ?? own?.kind ?? "block", own?.kind ?? "block")
+      : this.normalizePromoKind(own?.kind ?? "block", "block");
+
+    let linkUrl = this.normalizePromoLinkUrl(this.promoLinkInputEl?.value ?? own?.linkUrl ?? "");
+    if (!usePanelValues && own) {
+      linkUrl = this.normalizePromoLinkUrl(own.linkUrl ?? "");
+    }
+
+    const allowOthersDraw = usePanelValues
+      ? Boolean(this.promoAllowOthersDrawEl?.checked ?? own?.allowOthersDraw ?? false)
+      : Boolean(own?.allowOthersDraw ?? false);
 
     let mediaDataUrl = "";
     if (this.promoMediaRemoved) {
@@ -9098,6 +9132,7 @@ export class GameRuntime {
         y: transform.y,
         z: transform.z,
         yaw: this.normalizePromoYaw(transform.yaw, 0),
+        kind,
         scale,
         linkUrl,
         mediaDataUrl,
@@ -9194,7 +9229,122 @@ export class GameRuntime {
     }
   }
 
-  createPromoObjectVisual(entry) {
+  createPromoScreenMediaResources(
+    entry,
+    screenMaterial,
+    { videoEmissive = 0.08, imageEmissive = 0.1, emptyColor = 0xcfd4da, emptyEmissive = 0.04 } = {}
+  ) {
+    let videoEl = null;
+    let videoTexture = null;
+    let imageTexture = null;
+    if (entry.mediaDataUrl && entry.mediaKind === "video") {
+      videoEl = document.createElement("video");
+      videoEl.preload = "auto";
+      videoEl.loop = true;
+      videoEl.muted = true;
+      videoEl.playsInline = true;
+      videoEl.setAttribute("playsinline", "true");
+      videoEl.setAttribute("webkit-playsinline", "true");
+      videoEl.src = entry.mediaDataUrl;
+      videoTexture = new THREE.VideoTexture(videoEl);
+      videoTexture.colorSpace = THREE.SRGBColorSpace;
+      videoTexture.minFilter = THREE.LinearFilter;
+      videoTexture.magFilter = THREE.LinearFilter;
+      videoTexture.generateMipmaps = false;
+      screenMaterial.map = videoTexture;
+      screenMaterial.color.setHex(0xffffff);
+      screenMaterial.emissiveIntensity = videoEmissive;
+      videoEl.play().catch(() => {});
+    } else if (entry.mediaDataUrl && entry.mediaKind === "image") {
+      imageTexture = this.textureLoader.load(entry.mediaDataUrl);
+      imageTexture.colorSpace = THREE.SRGBColorSpace;
+      imageTexture.minFilter = THREE.LinearFilter;
+      imageTexture.magFilter = THREE.LinearFilter;
+      imageTexture.generateMipmaps = false;
+      screenMaterial.map = imageTexture;
+      screenMaterial.color.setHex(0xffffff);
+      screenMaterial.emissiveIntensity = imageEmissive;
+    } else {
+      screenMaterial.color.setHex(emptyColor);
+      screenMaterial.emissiveIntensity = emptyEmissive;
+    }
+    screenMaterial.needsUpdate = true;
+    return { videoEl, videoTexture, imageTexture };
+  }
+
+  createPromoBlockVisual(entry) {
+    const safeScale = THREE.MathUtils.clamp(Number(entry.scale) || 1, 0.35, 24);
+    const bodyWidth = 2.7 * safeScale;
+    const bodyHeight = 1.75 * safeScale;
+    const bodyDepth = 0.46 * safeScale;
+    const panelWidth = bodyWidth * 0.86;
+    const panelHeight = bodyHeight * 0.74;
+    const panelDepth = Math.max(0.02 * safeScale, 0.012);
+
+    const group = new THREE.Group();
+    group.position.set(entry.x, entry.y + bodyHeight * 0.5, entry.z);
+    group.rotation.y = this.normalizePromoYaw(entry.yaw, 0);
+
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(bodyWidth, bodyHeight, bodyDepth),
+      new THREE.MeshStandardMaterial({
+        color: 0xa8adb3,
+        roughness: 0.88,
+        metalness: 0.06,
+        emissive: 0x1f2328,
+        emissiveIntensity: 0.06
+      })
+    );
+    body.castShadow = true;
+    body.receiveShadow = true;
+    group.add(body);
+
+    const frame = new THREE.Mesh(
+      new THREE.BoxGeometry(panelWidth + 0.11 * safeScale, panelHeight + 0.11 * safeScale, panelDepth),
+      new THREE.MeshStandardMaterial({
+        color: 0x7f868d,
+        roughness: 0.72,
+        metalness: 0.14,
+        emissive: 0x12161a,
+        emissiveIntensity: 0.04
+      })
+    );
+    frame.position.set(0, 0, bodyDepth * 0.5 + panelDepth * 0.45);
+    frame.castShadow = true;
+    frame.receiveShadow = true;
+    group.add(frame);
+
+    const screenMaterial = new THREE.MeshStandardMaterial({
+      color: 0xcfd4da,
+      emissive: 0x1f2226,
+      emissiveIntensity: 0.04,
+      roughness: 0.62,
+      metalness: 0.02
+    });
+    screenMaterial.toneMapped = true;
+    const screen = new THREE.Mesh(new THREE.PlaneGeometry(panelWidth, panelHeight), screenMaterial);
+    screen.position.set(0, 0, bodyDepth * 0.5 + panelDepth + 0.002);
+    screen.receiveShadow = true;
+    group.add(screen);
+
+    const { videoEl, videoTexture, imageTexture } = this.createPromoScreenMediaResources(entry, screenMaterial, {
+      videoEmissive: 0.08,
+      imageEmissive: 0.1,
+      emptyColor: 0xcfd4da,
+      emptyEmissive: 0.04
+    });
+    const paintSurfaceId = this.registerPromoPaintSurface(screen, entry.ownerKey, panelWidth, panelHeight);
+    return {
+      group,
+      videoEl,
+      videoTexture,
+      imageTexture,
+      paintSurfaceId,
+      paintSurfaceMesh: screen
+    };
+  }
+
+  createPromoSignVisual(entry) {
     const safeScale = THREE.MathUtils.clamp(Number(entry.scale) || 1, 0.35, 24);
     const boardWidth = 2.6 * safeScale;
     const boardHeight = 1.5 * safeScale;
@@ -9239,54 +9389,17 @@ export class GameRuntime {
       metalness: 0.02
     });
     screenMaterial.toneMapped = false;
-    const screen = new THREE.Mesh(
-      new THREE.PlaneGeometry(boardWidth, boardHeight),
-      screenMaterial
-    );
+    const screen = new THREE.Mesh(new THREE.PlaneGeometry(boardWidth, boardHeight), screenMaterial);
     screen.position.set(0, frame.position.y, boardDepth * 0.52);
     group.add(screen);
 
-    let videoEl = null;
-    let videoTexture = null;
-    let imageTexture = null;
-    if (entry.mediaDataUrl && entry.mediaKind === "video") {
-      videoEl = document.createElement("video");
-      videoEl.preload = "auto";
-      videoEl.loop = true;
-      videoEl.muted = true;
-      videoEl.playsInline = true;
-      videoEl.setAttribute("playsinline", "true");
-      videoEl.setAttribute("webkit-playsinline", "true");
-      videoEl.src = entry.mediaDataUrl;
-      videoTexture = new THREE.VideoTexture(videoEl);
-      videoTexture.colorSpace = THREE.SRGBColorSpace;
-      videoTexture.minFilter = THREE.LinearFilter;
-      videoTexture.magFilter = THREE.LinearFilter;
-      videoTexture.generateMipmaps = false;
-      screenMaterial.map = videoTexture;
-      screenMaterial.color.setHex(0xffffff);
-      screenMaterial.emissiveIntensity = 0.46;
-      videoEl.play().catch(() => {});
-    } else if (entry.mediaDataUrl && entry.mediaKind === "image") {
-      imageTexture = this.textureLoader.load(entry.mediaDataUrl);
-      imageTexture.colorSpace = THREE.SRGBColorSpace;
-      imageTexture.minFilter = THREE.LinearFilter;
-      imageTexture.magFilter = THREE.LinearFilter;
-      imageTexture.generateMipmaps = false;
-      screenMaterial.map = imageTexture;
-      screenMaterial.color.setHex(0xffffff);
-      screenMaterial.emissiveIntensity = 0.5;
-    } else {
-      screenMaterial.color.setHex(0xd9f1ff);
-      screenMaterial.emissiveIntensity = 0.58;
-    }
-    screenMaterial.needsUpdate = true;
-    const paintSurfaceId = this.registerPromoPaintSurface(
-      screen,
-      entry.ownerKey,
-      boardWidth,
-      boardHeight
-    );
+    const { videoEl, videoTexture, imageTexture } = this.createPromoScreenMediaResources(entry, screenMaterial, {
+      videoEmissive: 0.46,
+      imageEmissive: 0.5,
+      emptyColor: 0xd9f1ff,
+      emptyEmissive: 0.58
+    });
+    const paintSurfaceId = this.registerPromoPaintSurface(screen, entry.ownerKey, boardWidth, boardHeight);
     return {
       group,
       videoEl,
@@ -9295,6 +9408,14 @@ export class GameRuntime {
       paintSurfaceId,
       paintSurfaceMesh: screen
     };
+  }
+
+  createPromoObjectVisual(entry) {
+    const kind = this.normalizePromoKind(entry?.kind ?? "block", "block");
+    if (kind === "sign") {
+      return this.createPromoSignVisual(entry);
+    }
+    return this.createPromoBlockVisual(entry);
   }
 
   applyPromoState(rawObjects = []) {
@@ -9334,7 +9455,19 @@ export class GameRuntime {
 
   openNearestPromoLink() {
     const target = this.nearestPromoLinkObject;
-    if (!target?.linkUrl) {
+    if (!target) {
+      return false;
+    }
+    const isOwn = String(target.ownerKey ?? "") === String(this.promoOwnerKey ?? "");
+    if (isOwn) {
+      if (this.mobileEnabled) {
+        this.setPromoPanelMobileOpen(true, { syncMobileUi: true });
+      } else {
+        this.setPromoPanelDesktopOpen(true, { syncUi: true });
+      }
+      return true;
+    }
+    if (!target.linkUrl) {
       return false;
     }
     try {
@@ -9379,14 +9512,20 @@ export class GameRuntime {
       return;
     }
     const nearest = this.getNearestPromoObject(PROMO_LINK_INTERACT_RADIUS);
-    if (!nearest?.linkUrl) {
+    const isOwn = String(nearest?.ownerKey ?? "") === String(this.promoOwnerKey ?? "");
+    if (!nearest || (!isOwn && !nearest.linkUrl)) {
       this.nearestPromoLinkObject = null;
       this.promoLinkPromptEl.classList.add("hidden");
       return;
     }
     this.nearestPromoLinkObject = nearest;
     if (this.promoOpenLinkBtnEl) {
-      this.promoOpenLinkBtnEl.textContent = `${nearest.ownerName} 링크 열기`;
+      this.promoOpenLinkBtnEl.textContent = isOwn ? "내 오브젝트 수정" : `${nearest.ownerName} 링크 열기`;
+    }
+    if (this.promoLinkPromptTextEl) {
+      this.promoLinkPromptTextEl.textContent = isOwn
+        ? "R 키로 내 오브젝트 수정"
+        : `${nearest.ownerName} 링크 열기`;
     }
     this.promoLinkPromptEl.classList.remove("hidden");
   }
@@ -10922,7 +11061,7 @@ export class GameRuntime {
 
       if (event.code === "KeyY" && this.canMovePlayer() && !this.mobileEnabled) {
         event.preventDefault();
-        this.requestPromoUpsert({ placeInFront: true });
+        this.requestPromoUpsert({ placeInFront: true, preserveExistingStyle: true });
         return;
       }
 
@@ -11445,7 +11584,7 @@ export class GameRuntime {
         if (!this.mobileEnabled || !this.canMovePlayer()) {
           return;
         }
-        this.requestPromoUpsert({ placeInFront: true });
+        this.requestPromoUpsert({ placeInFront: true, preserveExistingStyle: true });
       });
     }
     if (this.promoScaleInputEl) {
@@ -12158,6 +12297,9 @@ export class GameRuntime {
     }
     if (!this.promoScaleValueEl) {
       this.promoScaleValueEl = document.getElementById("promo-scale-value");
+    }
+    if (!this.promoTypeSelectEl) {
+      this.promoTypeSelectEl = document.getElementById("promo-shape");
     }
     if (!this.promoLinkInputEl) {
       this.promoLinkInputEl = document.getElementById("promo-link-url");

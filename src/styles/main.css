@@ -1682,6 +1682,17 @@ body:not(.is-mobile-ui) #promo-place-btn {
   font: 600 0.7rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
 }
 
+#promo-shape {
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid rgba(177, 210, 240, 0.64);
+  border-radius: 7px;
+  background: rgba(12, 28, 44, 0.92);
+  color: #edf6ff;
+  font: 600 0.7rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+}
+
 .promo-panel-check {
   display: inline-flex;
   align-items: center;
@@ -1716,6 +1727,7 @@ body:not(.is-mobile-ui) #promo-place-btn {
 .promo-panel-actions button:disabled,
 #promo-panel-close:disabled,
 #promo-link-url:disabled,
+#promo-shape:disabled,
 #promo-scale:disabled,
 #promo-draw-color:disabled,
 #promo-draw-bg:disabled,
