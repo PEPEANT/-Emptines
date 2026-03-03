@@ -153,6 +153,13 @@
             </select>
             <button id="host-right-play" type="button">재생</button>
           </div>
+          <div class="host-control-label">실시간 MP4 업로드 (전원 동기화)</div>
+          <input id="host-billboard-video-file" type="file" accept=".mp4,video/mp4,video/*" />
+          <div class="host-custom-row">
+            <button id="host-billboard-video-play-left" type="button">왼쪽 재생</button>
+            <button id="host-billboard-video-play-right" type="button">오른쪽 재생</button>
+            <button id="host-billboard-video-play-both" type="button">양쪽 재생</button>
+          </div>
           <button id="host-right-reset" type="button">광고 초기화</button>
           <button id="host-security-test-toggle" type="button" aria-pressed="false">
             보안 테스트: OFF
@@ -191,6 +198,7 @@
           <span id="rope-editor-count" class="host-editor-count">줄: 0개</span>
           <div class="host-custom-row">
             <button id="platform-editor-save" type="button">저장</button>
+            <button id="platform-editor-delete-one" type="button">조준 발판 삭제</button>
             <button id="platform-editor-clear" type="button">전체 삭제</button>
           </div>
         </div>
@@ -205,7 +213,10 @@
             <input id="host-gray-object-height" type="number" min="0.5" max="18" step="0.1" value="2.5" />
             <input id="host-gray-object-depth" type="number" min="0.5" max="18" step="0.1" value="2.5" />
           </div>
-          <button id="host-gray-object-add" type="button">앞에 오브젝트 추가</button>
+          <div class="host-custom-row">
+            <button id="host-gray-object-add" type="button">앞에 오브젝트 추가</button>
+            <button id="host-gray-object-delete" type="button">선택 오브젝트 삭제</button>
+          </div>
           <div class="host-control-label">추가 후 F 키로 표면 그리기 가능</div>
         </div>
       </details>

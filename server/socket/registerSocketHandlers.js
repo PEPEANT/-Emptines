@@ -602,6 +602,41 @@ export function registerSocketHandlers({
       });
     });
 
+    socket.on("billboard:video:set", (payload = {}, ackFn) => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        ack(ackFn, { ok: false, error: "room not found" });
+        return;
+      }
+      if (!roomService.isHost(room, socket.id)) {
+        ack(ackFn, { ok: false, error: "host only" });
+        return;
+      }
+
+      const result = roomService.setBillboardVideoData(
+        room,
+        payload?.videoDataUrl ?? payload?.dataUrl ?? "",
+        payload?.target ?? ""
+      );
+      if (!result.ok) {
+        ack(ackFn, result);
+        return;
+      }
+
+      if (result.changed) {
+        roomService.emitLeftBillboardUpdate(room);
+        roomService.emitRightBillboardUpdate(room);
+      }
+
+      ack(ackFn, {
+        ok: true,
+        changed: Boolean(result.changed),
+        target: result.target,
+        leftState: result.leftState,
+        rightState: result.rightState
+      });
+    });
+
     socket.on("billboard:left:set", (payload = {}, ackFn) => {
       const room = roomService.getRoomBySocket(socket);
       if (!room) {

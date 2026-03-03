@@ -83,6 +83,8 @@ const RIGHT_BILLBOARD_VIDEO_ID_LOOKUP = Object.freeze(
   }, { ...RIGHT_BILLBOARD_VIDEO_ID_ALIASES })
 );
 const MAX_LEFT_BILLBOARD_IMAGE_CHARS = 4_200_000;
+const MAX_BILLBOARD_VIDEO_DATA_URL_CHARS = 10_500_000;
+const MAX_BILLBOARD_VIDEO_BYTES = 7 * 1024 * 1024;
 const DEFAULT_PORTAL_TARGET_URL =
   "https://reclaim-fps.vercel.app/";
 const A_ZONE_FIXED_PORTAL_TARGET_URL = "https://reclaim-fps.vercel.app/";
@@ -405,23 +407,32 @@ export class GameRuntime {
     this.surfacePaintProbeForwardVector = new THREE.Vector3();
     this.plazaBillboardAdTexture = null;
     this.plazaBillboardLeftCustomTexture = null;
+    this.plazaBillboardLeftVideoEl = null;
+    this.plazaBillboardLeftVideoTexture = null;
+    this.leftBillboardActiveVideoDataUrl = "";
     this.plazaBillboardLeftScreenMaterial = null;
     this.plazaBillboardRightScreenMaterial = null;
     this.plazaBillboardRightVideoEl = null;
     this.plazaBillboardRightVideoTexture = null;
     this.rightBillboardActiveVideoId = "";
+    this.rightBillboardActiveVideoDataUrl = "";
     this.leftBillboardState = {
       mode: "ad",
       imageDataUrl: "",
+      videoDataUrl: "",
       updatedAt: Date.now()
     };
     this.leftBillboardSetInFlight = false;
     this.rightBillboardState = {
       mode: "ad",
       videoId: "",
+      videoDataUrl: "",
       updatedAt: Date.now()
     };
     this.rightBillboardResetInFlight = false;
+    this.billboardVideoSetInFlight = false;
+    this.hostBillboardVideoPendingDataUrl = "";
+    this.hostBillboardVideoPendingName = "";
     this.beach = null;
     this.shoreFoam = null;
     this.shoreWetBand = null;
@@ -583,6 +594,10 @@ export class GameRuntime {
     );
     this.hostPlayRightVideoBtnEl = document.getElementById("host-right-play");
     this.hostResetRightVideoBtnEl = document.getElementById("host-right-reset");
+    this.hostBillboardVideoFileInputEl = document.getElementById("host-billboard-video-file");
+    this.hostBillboardVideoPlayLeftBtnEl = document.getElementById("host-billboard-video-play-left");
+    this.hostBillboardVideoPlayRightBtnEl = document.getElementById("host-billboard-video-play-right");
+    this.hostBillboardVideoPlayBothBtnEl = document.getElementById("host-billboard-video-play-both");
     this.hostSecurityTestToggleBtnEl = document.getElementById("host-security-test-toggle");
     this.hostMusicSetInFlight = false;
     this.playerRosterVisible = false;
@@ -688,6 +703,7 @@ export class GameRuntime {
 
     this.platformEditorEl = document.getElementById("platform-editor");
     this.platformEditorSaveBtnEl = document.getElementById("platform-editor-save");
+    this.platformEditorDeleteOneBtnEl = document.getElementById("platform-editor-delete-one");
     this.platformEditorClearBtnEl = document.getElementById("platform-editor-clear");
     this.platformEditorCountEl = document.getElementById("platform-editor-count");
     this.ropeEditorCountEl = document.getElementById("rope-editor-count");
@@ -706,6 +722,7 @@ export class GameRuntime {
     this.hostGrayObjectHeightInputEl = document.getElementById("host-gray-object-height");
     this.hostGrayObjectDepthInputEl = document.getElementById("host-gray-object-depth");
     this.hostGrayObjectAddBtnEl = document.getElementById("host-gray-object-add");
+    this.hostGrayObjectDeleteBtnEl = document.getElementById("host-gray-object-delete");
     this.objEditorBarEl = document.getElementById("obj-editor-bar");
     this.objEditorInfoEl = document.getElementById("obj-editor-info");
 
@@ -3006,28 +3023,61 @@ export class GameRuntime {
     return RIGHT_BILLBOARD_VIDEO_ID_LOOKUP[text] ?? "";
   }
 
+  normalizeBillboardVideoDataUrl(rawDataUrl) {
+    const value = String(rawDataUrl ?? "").trim();
+    if (!value || value.length > MAX_BILLBOARD_VIDEO_DATA_URL_CHARS) {
+      return "";
+    }
+    if (!/^data:video\/[a-z0-9.+-]+;base64,/i.test(value)) {
+      return "";
+    }
+    return value;
+  }
+
+  normalizeBillboardVideoTarget(rawTarget) {
+    const target = String(rawTarget ?? "").trim().toLowerCase();
+    if (target === "left" || target === "right" || target === "both") {
+      return target;
+    }
+    return "";
+  }
+
   normalizeRightBillboardState(rawState = {}) {
     const videoId = this.normalizeRightBillboardVideoId(rawState?.videoId ?? rawState?.id ?? "");
+    const videoDataUrl = this.normalizeBillboardVideoDataUrl(rawState?.videoDataUrl ?? rawState?.dataUrl ?? "");
     const modeRaw = String(rawState?.mode ?? "ad").trim().toLowerCase();
-    const mode = modeRaw === "video" && videoId ? "video" : "ad";
+    let mode = "ad";
+    if (modeRaw === "video_data" && videoDataUrl) {
+      mode = "video_data";
+    } else if (modeRaw === "video" && videoId) {
+      mode = "video";
+    }
     return {
       mode,
       videoId: mode === "video" ? videoId : "",
+      videoDataUrl: mode === "video_data" ? videoDataUrl : "",
       updatedAt: Math.max(0, Math.trunc(Number(rawState?.updatedAt) || Date.now()))
     };
   }
 
   normalizeLeftBillboardState(rawState = {}) {
     const imageDataUrl = String(rawState?.imageDataUrl ?? rawState?.dataUrl ?? "").trim();
+    const videoDataUrl = this.normalizeBillboardVideoDataUrl(rawState?.videoDataUrl ?? "");
     const hasValidImage =
       imageDataUrl.length > 0 &&
       imageDataUrl.length <= MAX_LEFT_BILLBOARD_IMAGE_CHARS &&
       imageDataUrl.startsWith("data:image/");
     const modeRaw = String(rawState?.mode ?? "ad").trim().toLowerCase();
-    const mode = modeRaw === "image" && hasValidImage ? "image" : "ad";
+    let mode = "ad";
+    if (modeRaw === "image" && hasValidImage) {
+      mode = "image";
+    } else if (modeRaw === "video_data" && videoDataUrl) {
+      mode = "video_data";
+    }
     return {
       mode,
       imageDataUrl: mode === "image" ? imageDataUrl : "",
+      videoDataUrl: mode === "video_data" ? videoDataUrl : "",
       updatedAt: Math.max(0, Math.trunc(Number(rawState?.updatedAt) || Date.now()))
     };
   }
@@ -3038,7 +3088,8 @@ export class GameRuntime {
     if (
       !force &&
       previous.mode === next.mode &&
-      previous.imageDataUrl === next.imageDataUrl
+      previous.imageDataUrl === next.imageDataUrl &&
+      previous.videoDataUrl === next.videoDataUrl
     ) {
       return false;
     }
@@ -3046,6 +3097,10 @@ export class GameRuntime {
     this.leftBillboardState = next;
     if (next.mode === "image" && next.imageDataUrl) {
       this.setLeftBillboardImage(next.imageDataUrl);
+      return true;
+    }
+    if (next.mode === "video_data" && next.videoDataUrl) {
+      this.startLeftBillboardVideoDataPlayback(next.videoDataUrl);
       return true;
     }
 
@@ -3062,8 +3117,26 @@ export class GameRuntime {
     return resolveRuntimeAssetUrl(relativePath);
   }
 
+  stopLeftBillboardVideoPlayback() {
+    this.leftBillboardActiveVideoDataUrl = "";
+    if (this.plazaBillboardLeftVideoEl) {
+      const video = this.plazaBillboardLeftVideoEl;
+      this.plazaBillboardLeftVideoEl = null;
+      video.onended = null;
+      video.onerror = null;
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
+    }
+    if (this.plazaBillboardLeftVideoTexture) {
+      this.plazaBillboardLeftVideoTexture.dispose();
+      this.plazaBillboardLeftVideoTexture = null;
+    }
+  }
+
   stopRightBillboardVideoPlayback() {
     this.rightBillboardActiveVideoId = "";
+    this.rightBillboardActiveVideoDataUrl = "";
     if (this.plazaBillboardRightVideoEl) {
       const video = this.plazaBillboardRightVideoEl;
       this.plazaBillboardRightVideoEl = null;
@@ -3100,6 +3173,7 @@ export class GameRuntime {
       this.resetLeftBillboardImage();
       return;
     }
+    this.stopLeftBillboardVideoPlayback();
     // Dispose previous custom texture
     this.plazaBillboardLeftCustomTexture?.dispose();
     this.plazaBillboardLeftCustomTexture = null;
@@ -3128,11 +3202,83 @@ export class GameRuntime {
   }
 
   resetLeftBillboardImage() {
+    this.stopLeftBillboardVideoPlayback();
     this.plazaBillboardLeftCustomTexture?.dispose();
     this.plazaBillboardLeftCustomTexture = null;
     if (!this.plazaBillboardLeftScreenMaterial) return;
     this.plazaBillboardLeftScreenMaterial.map = this.plazaBillboardAdTexture ?? null;
     this.plazaBillboardLeftScreenMaterial.needsUpdate = true;
+  }
+
+  startLeftBillboardVideoDataPlayback(rawVideoDataUrl) {
+    const videoDataUrl = this.normalizeBillboardVideoDataUrl(rawVideoDataUrl);
+    if (!videoDataUrl || !this.plazaBillboardLeftScreenMaterial) {
+      this.resetLeftBillboardImage();
+      return false;
+    }
+
+    if (
+      this.leftBillboardActiveVideoDataUrl === videoDataUrl &&
+      this.plazaBillboardLeftVideoEl &&
+      !this.plazaBillboardLeftVideoEl.ended
+    ) {
+      return true;
+    }
+
+    this.plazaBillboardLeftCustomTexture?.dispose();
+    this.plazaBillboardLeftCustomTexture = null;
+    this.stopLeftBillboardVideoPlayback();
+
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    video.playsInline = true;
+    video.muted = true;
+    video.loop = true;
+    video.crossOrigin = "anonymous";
+    video.disablePictureInPicture = true;
+    video.setAttribute("playsinline", "true");
+    video.setAttribute("webkit-playsinline", "true");
+    video.setAttribute("disableremoteplayback", "true");
+    video.src = videoDataUrl;
+    video.currentTime = 0;
+
+    const texture = new THREE.VideoTexture(video);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.generateMipmaps = false;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+
+    this.plazaBillboardLeftVideoEl = video;
+    this.plazaBillboardLeftVideoTexture = texture;
+    this.leftBillboardActiveVideoDataUrl = videoDataUrl;
+
+    video.addEventListener(
+      "canplay",
+      () => {
+        if (this.plazaBillboardLeftVideoEl !== video) return;
+        if (this.plazaBillboardLeftScreenMaterial) {
+          this.plazaBillboardLeftScreenMaterial.map = texture;
+          this.plazaBillboardLeftScreenMaterial.needsUpdate = true;
+        }
+      },
+      { once: true }
+    );
+
+    const finishPlayback = () => {
+      if (this.plazaBillboardLeftVideoEl !== video) {
+        return;
+      }
+      this.handleLeftBillboardVideoDataFinished(videoDataUrl);
+    };
+    video.onended = null;
+    video.onerror = finishPlayback;
+
+    video.play().catch(() => {
+      finishPlayback();
+    });
+    return true;
   }
 
   startRightBillboardVideoPlayback(rawVideoId) {
@@ -3182,6 +3328,7 @@ export class GameRuntime {
     this.plazaBillboardRightVideoEl = video;
     this.plazaBillboardRightVideoTexture = texture;
     this.rightBillboardActiveVideoId = videoId;
+    this.rightBillboardActiveVideoDataUrl = "";
 
     // Keep showing the AD image until video has enough data to display,
     // so joining players see the AD briefly instead of a black frame.
@@ -3231,7 +3378,8 @@ export class GameRuntime {
     if (
       !force &&
       previous.mode === next.mode &&
-      previous.videoId === next.videoId
+      previous.videoId === next.videoId &&
+      previous.videoDataUrl === next.videoDataUrl
     ) {
       return false;
     }
@@ -3240,6 +3388,10 @@ export class GameRuntime {
     this.syncRightBillboardHostUi();
     if (next.mode === "video" && next.videoId) {
       this.startRightBillboardVideoPlayback(next.videoId);
+      return true;
+    }
+    if (next.mode === "video_data" && next.videoDataUrl) {
+      this.startRightBillboardVideoDataPlayback(next.videoDataUrl);
       return true;
     }
 
@@ -3279,10 +3431,57 @@ export class GameRuntime {
     const fallbackState = {
       mode: "ad",
       videoId: "",
+      videoDataUrl: "",
       updatedAt: Date.now()
     };
     this.applyRightBillboardState(fallbackState, { force: true });
     this.requestRightBillboardReset({ announceErrors: false });
+  }
+
+  handleLeftBillboardVideoDataFinished(rawVideoDataUrl) {
+    const finishedVideoDataUrl = this.normalizeBillboardVideoDataUrl(rawVideoDataUrl);
+    const current = this.normalizeLeftBillboardState(this.leftBillboardState);
+    if (
+      current.mode !== "video_data" ||
+      !current.videoDataUrl ||
+      (finishedVideoDataUrl && current.videoDataUrl !== finishedVideoDataUrl)
+    ) {
+      return;
+    }
+
+    const fallbackState = {
+      mode: "ad",
+      imageDataUrl: "",
+      videoDataUrl: "",
+      updatedAt: Date.now()
+    };
+    this.applyLeftBillboardState(fallbackState, { force: true });
+    if (this.isRoomHost || this.canUseOfflineHostMode()) {
+      this.requestLeftBillboardReset({ announceErrors: false });
+    }
+  }
+
+  handleRightBillboardVideoDataFinished(rawVideoDataUrl) {
+    const finishedVideoDataUrl = this.normalizeBillboardVideoDataUrl(rawVideoDataUrl);
+    const current = this.normalizeRightBillboardState(this.rightBillboardState);
+    if (
+      current.mode !== "video_data" ||
+      !current.videoDataUrl ||
+      (finishedVideoDataUrl && current.videoDataUrl !== finishedVideoDataUrl)
+    ) {
+      return;
+    }
+
+    const fallbackState = {
+      mode: "ad",
+      videoId: "",
+      videoDataUrl: "",
+      updatedAt: Date.now()
+    };
+    this.applyRightBillboardState(fallbackState, { force: true });
+    if (this.isRoomHost || this.canUseOfflineHostMode()) {
+      this.requestRightBillboardReset({ announceErrors: false });
+    }
   }
 
   requestLeftBillboardImageSet(rawImageDataUrl) {
@@ -3337,6 +3536,7 @@ export class GameRuntime {
           {
             mode: "ad",
             imageDataUrl: "",
+            videoDataUrl: "",
             updatedAt: Date.now()
           },
           { force: true }
@@ -3413,6 +3613,129 @@ export class GameRuntime {
     });
   }
 
+  requestBillboardVideoDataSet(rawVideoDataUrl, rawTarget) {
+    const target = this.normalizeBillboardVideoTarget(rawTarget);
+    if (!target) {
+      this.appendChatLine("", "전광판 대상(왼쪽/오른쪽/양쪽)을 선택하세요.", "system");
+      return;
+    }
+    const videoDataUrl = this.normalizeBillboardVideoDataUrl(rawVideoDataUrl);
+    if (!videoDataUrl) {
+      this.appendChatLine("", "MP4 파일을 다시 선택하세요.", "system");
+      return;
+    }
+
+    const localHostMode = this.canUseOfflineHostMode();
+    if (!this.socket || !this.networkConnected) {
+      if (localHostMode) {
+        const updatedAt = Date.now();
+        if (target === "left" || target === "both") {
+          this.applyLeftBillboardState(
+            {
+              mode: "video_data",
+              imageDataUrl: "",
+              videoDataUrl,
+              updatedAt
+            },
+            { force: true }
+          );
+        }
+        if (target === "right" || target === "both") {
+          this.applyRightBillboardState(
+            {
+              mode: "video_data",
+              videoId: "",
+              videoDataUrl,
+              updatedAt
+            },
+            { force: true }
+          );
+        }
+        return;
+      }
+      this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
+      return;
+    }
+
+    if (!this.isRoomHost) {
+      this.appendChatLine("", "전광판 제어는 방장만 가능합니다.", "system");
+      return;
+    }
+    if (this.billboardVideoSetInFlight) {
+      return;
+    }
+
+    this.billboardVideoSetInFlight = true;
+    this.syncHostControls();
+    this.socket.emit(
+      "billboard:video:set",
+      { videoDataUrl, target },
+      (response = {}) => {
+        this.billboardVideoSetInFlight = false;
+        this.syncHostControls();
+        if (!response?.ok) {
+          const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
+          this.appendChatLine("", `실시간 MP4 적용 실패: ${reason}`, "system");
+          return;
+        }
+        if (response?.leftState && typeof response.leftState === "object") {
+          this.applyLeftBillboardState(response.leftState, { force: true });
+        }
+        if (response?.rightState && typeof response.rightState === "object") {
+          this.applyRightBillboardState(response.rightState, { force: true });
+        }
+      }
+    );
+  }
+
+  handleHostBillboardVideoFileSelected(file) {
+    if (!file) {
+      return;
+    }
+    const fileName = String(file.name ?? "").trim();
+    const lowerName = fileName.toLowerCase();
+    const fileType = String(file.type ?? "").trim().toLowerCase();
+    const isVideoFile =
+      fileType.startsWith("video/") || lowerName.endsWith(".mp4") || lowerName.endsWith(".webm");
+    if (!isVideoFile) {
+      this.hostBillboardVideoPendingDataUrl = "";
+      this.hostBillboardVideoPendingName = "";
+      this.appendChatLine("", "영상 파일(mp4/webm)만 업로드할 수 있습니다.", "system");
+      return;
+    }
+    const fileSize = Number(file.size) || 0;
+    if (fileSize <= 0 || fileSize > MAX_BILLBOARD_VIDEO_BYTES) {
+      this.hostBillboardVideoPendingDataUrl = "";
+      this.hostBillboardVideoPendingName = "";
+      this.appendChatLine("", "영상이 너무 큽니다. 7MB 이하 파일을 선택하세요.", "system");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = this.normalizeBillboardVideoDataUrl(String(event?.target?.result ?? ""));
+      if (!dataUrl) {
+        this.hostBillboardVideoPendingDataUrl = "";
+        this.hostBillboardVideoPendingName = "";
+        this.appendChatLine("", "영상 파일을 읽지 못했습니다.", "system");
+        return;
+      }
+      this.hostBillboardVideoPendingDataUrl = dataUrl;
+      this.hostBillboardVideoPendingName = fileName || "video.mp4";
+      this.appendChatLine(
+        "",
+        `실시간 영상 선택됨: ${this.hostBillboardVideoPendingName} (버튼으로 왼/오/양쪽 적용)`,
+        "system"
+      );
+    };
+    reader.onerror = () => {
+      this.hostBillboardVideoPendingDataUrl = "";
+      this.hostBillboardVideoPendingName = "";
+      this.appendChatLine("", "영상 파일을 읽지 못했습니다.", "system");
+    };
+    reader.readAsDataURL(file);
+  }
+
   requestRightBillboardReset({ announceErrors = true } = {}) {
     const localHostMode = this.canUseOfflineHostMode();
     if (!this.socket || !this.networkConnected) {
@@ -3421,6 +3744,7 @@ export class GameRuntime {
           {
             mode: "ad",
             videoId: "",
+            videoDataUrl: "",
             updatedAt: Date.now()
           },
           { force: true }
@@ -8442,6 +8766,7 @@ export class GameRuntime {
       this.aZonePortalTargetSetInFlight ||
       this.leftBillboardSetInFlight ||
       this.rightBillboardResetInFlight ||
+      this.billboardVideoSetInFlight ||
       this.hostMusicSetInFlight ||
       this.securityTestSetInFlight ||
       this.editorSettingsSetInFlight;
@@ -8502,6 +8827,18 @@ export class GameRuntime {
     if (this.hostResetRightVideoBtnEl) {
       this.hostResetRightVideoBtnEl.disabled = controlsBusy;
     }
+    if (this.hostBillboardVideoFileInputEl) {
+      this.hostBillboardVideoFileInputEl.disabled = controlsBusy;
+    }
+    if (this.hostBillboardVideoPlayLeftBtnEl) {
+      this.hostBillboardVideoPlayLeftBtnEl.disabled = controlsBusy;
+    }
+    if (this.hostBillboardVideoPlayRightBtnEl) {
+      this.hostBillboardVideoPlayRightBtnEl.disabled = controlsBusy;
+    }
+    if (this.hostBillboardVideoPlayBothBtnEl) {
+      this.hostBillboardVideoPlayBothBtnEl.disabled = controlsBusy;
+    }
     if (this.hostSecurityTestToggleBtnEl) {
       const enabled = Boolean(this.securityTestState?.enabled);
       const nextLabel = enabled ? "보안 테스트: ON" : "보안 테스트: OFF";
@@ -8541,8 +8878,19 @@ export class GameRuntime {
     if (this.editorSettingsApplyBtnEl) {
       this.editorSettingsApplyBtnEl.disabled = controlsBusy;
     }
+    if (this.platformEditorSaveBtnEl) {
+      this.platformEditorSaveBtnEl.disabled = controlsBusy;
+    }
+    if (this.platformEditorDeleteOneBtnEl) {
+      this.platformEditorDeleteOneBtnEl.disabled = controlsBusy || this.jumpPlatforms.length <= 0;
+    }
+    if (this.platformEditorClearBtnEl) {
+      const hasAnyPlacedEditorItem = this.jumpPlatforms.length > 0 || this.jumpRopes.length > 0;
+      this.platformEditorClearBtnEl.disabled = controlsBusy || !hasAnyPlacedEditorItem;
+    }
     const hostCustomTotal = this.getHostCustomPaintBlockEntries().length;
     const hostCustomAvailable = this.getHostCustomPaintBlockAvailableCount();
+    const hostCustomVisible = this.getVisibleHostCustomPaintBlockEntries().length;
     const hostCustomPreviewActive = this.hostCustomBlockPlacementPreviewActive;
     const hostCustomDisabled =
       controlsBusy || (hostCustomAvailable <= 0 && !hostCustomPreviewActive);
@@ -8563,6 +8911,9 @@ export class GameRuntime {
         this.hostGrayObjectAddBtnEl.textContent = nextLabel;
       }
       this.hostGrayObjectAddBtnEl.disabled = hostCustomDisabled;
+    }
+    if (this.hostGrayObjectDeleteBtnEl) {
+      this.hostGrayObjectDeleteBtnEl.disabled = controlsBusy || hostCustomVisible <= 0;
     }
     this.syncObjectEditorSettingsUi();
     for (const button of this.hostRightVideoQuickButtons ?? []) {
@@ -10658,7 +11009,9 @@ export class GameRuntime {
       this.appendChatLine("", "포탈 닫기는 방장만 가능합니다.", "system");
       return;
     }
-    if (!this.hubFlowEnabled || this.flowStage !== "city_live") {
+    const computed = this.getPortalScheduleComputed();
+    const portalOpenNow = computed.mode === "open" || computed.mode === "open_manual";
+    if ((!this.hubFlowEnabled || this.flowStage !== "city_live") && !portalOpenNow) {
       this.appendChatLine("", "도시 라이브 단계에서만 포탈 닫기 가능합니다.", "system");
       return;
     }
@@ -12792,6 +13145,37 @@ export class GameRuntime {
         this.requestRightBillboardReset({ announceErrors: true });
       });
     }
+    if (this.hostBillboardVideoFileInputEl) {
+      this.hostBillboardVideoFileInputEl.addEventListener("change", () => {
+        const file = this.hostBillboardVideoFileInputEl?.files?.[0] ?? null;
+        this.handleHostBillboardVideoFileSelected(file);
+        this.hostBillboardVideoFileInputEl.value = "";
+      });
+    }
+    const applyPendingBillboardVideo = (target) => {
+      const dataUrl = this.normalizeBillboardVideoDataUrl(this.hostBillboardVideoPendingDataUrl);
+      if (!dataUrl) {
+        this.appendChatLine("", "먼저 실시간 MP4 파일을 선택하세요.", "system");
+        this.hostBillboardVideoFileInputEl?.focus?.();
+        return;
+      }
+      this.requestBillboardVideoDataSet(dataUrl, target);
+    };
+    if (this.hostBillboardVideoPlayLeftBtnEl) {
+      this.hostBillboardVideoPlayLeftBtnEl.addEventListener("click", () => {
+        applyPendingBillboardVideo("left");
+      });
+    }
+    if (this.hostBillboardVideoPlayRightBtnEl) {
+      this.hostBillboardVideoPlayRightBtnEl.addEventListener("click", () => {
+        applyPendingBillboardVideo("right");
+      });
+    }
+    if (this.hostBillboardVideoPlayBothBtnEl) {
+      this.hostBillboardVideoPlayBothBtnEl.addEventListener("click", () => {
+        applyPendingBillboardVideo("both");
+      });
+    }
     if (this.hostSecurityTestToggleBtnEl) {
       this.hostSecurityTestToggleBtnEl.addEventListener("click", () => {
         this.requestHostSecurityTestToggle(!this.securityTestState.enabled);
@@ -13029,6 +13413,9 @@ export class GameRuntime {
       this.saveRopes({ forceFlush: true });
       this.saveObjectPositions({ forceFlush: true });
     });
+    this.platformEditorDeleteOneBtnEl?.addEventListener("click", () => {
+      this.requestDeletePlatformFromHostPanel();
+    });
     this.platformEditorClearBtnEl?.addEventListener("click", () => {
       for (const mesh of this.jumpPlatformMeshes) {
         this.scene.remove(mesh);
@@ -13062,6 +13449,9 @@ export class GameRuntime {
     });
     this.hostGrayObjectAddBtnEl?.addEventListener("click", () => {
       this.requestHostCustomPaintBlockAdd();
+    });
+    this.hostGrayObjectDeleteBtnEl?.addEventListener("click", () => {
+      this.requestDeleteHostCustomPaintBlockFromHostPanel();
     });
     const handleHostGraySizeEnter = (event) => {
       if (event.code !== "Enter") {
@@ -13340,6 +13730,18 @@ export class GameRuntime {
     if (!this.hostResetRightVideoBtnEl) {
       this.hostResetRightVideoBtnEl = document.getElementById("host-right-reset");
     }
+    if (!this.hostBillboardVideoFileInputEl) {
+      this.hostBillboardVideoFileInputEl = document.getElementById("host-billboard-video-file");
+    }
+    if (!this.hostBillboardVideoPlayLeftBtnEl) {
+      this.hostBillboardVideoPlayLeftBtnEl = document.getElementById("host-billboard-video-play-left");
+    }
+    if (!this.hostBillboardVideoPlayRightBtnEl) {
+      this.hostBillboardVideoPlayRightBtnEl = document.getElementById("host-billboard-video-play-right");
+    }
+    if (!this.hostBillboardVideoPlayBothBtnEl) {
+      this.hostBillboardVideoPlayBothBtnEl = document.getElementById("host-billboard-video-play-both");
+    }
     if (!this.hostSecurityTestToggleBtnEl) {
       this.hostSecurityTestToggleBtnEl = document.getElementById("host-security-test-toggle");
     }
@@ -13475,6 +13877,9 @@ export class GameRuntime {
     if (!this.platformEditorCountEl) {
       this.platformEditorCountEl = document.getElementById("platform-editor-count");
     }
+    if (!this.platformEditorDeleteOneBtnEl) {
+      this.platformEditorDeleteOneBtnEl = document.getElementById("platform-editor-delete-one");
+    }
     if (!this.ropeEditorCountEl) {
       this.ropeEditorCountEl = document.getElementById("rope-editor-count");
     }
@@ -13510,6 +13915,9 @@ export class GameRuntime {
     }
     if (!this.hostGrayObjectAddBtnEl) {
       this.hostGrayObjectAddBtnEl = document.getElementById("host-gray-object-add");
+    }
+    if (!this.hostGrayObjectDeleteBtnEl) {
+      this.hostGrayObjectDeleteBtnEl = document.getElementById("host-gray-object-delete");
     }
     this.chalkColorButtons = Array.from(document.querySelectorAll(".chalk-color[data-color]"));
     this.toolButtons = Array.from(document.querySelectorAll(".tool-slot[data-tool]"));
@@ -13912,6 +14320,7 @@ export class GameRuntime {
       this.objectStateAutosaveClock = 0;
       this.leftBillboardSetInFlight = false;
       this.rightBillboardResetInFlight = false;
+      this.billboardVideoSetInFlight = false;
       this.hostMusicSetInFlight = false;
       this.applySharedMusicState({ mode: "idle" }, { announce: false });
       this.portalForceOpenInFlight = false;
@@ -13976,6 +14385,7 @@ export class GameRuntime {
       this.objectStateAutosaveClock = 0;
       this.leftBillboardSetInFlight = false;
       this.rightBillboardResetInFlight = false;
+      this.billboardVideoSetInFlight = false;
       this.hostMusicSetInFlight = false;
       this.remoteSyncClock = 0;
       this.remoteUpdateClock = 0;
@@ -14050,6 +14460,7 @@ export class GameRuntime {
       this.objectStateAutosaveClock = 0;
       this.leftBillboardSetInFlight = false;
       this.rightBillboardResetInFlight = false;
+      this.billboardVideoSetInFlight = false;
       this.hostMusicSetInFlight = false;
       this.securityTestSetInFlight = false;
       this.authoritativeStateSyncInFlight = false;
@@ -14108,6 +14519,7 @@ export class GameRuntime {
       this.objectStateAutosaveClock = 0;
       this.leftBillboardSetInFlight = false;
       this.rightBillboardResetInFlight = false;
+      this.billboardVideoSetInFlight = false;
       this.hostMusicSetInFlight = false;
       this.securityTestSetInFlight = false;
       this.authoritativeStateSyncInFlight = false;
@@ -16350,6 +16762,34 @@ export class GameRuntime {
     return null;
   }
 
+  pickMovableEntryAtScreenCenter() {
+    if (!this.camera || !this.movableObjects.length) {
+      return null;
+    }
+    this.objEditorMouseNdc.set(0, 0);
+    this.objEditorRaycaster.setFromCamera(this.objEditorMouseNdc, this.camera);
+    const meshes = [];
+    for (const entry of this.movableObjects) {
+      if (entry?.mesh?.visible) {
+        meshes.push(entry.mesh);
+      }
+    }
+    if (!meshes.length) {
+      return null;
+    }
+    const intersections = this.objEditorRaycaster.intersectObjects(meshes, true);
+    if (!intersections.length) {
+      return null;
+    }
+    for (const intersection of intersections) {
+      const entry = this.findMovableEntryForObject(intersection?.object);
+      if (entry?.mesh) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
   collectObjEditorHighlightTargets(root) {
     if (!root) {
       return [];
@@ -16904,6 +17344,10 @@ export class GameRuntime {
     return this.movableObjects.filter((entry) => entry?.isHostCustomPaintBlock && entry?.mesh);
   }
 
+  getVisibleHostCustomPaintBlockEntries() {
+    return this.getHostCustomPaintBlockEntries().filter((entry) => entry?.mesh?.visible === true);
+  }
+
   getHostCustomPaintBlockAvailableCount() {
     return this.getHostCustomPaintBlockEntries().filter((entry) => entry.mesh.visible !== true).length;
   }
@@ -16914,6 +17358,73 @@ export class GameRuntime {
       return null;
     }
     return entries.find((entry) => entry?.mesh?.visible !== true) ?? null;
+  }
+
+  removeHostCustomPaintBlockEntry(
+    entry,
+    { announce = true, announceErrors = true, forceFlush = true } = {}
+  ) {
+    if (!entry?.mesh || entry?.isHostCustomPaintBlock !== true) {
+      if (announceErrors) {
+        this.appendChatLine("", "삭제할 회색 오브젝트를 찾지 못했습니다.", "system");
+      }
+      return false;
+    }
+    const objectId = String(entry.id ?? "").trim() || "host_custom_block";
+    if (entry === this.objEditorSelected) {
+      this.clearObjEditorSelection();
+    }
+
+    this.setMovableObjectVisibility(entry, false);
+    const defaultPosition = entry.defaultPosition;
+    if (defaultPosition && Number.isFinite(defaultPosition.x)) {
+      entry.mesh.position.copy(defaultPosition);
+    } else {
+      entry.mesh.position.set(0, -920, 0);
+    }
+    const defaultScale = entry.defaultScale;
+    if (defaultScale && Number.isFinite(defaultScale.x)) {
+      entry.mesh.scale.copy(defaultScale);
+    } else {
+      entry.mesh.scale.set(1, 1, 1);
+    }
+    this.updateMovableObjectCollider(entry);
+    this.updateSecurityTestLabelForEntry(entry);
+    this.updateObjEditorInfoEl(this.objEditorSelected);
+    this.markObjectStateDirty();
+    this.saveObjectPositions({ announceErrors, forceFlush });
+    this.syncHostControls();
+    if (announce) {
+      this.appendChatLine("", `회색 오브젝트 삭제: ${objectId}`, "system");
+    }
+    return true;
+  }
+
+  requestDeleteHostCustomPaintBlockFromHostPanel() {
+    if (!this.hasHostPrivilege()) {
+      if (this.socket && this.networkConnected) {
+        this.requestHostClaim({ manual: true });
+      }
+      this.appendChatLine("", "회색 오브젝트 삭제는 방장만 가능합니다.", "system");
+      return false;
+    }
+    if (this.hostCustomBlockPlacementPreviewActive) {
+      this.clearHostCustomBlockPlacementPreview({ syncUi: true });
+    }
+
+    const selected = this.objEditorSelected;
+    if (selected?.isHostCustomPaintBlock && selected?.mesh?.visible === true) {
+      return this.removeHostCustomPaintBlockEntry(selected, { announce: true, forceFlush: true });
+    }
+
+    const centerEntry = this.pickMovableEntryAtScreenCenter();
+    if (centerEntry?.isHostCustomPaintBlock && centerEntry?.mesh?.visible === true) {
+      this.selectObjEditorEntry(centerEntry);
+      return this.removeHostCustomPaintBlockEntry(centerEntry, { announce: true, forceFlush: true });
+    }
+
+    this.appendChatLine("", "삭제할 회색 오브젝트를 선택하거나 화면 중앙에 맞춰주세요.", "system");
+    return false;
   }
 
   normalizeHostCustomBlockSize(rawValue, fallback = HOST_CUSTOM_BLOCK_DEFAULT_SIZE) {
@@ -17089,6 +17600,89 @@ export class GameRuntime {
     return true;
   }
 
+  startRightBillboardVideoDataPlayback(rawVideoDataUrl) {
+    const videoDataUrl = this.normalizeBillboardVideoDataUrl(rawVideoDataUrl);
+    if (!videoDataUrl || !this.plazaBillboardRightScreenMaterial) {
+      this.showDefaultBillboardAdOnRight();
+      return false;
+    }
+
+    if (
+      this.rightBillboardActiveVideoDataUrl === videoDataUrl &&
+      this.plazaBillboardRightVideoEl &&
+      !this.plazaBillboardRightVideoEl.ended
+    ) {
+      return true;
+    }
+
+    this.stopRightBillboardVideoPlayback();
+
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    video.playsInline = true;
+    video.muted = false;
+    video.loop = true;
+    video.crossOrigin = "anonymous";
+    video.disablePictureInPicture = true;
+    video.setAttribute("playsinline", "true");
+    video.setAttribute("webkit-playsinline", "true");
+    video.setAttribute("disableremoteplayback", "true");
+    video.src = videoDataUrl;
+    video.currentTime = 0;
+
+    const texture = new THREE.VideoTexture(video);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.generateMipmaps = false;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+
+    this.plazaBillboardRightVideoEl = video;
+    this.plazaBillboardRightVideoTexture = texture;
+    this.rightBillboardActiveVideoId = "";
+    this.rightBillboardActiveVideoDataUrl = videoDataUrl;
+
+    video.addEventListener(
+      "canplay",
+      () => {
+        if (this.plazaBillboardRightVideoEl !== video) return;
+        if (this.plazaBillboardRightScreenMaterial) {
+          this.plazaBillboardRightScreenMaterial.map = texture;
+          this.plazaBillboardRightScreenMaterial.needsUpdate = true;
+        }
+      },
+      { once: true }
+    );
+
+    const finishPlayback = () => {
+      if (this.plazaBillboardRightVideoEl !== video) {
+        return;
+      }
+      this.handleRightBillboardVideoDataFinished(videoDataUrl);
+    };
+    video.onended = null;
+    video.onerror = finishPlayback;
+
+    video.play().then(
+      () => {
+        this.updateSpatialAudioMix();
+      },
+      () => {
+        video.muted = true;
+        video.play().then(
+          () => {
+            this.updateSpatialAudioMix();
+          },
+          () => {
+            finishPlayback();
+          }
+        );
+      }
+    );
+    return true;
+  }
+
   confirmHostCustomBlockPlacementPreview() {
     if (!this.hostCustomBlockPlacementPreviewActive) {
       return false;
@@ -17171,6 +17765,87 @@ export class GameRuntime {
       return this.confirmHostCustomBlockPlacementPreview();
     }
     return this.beginHostCustomBlockPlacementPreview();
+  }
+
+  findPlatformMeshIndexForObject(object) {
+    if (!object || !this.jumpPlatformMeshes.length) {
+      return -1;
+    }
+    let current = object;
+    while (current) {
+      const index = this.jumpPlatformMeshes.indexOf(current);
+      if (index >= 0) {
+        return index;
+      }
+      current = current.parent ?? null;
+    }
+    return -1;
+  }
+
+  pickPlatformIndexAtScreenCenter() {
+    if (!this.camera || !this.jumpPlatformMeshes.length) {
+      return -1;
+    }
+    this.objEditorMouseNdc.set(0, 0);
+    this.objEditorRaycaster.setFromCamera(this.objEditorMouseNdc, this.camera);
+    const intersections = this.objEditorRaycaster.intersectObjects(this.jumpPlatformMeshes, true);
+    if (!intersections.length) {
+      return -1;
+    }
+    for (const intersection of intersections) {
+      const index = this.findPlatformMeshIndexForObject(intersection?.object);
+      if (index >= 0) {
+        return index;
+      }
+    }
+    return -1;
+  }
+
+  removePlatformAtIndex(index, { announce = true, forceFlush = true } = {}) {
+    const safeIndex = Math.trunc(Number(index));
+    if (safeIndex < 0 || safeIndex >= this.jumpPlatforms.length || safeIndex >= this.jumpPlatformMeshes.length) {
+      return false;
+    }
+
+    const removedPlatform = this.jumpPlatforms.splice(safeIndex, 1)[0];
+    const removedMesh = this.jumpPlatformMeshes.splice(safeIndex, 1)[0];
+    if (removedMesh) {
+      this.scene.remove(removedMesh);
+      removedMesh.geometry?.dispose?.();
+      removedMesh.material?.dispose?.();
+    }
+    this.rebuildPlatformSpatialIndex();
+    this.updatePlatformEditorCount();
+    this.savePlatforms({ forceFlush });
+    if (announce && removedPlatform) {
+      this.appendChatLine(
+        "",
+        `발판 삭제 (${(Number(removedPlatform.x) || 0).toFixed(1)}, ${(Number(removedPlatform.y) || 0).toFixed(1)}, ${(Number(removedPlatform.z) || 0).toFixed(1)})`,
+        "system"
+      );
+    }
+    return true;
+  }
+
+  requestDeletePlatformFromHostPanel() {
+    if (!this.hasHostPrivilege()) {
+      if (this.socket && this.networkConnected) {
+        this.requestHostClaim({ manual: true });
+      }
+      this.appendChatLine("", "발판 삭제는 방장만 가능합니다.", "system");
+      return false;
+    }
+    if (!this.jumpPlatforms.length) {
+      this.appendChatLine("", "삭제할 발판이 없습니다.", "system");
+      return false;
+    }
+
+    const targetIndex = this.pickPlatformIndexAtScreenCenter();
+    if (targetIndex < 0) {
+      this.appendChatLine("", "삭제할 발판을 화면 중앙에 맞춰주세요.", "system");
+      return false;
+    }
+    return this.removePlatformAtIndex(targetIndex, { announce: true, forceFlush: true });
   }
 
   undoLastPlatform() {

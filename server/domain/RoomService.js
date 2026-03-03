@@ -31,6 +31,7 @@ const RIGHT_BILLBOARD_VIDEO_ID_LOOKUP = Object.freeze(
   })
 );
 const MAX_LEFT_BILLBOARD_IMAGE_CHARS = 4_200_000;
+const MAX_BILLBOARD_VIDEO_DATA_URL_CHARS = 10_500_000;
 const SURFACE_PAINT_STORE_VERSION = 1;
 const MAX_SHARED_AUDIO_DATA_URL_CHARS = 12_000_000;
 const MAX_SHARED_AUDIO_NAME_CHARS = 120;
@@ -323,6 +324,7 @@ function createRightBillboardState() {
   return {
     mode: "ad",
     videoId: "",
+    videoDataUrl: "",
     updatedAt: Date.now()
   };
 }
@@ -331,6 +333,7 @@ function createLeftBillboardState() {
   return {
     mode: "ad",
     imageDataUrl: "",
+    videoDataUrl: "",
     updatedAt: Date.now()
   };
 }
@@ -518,6 +521,25 @@ function normalizeLeftBillboardImageDataUrl(rawValue) {
     return "";
   }
   return value;
+}
+
+function normalizeBillboardVideoDataUrl(rawValue) {
+  const value = String(rawValue ?? "").trim();
+  if (!value || value.length > MAX_BILLBOARD_VIDEO_DATA_URL_CHARS) {
+    return "";
+  }
+  if (!/^data:video\/[a-z0-9.+-]+;base64,/i.test(value)) {
+    return "";
+  }
+  return value;
+}
+
+function normalizeBillboardVideoTarget(rawValue) {
+  const text = String(rawValue ?? "").trim().toLowerCase();
+  if (text === "left" || text === "right" || text === "both") {
+    return text;
+  }
+  return "";
 }
 
 function createPersistentRoom(code, defaultPortalTargetUrl, defaultAZonePortalTargetUrl) {
@@ -1351,12 +1373,19 @@ export class RoomService {
   serializeLeftBillboard(room) {
     const state = room?.leftBillboard ?? createLeftBillboardState();
     const imageDataUrl = normalizeLeftBillboardImageDataUrl(state.imageDataUrl);
+    const videoDataUrl = normalizeBillboardVideoDataUrl(state.videoDataUrl);
     const modeRaw = String(state.mode ?? "ad").trim().toLowerCase();
-    const mode = modeRaw === "image" && imageDataUrl ? "image" : "ad";
+    let mode = "ad";
+    if (modeRaw === "image" && imageDataUrl) {
+      mode = "image";
+    } else if (modeRaw === "video_data" && videoDataUrl) {
+      mode = "video_data";
+    }
 
     return {
       mode,
       imageDataUrl: mode === "image" ? imageDataUrl : "",
+      videoDataUrl: mode === "video_data" ? videoDataUrl : "",
       updatedAt: Math.max(0, Math.trunc(Number(state.updatedAt) || Date.now()))
     };
   }
@@ -1389,6 +1418,7 @@ export class RoomService {
     }
     room.leftBillboard.mode = "image";
     room.leftBillboard.imageDataUrl = imageDataUrl;
+    room.leftBillboard.videoDataUrl = "";
     room.leftBillboard.updatedAt = Date.now();
     this.scheduleSurfacePaintSave();
 
@@ -1418,6 +1448,7 @@ export class RoomService {
     }
     room.leftBillboard.mode = "ad";
     room.leftBillboard.imageDataUrl = "";
+    room.leftBillboard.videoDataUrl = "";
     room.leftBillboard.updatedAt = Date.now();
     this.scheduleSurfacePaintSave();
 
@@ -1431,12 +1462,19 @@ export class RoomService {
   serializeRightBillboard(room) {
     const state = room?.rightBillboard ?? createRightBillboardState();
     const videoId = normalizeRightBillboardVideoId(state.videoId);
+    const videoDataUrl = normalizeBillboardVideoDataUrl(state.videoDataUrl);
     const modeRaw = String(state.mode ?? "ad").trim().toLowerCase();
-    const mode = modeRaw === "video" && videoId ? "video" : "ad";
+    let mode = "ad";
+    if (modeRaw === "video_data" && videoDataUrl) {
+      mode = "video_data";
+    } else if (modeRaw === "video" && videoId) {
+      mode = "video";
+    }
 
     return {
       mode,
       videoId: mode === "video" ? videoId : "",
+      videoDataUrl: mode === "video_data" ? videoDataUrl : "",
       updatedAt: Math.max(0, Math.trunc(Number(state.updatedAt) || Date.now()))
     };
   }
@@ -1469,6 +1507,7 @@ export class RoomService {
     }
     room.rightBillboard.mode = "video";
     room.rightBillboard.videoId = videoId;
+    room.rightBillboard.videoDataUrl = "";
     room.rightBillboard.updatedAt = Date.now();
     this.scheduleSurfacePaintSave();
 
@@ -1485,7 +1524,7 @@ export class RoomService {
     }
 
     const previous = this.serializeRightBillboard(room);
-    if (previous.mode === "ad" && !previous.videoId) {
+    if (previous.mode === "ad" && !previous.videoId && !previous.videoDataUrl) {
       return {
         ok: true,
         changed: false,
@@ -1498,6 +1537,7 @@ export class RoomService {
     }
     room.rightBillboard.mode = "ad";
     room.rightBillboard.videoId = "";
+    room.rightBillboard.videoDataUrl = "";
     room.rightBillboard.updatedAt = Date.now();
     this.scheduleSurfacePaintSave();
 
@@ -1505,6 +1545,68 @@ export class RoomService {
       ok: true,
       changed: true,
       state: this.serializeRightBillboard(room)
+    };
+  }
+
+  setBillboardVideoData(room, rawVideoDataUrl, rawTarget) {
+    if (!room) {
+      return { ok: false, error: "room not found" };
+    }
+
+    const target = normalizeBillboardVideoTarget(rawTarget);
+    if (!target) {
+      return { ok: false, error: "invalid target" };
+    }
+
+    const videoDataUrl = normalizeBillboardVideoDataUrl(rawVideoDataUrl);
+    if (!videoDataUrl) {
+      return { ok: false, error: "invalid video data" };
+    }
+
+    const previousLeft = this.serializeLeftBillboard(room);
+    const previousRight = this.serializeRightBillboard(room);
+
+    if (!room.leftBillboard || typeof room.leftBillboard !== "object") {
+      room.leftBillboard = createLeftBillboardState();
+    }
+    if (!room.rightBillboard || typeof room.rightBillboard !== "object") {
+      room.rightBillboard = createRightBillboardState();
+    }
+
+    const now = Date.now();
+    if (target === "left" || target === "both") {
+      room.leftBillboard.mode = "video_data";
+      room.leftBillboard.imageDataUrl = "";
+      room.leftBillboard.videoDataUrl = videoDataUrl;
+      room.leftBillboard.updatedAt = now;
+    }
+    if (target === "right" || target === "both") {
+      room.rightBillboard.mode = "video_data";
+      room.rightBillboard.videoId = "";
+      room.rightBillboard.videoDataUrl = videoDataUrl;
+      room.rightBillboard.updatedAt = now;
+    }
+
+    const leftState = this.serializeLeftBillboard(room);
+    const rightState = this.serializeRightBillboard(room);
+    const changed =
+      previousLeft.mode !== leftState.mode ||
+      previousLeft.imageDataUrl !== leftState.imageDataUrl ||
+      previousLeft.videoDataUrl !== leftState.videoDataUrl ||
+      previousRight.mode !== rightState.mode ||
+      previousRight.videoId !== rightState.videoId ||
+      previousRight.videoDataUrl !== rightState.videoDataUrl;
+
+    if (changed) {
+      this.scheduleSurfacePaintSave();
+    }
+
+    return {
+      ok: true,
+      changed,
+      target,
+      leftState,
+      rightState
     };
   }
 
