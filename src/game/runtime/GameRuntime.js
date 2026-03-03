@@ -83,8 +83,8 @@ const RIGHT_BILLBOARD_VIDEO_ID_LOOKUP = Object.freeze(
   }, { ...RIGHT_BILLBOARD_VIDEO_ID_ALIASES })
 );
 const MAX_LEFT_BILLBOARD_IMAGE_CHARS = 4_200_000;
-const MAX_BILLBOARD_VIDEO_DATA_URL_CHARS = 10_500_000;
-const MAX_BILLBOARD_VIDEO_BYTES = 7 * 1024 * 1024;
+const MAX_BILLBOARD_VIDEO_DATA_URL_CHARS = 30_000_000;
+const MAX_BILLBOARD_VIDEO_BYTES = 20 * 1024 * 1024;
 const DEFAULT_PORTAL_TARGET_URL =
   "https://reclaim-fps.vercel.app/";
 const A_ZONE_FIXED_PORTAL_TARGET_URL = "https://reclaim-fps.vercel.app/";
@@ -3000,14 +3000,14 @@ export class GameRuntime {
       board.add(leftColumn, rightColumn, frame, glow, screen);
       cityGroup.add(board);
       if (index === 0) {
-        this.plazaBillboardLeftScreenMaterial = screenMaterial;
-      } else if (index === 1) {
         this.plazaBillboardRightScreenMaterial = screenMaterial;
         this.rightBillboardSourcePosition.set(
           this.citySpawn.x + placement.x,
           frameY,
           this.citySpawn.z + 4 + placement.z
         );
+      } else if (index === 1) {
+        this.plazaBillboardLeftScreenMaterial = screenMaterial;
       }
     });
 
@@ -3557,12 +3557,38 @@ export class GameRuntime {
     if (this.leftBillboardSetInFlight) {
       return;
     }
+
+    // Apply immediately on host side so the video/image stops without waiting for ack.
+    this.applyLeftBillboardState(
+      {
+        mode: "ad",
+        imageDataUrl: "",
+        videoDataUrl: "",
+        updatedAt: Date.now()
+      },
+      { force: true }
+    );
+
     this.leftBillboardSetInFlight = true;
     this.syncHostControls();
-
-    this.socket.emit("billboard:left:reset", {}, (response = {}) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
       this.leftBillboardSetInFlight = false;
       this.syncHostControls();
+    };
+    const timeoutId = window.setTimeout(() => {
+      finish();
+      if (announceErrors) {
+        this.appendChatLine("", "좌측 전광판 초기화 응답이 지연되어 로컬에서 먼저 반영했습니다.", "system");
+      }
+    }, 12000);
+    this.socket.emit("billboard:left:reset", {}, (response = {}) => {
+      window.clearTimeout(timeoutId);
+      finish();
       if (!response?.ok) {
         if (announceErrors) {
           const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
@@ -3707,7 +3733,7 @@ export class GameRuntime {
     if (fileSize <= 0 || fileSize > MAX_BILLBOARD_VIDEO_BYTES) {
       this.hostBillboardVideoPendingDataUrl = "";
       this.hostBillboardVideoPendingName = "";
-      this.appendChatLine("", "영상이 너무 큽니다. 7MB 이하 파일을 선택하세요.", "system");
+      this.appendChatLine("", "영상이 너무 큽니다. 20MB 이하 파일을 선택하세요.", "system");
       return;
     }
 
@@ -3765,12 +3791,38 @@ export class GameRuntime {
     if (this.rightBillboardResetInFlight) {
       return;
     }
+
+    // Apply immediately on host side so right video stops without waiting for ack.
+    this.applyRightBillboardState(
+      {
+        mode: "ad",
+        videoId: "",
+        videoDataUrl: "",
+        updatedAt: Date.now()
+      },
+      { force: true }
+    );
+
     this.rightBillboardResetInFlight = true;
     this.syncHostControls();
-
-    this.socket.emit("billboard:right:reset", {}, (response = {}) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
       this.rightBillboardResetInFlight = false;
       this.syncHostControls();
+    };
+    const timeoutId = window.setTimeout(() => {
+      finish();
+      if (announceErrors) {
+        this.appendChatLine("", "우측 전광판 초기화 응답이 지연되어 로컬에서 먼저 반영했습니다.", "system");
+      }
+    }, 12000);
+    this.socket.emit("billboard:right:reset", {}, (response = {}) => {
+      window.clearTimeout(timeoutId);
+      finish();
       if (!response?.ok) {
         if (announceErrors) {
           const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
@@ -7059,8 +7111,13 @@ export class GameRuntime {
   confirmBridgeName() {
     if (this.hubFlowEnabled && this.flowStage === "boot_intro") {
       const rawBootName = String(this.nicknameInputEl?.value ?? "").trim();
+      this.requestFullscreenOnMobileStartInteraction();
+      this.primeEntryMusicOnMobileStartInteraction();
       const nextName = rawBootName.length > 0 ? this.formatPlayerName(rawBootName) : "게스트";
       this.localPlayerName = nextName;
+      if (rawBootName.length >= 2) {
+        try { localStorage.setItem("emptines_nickname", nextName); } catch (_) {}
+      }
       this.pendingPlayerNameSync = true;
       this.syncPlayerNameIfConnected();
       this.hideNicknameGate();
@@ -8048,6 +8105,70 @@ export class GameRuntime {
         this.triggerPortalTransfer(destination);
       }
     }
+  }
+
+  requestFullscreenOnMobileStartInteraction() {
+    if (!this.mobileEnabled || !this.canUseFullscreenApi() || this.isFullscreenActive()) {
+      return;
+    }
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    const root = document.documentElement;
+    if (!root) {
+      return;
+    }
+
+    const requestFn = root.requestFullscreen ?? root.webkitRequestFullscreen;
+    if (typeof requestFn !== "function") {
+      return;
+    }
+
+    try {
+      const maybePromise = requestFn.call(root, { navigationUI: "hide" });
+      if (maybePromise && typeof maybePromise.catch === "function") {
+        maybePromise.catch(() => {});
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  primeEntryMusicOnMobileStartInteraction() {
+    if (!this.mobileEnabled || this.entryMusicStarted) {
+      return;
+    }
+    if (!this.entryMusicAudioEl) {
+      const audio = new Audio(ENTRY_BGM_URL);
+      audio.preload = "auto";
+      audio.loop = false;
+      audio.volume = this.entryMusicBaseVolume;
+      this.entryMusicAudioEl = audio;
+    }
+
+    const audio = this.entryMusicAudioEl;
+    if (!audio) {
+      return;
+    }
+
+    audio.muted = true;
+    audio.play().then(
+      () => {
+        try {
+          audio.pause();
+          audio.currentTime = 0;
+        } catch {
+          // ignore
+        }
+        audio.muted = false;
+        this.detachEntryMusicUnlockListeners();
+      },
+      () => {
+        audio.muted = false;
+        this.attachEntryMusicUnlockListeners();
+      }
+    );
   }
 
   updatePortalPhase(delta) {
@@ -14098,9 +14219,13 @@ export class GameRuntime {
   loadGraphicsQualityPreference() {
     try {
       const saved = localStorage.getItem(this.graphicsQualityStorageKey);
-      return this.normalizeGraphicsQuality(saved);
+      const text = String(saved ?? "").trim();
+      if (!text) {
+        return this.mobileEnabled ? "high" : "medium";
+      }
+      return this.normalizeGraphicsQuality(text);
     } catch {
-      return "medium";
+      return this.mobileEnabled ? "high" : "medium";
     }
   }
 

@@ -6,7 +6,7 @@ export const DEFAULT_A_ZONE_PORTAL_TARGET_URL =
   "https://reclaim-fps.vercel.app/";
 export const DEFAULT_SURFACE_PAINT_STORE_PATH = "server/data/surface-paint.json";
 export const DEFAULT_SURFACE_PAINT_SAVE_DEBOUNCE_MS = 300;
-export const DEFAULT_MAX_SOCKET_PAYLOAD_BYTES = 12_000_000;
+export const DEFAULT_MAX_SOCKET_PAYLOAD_BYTES = 35_000_000;
 
 const DEFAULT_MAX_ROOM_PLAYERS = 120;
 const MIN_ROOM_PLAYERS = 16;
