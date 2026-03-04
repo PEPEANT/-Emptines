@@ -905,6 +905,16 @@ export class GameRuntime {
     this.portalBillboardCanvas = null;
     this.portalBillboardContext = null;
     this.portalBillboardTexture = null;
+    this.portalBillboardPalette = {
+      bgFrom: "rgba(27, 11, 29, 0.56)",
+      bgTo: "rgba(46, 14, 45, 0.64)",
+      border: "rgba(255, 148, 226, 0.82)",
+      stripe: "rgba(208, 102, 178, 0.16)",
+      shadow: "rgba(255, 156, 228, 0.72)",
+      line1: "#ffe7f8",
+      line2: "#ffc7ee",
+      line3: "#f6b8e7"
+    };
     this.portalBillboardCache = {
       line1: "",
       line2: "",
@@ -1225,6 +1235,16 @@ export class GameRuntime {
     this.portalBillboardCanvas = null;
     this.portalBillboardContext = null;
     this.portalBillboardGroup = null;
+    this.portalBillboardPalette = {
+      bgFrom: "rgba(27, 11, 29, 0.56)",
+      bgTo: "rgba(46, 14, 45, 0.64)",
+      border: "rgba(255, 148, 226, 0.82)",
+      stripe: "rgba(208, 102, 178, 0.16)",
+      shadow: "rgba(255, 156, 228, 0.72)",
+      line1: "#ffe7f8",
+      line2: "#ffc7ee",
+      line3: "#f6b8e7"
+    };
     this.spawnPortalVeilGroup = null;
     this.spawnPortalVeilMaterial = null;
     this.spawnPortalVeilWorldZ = this.bridgeNpcPosition.z;
@@ -2588,7 +2608,24 @@ export class GameRuntime {
     portalCoreGlow.position.y = 2.45;
     portalCoreGlow.renderOrder = 12;
     portalGroup.add(portalCore, portalCoreGlow);
-    const portalBillboard = this.createPortalTimeBillboard();
+    const portalBillboard = this.createPortalTimeBillboard({
+      dynamic: false,
+      topAdImageUrl: PORTAL_TOP_AD_IMAGE_URL,
+      line1: "OX 퀴즈 : 상시 입장 가능",
+      line2: "언제든 포탈 진입 가능",
+      line3: "",
+      rotationY: Math.PI,
+      palette: {
+        bgFrom: "rgba(6, 16, 28, 0.50)",
+        bgTo: "rgba(8, 24, 39, 0.58)",
+        border: "rgba(122, 191, 235, 0.72)",
+        stripe: "rgba(88, 150, 198, 0.12)",
+        shadow: "rgba(90, 199, 255, 0.65)",
+        line1: "#d8f2ff",
+        line2: "#9de7ff",
+        line3: "#8bd6f5"
+      }
+    });
     portalGroup.add(portalBillboard);
 
     const aZonePortalRadius = Math.max(2.4, Number(this.aZonePortalRadius) || this.portalRadius * 0.88);
@@ -2673,45 +2710,24 @@ export class GameRuntime {
     aZonePortalCoreGlow.renderOrder = 12;
     aZonePortalGroup.add(aZonePortalCore, aZonePortalCoreGlow);
 
-    const aZonePortalBillboard = new THREE.Group();
-    aZonePortalBillboard.position.set(0, 8.1, 0);
-    const aZoneBoardWidth = 7.8;
-    const aZoneBoardHeight = 3.4;
-    const aZoneFrame = new THREE.Mesh(
-      new THREE.BoxGeometry(aZoneBoardWidth + 0.36, aZoneBoardHeight + 0.36, 0.28),
-      new THREE.MeshStandardMaterial({
-        color: 0x0f141b,
-        roughness: 0.3,
-        metalness: 0.54,
-        emissive: 0x1c2f43,
-        emissiveIntensity: 0.24
-      })
-    );
-    aZoneFrame.position.z = -0.02;
-    aZoneFrame.castShadow = false;
-    aZoneFrame.receiveShadow = true;
-    const aZoneScreen = new THREE.Mesh(
-      new THREE.PlaneGeometry(aZoneBoardWidth, aZoneBoardHeight),
-      this.createFutureCityFixedBillboardScreenMaterial(A_ZONE_FIXED_PORTAL_IMAGE_URL, 1.08)
-    );
-    aZoneScreen.position.z = 0.16;
-    aZoneScreen.renderOrder = 14;
-    const aZoneGlow = new THREE.Mesh(
-      new THREE.PlaneGeometry(aZoneBoardWidth + 0.4, aZoneBoardHeight + 0.4),
-      new THREE.MeshBasicMaterial({
-        color: 0x6cf6ff,
-        transparent: true,
-        opacity: 0.2,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-        fog: false,
-        toneMapped: false
-      })
-    );
-    aZoneGlow.position.z = 0.14;
-    aZoneGlow.renderOrder = 13;
-    aZonePortalBillboard.add(aZoneFrame, aZoneGlow, aZoneScreen);
+    const aZonePortalBillboard = this.createPortalTimeBillboard({
+      dynamic: false,
+      topAdImageUrl: A_ZONE_FIXED_PORTAL_IMAGE_URL,
+      line1: "FPS 포탈 : 상시 입장 가능",
+      line2: "언제든 포탈 진입 가능",
+      line3: "",
+      rotationY: 0,
+      palette: {
+        bgFrom: "rgba(6, 16, 28, 0.50)",
+        bgTo: "rgba(8, 24, 39, 0.58)",
+        border: "rgba(122, 191, 235, 0.72)",
+        stripe: "rgba(88, 150, 198, 0.12)",
+        shadow: "rgba(90, 199, 255, 0.65)",
+        line1: "#d8f2ff",
+        line2: "#9de7ff",
+        line3: "#8bd6f5"
+      }
+    });
     aZonePortalGroup.add(aZonePortalBillboard);
 
     const hallPortalRadius = Math.max(2.2, Number(this.hallPortalRadius) || this.portalRadius * 0.92);
@@ -2790,45 +2806,21 @@ export class GameRuntime {
     hallPortalCoreGlow.renderOrder = 12;
     hallPortalGroup.add(hallPortalCore, hallPortalCoreGlow);
 
-    const hallPortalBillboard = new THREE.Group();
-    hallPortalBillboard.position.set(0, 8.1, 0);
-    const hallBoardWidth = 7.8;
-    const hallBoardHeight = 3.4;
-    const hallFrame = new THREE.Mesh(
-      new THREE.BoxGeometry(hallBoardWidth + 0.36, hallBoardHeight + 0.36, 0.28),
-      new THREE.MeshStandardMaterial({
-        color: 0x131225,
-        roughness: 0.32,
-        metalness: 0.5,
-        emissive: 0x33294e,
-        emissiveIntensity: 0.22
-      })
-    );
-    hallFrame.position.z = -0.02;
-    hallFrame.castShadow = false;
-    hallFrame.receiveShadow = true;
-    const hallScreen = new THREE.Mesh(
-      new THREE.PlaneGeometry(hallBoardWidth, hallBoardHeight),
-      this.createFutureCityFixedBillboardScreenMaterial(HALL_FIXED_PORTAL_IMAGE_URL, 1.04)
-    );
-    hallScreen.position.z = 0.16;
-    hallScreen.renderOrder = 14;
-    const hallGlow = new THREE.Mesh(
-      new THREE.PlaneGeometry(hallBoardWidth + 0.4, hallBoardHeight + 0.4),
-      new THREE.MeshBasicMaterial({
-        color: 0xff8bde,
-        transparent: true,
-        opacity: 0.2,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-        fog: false,
-        toneMapped: false
-      })
-    );
-    hallGlow.position.z = 0.14;
-    hallGlow.renderOrder = 13;
-    hallPortalBillboard.add(hallFrame, hallGlow, hallScreen);
+    const hallPortalBillboard = this.createPortalTimeBillboard({
+      dynamic: true,
+      topAdImageUrl: HALL_FIXED_PORTAL_IMAGE_URL,
+      rotationY: 0,
+      palette: {
+        bgFrom: "rgba(27, 11, 29, 0.56)",
+        bgTo: "rgba(46, 14, 45, 0.64)",
+        border: "rgba(255, 148, 226, 0.82)",
+        stripe: "rgba(208, 102, 178, 0.16)",
+        shadow: "rgba(255, 156, 228, 0.72)",
+        line1: "#ffe7f8",
+        line2: "#ffc7ee",
+        line3: "#f6b8e7"
+      }
+    });
     hallPortalGroup.add(hallPortalBillboard);
 
     this.hubFlowGroup = group;
@@ -6779,13 +6771,22 @@ export class GameRuntime {
     }
   }
 
-  createPortalTimeBillboard() {
+  createPortalTimeBillboard(options = {}) {
+    const dynamic = Boolean(options?.dynamic);
+    const topAdImageUrl = String(options?.topAdImageUrl ?? PORTAL_TOP_AD_IMAGE_URL).trim()
+      || PORTAL_TOP_AD_IMAGE_URL;
+    const line1 = String(options?.line1 ?? "상시 입장 가능").trim() || "상시 입장 가능";
+    const line2 = String(options?.line2 ?? "").trim();
+    const line3 = String(options?.line3 ?? "").trim();
+    const rotationYRaw = Number(options?.rotationY);
+    const rotationY = Number.isFinite(rotationYRaw) ? rotationYRaw : Math.PI;
+    const palette = options?.palette ?? {};
     const board = new THREE.Group();
     const billboardBaseY = 7.1;
     const schedulePanelY = 2.55;
     const topAdPanelY = 7.8;
     board.position.set(0, billboardBaseY, 0);
-    board.rotation.y = Math.PI;
+    board.rotation.y = rotationY;
 
     const glowBack = new THREE.Mesh(
       new THREE.PlaneGeometry(12.6, 2.72),
@@ -6854,7 +6855,7 @@ export class GameRuntime {
       topAdScreen.geometry.dispose();
       topAdScreen.geometry = new THREE.PlaneGeometry(nextSize.width, nextSize.height);
     };
-    const topAdTexture = this.textureLoader.load(PORTAL_TOP_AD_IMAGE_URL, (loadedTexture) => {
+    const topAdTexture = this.textureLoader.load(topAdImageUrl, (loadedTexture) => {
       const image = loadedTexture?.image;
       if (!image) {
         return;
@@ -6921,17 +6922,89 @@ export class GameRuntime {
 
     board.add(glowBack, screen, topAdGlow, topAdBorder, topAdScreen);
 
-    this.portalBillboardCanvas = canvas;
-    this.portalBillboardContext = context;
-    this.portalBillboardTexture = texture;
-    this.portalBillboardUpdateClock = 0;
-    this.portalBillboardCache = {
-      line1: "",
-      line2: "",
-      line3: ""
-    };
-    this.updatePortalTimeBillboard(1, true);
+    if (dynamic) {
+      this.portalBillboardCanvas = canvas;
+      this.portalBillboardContext = context;
+      this.portalBillboardTexture = texture;
+      this.portalBillboardUpdateClock = 0;
+      this.portalBillboardCache = {
+        line1: "",
+        line2: "",
+        line3: ""
+      };
+      this.portalBillboardPalette = {
+        bgFrom: String(palette?.bgFrom ?? "rgba(27, 11, 29, 0.56)"),
+        bgTo: String(palette?.bgTo ?? "rgba(46, 14, 45, 0.64)"),
+        border: String(palette?.border ?? "rgba(255, 148, 226, 0.82)"),
+        stripe: String(palette?.stripe ?? "rgba(208, 102, 178, 0.16)"),
+        shadow: String(palette?.shadow ?? "rgba(255, 156, 228, 0.72)"),
+        line1: String(palette?.line1 ?? "#ffe7f8"),
+        line2: String(palette?.line2 ?? "#ffc7ee"),
+        line3: String(palette?.line3 ?? "#f6b8e7")
+      };
+      this.updatePortalTimeBillboard(1, true);
+    } else {
+      this.drawPortalBillboardLines(context, canvas, {
+        line1,
+        line2,
+        line3,
+        palette: {
+          bgFrom: String(palette?.bgFrom ?? "rgba(6, 16, 28, 0.50)"),
+          bgTo: String(palette?.bgTo ?? "rgba(8, 24, 39, 0.58)"),
+          border: String(palette?.border ?? "rgba(122, 191, 235, 0.72)"),
+          stripe: String(palette?.stripe ?? "rgba(88, 150, 198, 0.12)"),
+          shadow: String(palette?.shadow ?? "rgba(90, 199, 255, 0.65)"),
+          line1: String(palette?.line1 ?? "#d8f2ff"),
+          line2: String(palette?.line2 ?? "#9de7ff"),
+          line3: String(palette?.line3 ?? "#8bd6f5")
+        }
+      });
+      texture.needsUpdate = true;
+    }
     return board;
+  }
+
+  drawPortalBillboardLines(context, canvas, { line1 = "", line2 = "", line3 = "", palette = {} } = {}) {
+    if (!context || !canvas) {
+      return;
+    }
+    const width = canvas.width;
+    const height = canvas.height;
+    context.clearRect(0, 0, width, height);
+    const bgGradient = context.createLinearGradient(0, 0, width, height);
+    bgGradient.addColorStop(0, String(palette?.bgFrom ?? "rgba(6, 16, 28, 0.50)"));
+    bgGradient.addColorStop(1, String(palette?.bgTo ?? "rgba(8, 24, 39, 0.58)"));
+    context.fillStyle = bgGradient;
+    context.fillRect(0, 0, width, height);
+
+    context.strokeStyle = String(palette?.border ?? "rgba(122, 191, 235, 0.72)");
+    context.lineWidth = 6;
+    context.strokeRect(8, 8, width - 16, height - 16);
+
+    context.fillStyle = String(palette?.stripe ?? "rgba(88, 150, 198, 0.12)");
+    for (let y = 22; y < height; y += 8) {
+      context.fillRect(14, y, width - 28, 1);
+    }
+
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.shadowColor = String(palette?.shadow ?? "rgba(90, 199, 255, 0.65)");
+    context.shadowBlur = 12;
+    context.fillStyle = String(palette?.line1 ?? "#d8f2ff");
+    context.font = "700 70px Bahnschrift";
+    context.fillText(String(line1 ?? ""), width * 0.5, 120);
+
+    context.shadowBlur = 10;
+    context.fillStyle = String(palette?.line2 ?? "#9de7ff");
+    context.font = "700 62px Bahnschrift";
+    context.fillText(String(line2 ?? ""), width * 0.5, 218);
+
+    if (String(line3 ?? "").trim()) {
+      context.shadowBlur = 8;
+      context.fillStyle = String(palette?.line3 ?? "#8bd6f5");
+      context.font = "700 42px Bahnschrift";
+      context.fillText(String(line3 ?? ""), width * 0.5, 282);
+    }
   }
 
   applyInitialFlowSpawn() {
@@ -8525,38 +8598,16 @@ export class GameRuntime {
         this.hallPortalGroup.scale.set(hallScale, hallScale, hallScale);
       }
     }
-    if (this.portalPhase === "open") {
-      ringMaterial.emissiveIntensity = 0.9 + pulse * 0.85;
-      ringMaterial.opacity = 0.9;
-      coreMaterial.opacity = 0.65 + pulse * 0.28;
-      if (coreGlowMaterial) {
-        coreGlowMaterial.opacity = 0.68 + pulse * 0.24;
-      }
-      this.portalGroup.scale.set(1 + pulse * 0.05, 1 + pulse * 0.05, 1 + pulse * 0.05);
-      this.portalReplicaGroup?.scale.set(1 + pulse * 0.05, 1 + pulse * 0.05, 1 + pulse * 0.05);
-      return;
-    }
-
-    if (this.portalPhase === "warning") {
-      ringMaterial.emissiveIntensity = 0.42 + pulse * 0.48;
-      ringMaterial.opacity = 0.78;
-      coreMaterial.opacity = 0.12 + pulse * 0.16;
-      if (coreGlowMaterial) {
-        coreGlowMaterial.opacity = 0.22 + pulse * 0.18;
-      }
-      this.portalGroup.scale.set(1, 1, 1);
-      this.portalReplicaGroup?.scale.set(1, 1, 1);
-      return;
-    }
-
-    ringMaterial.emissiveIntensity = 0.14;
-    ringMaterial.opacity = 0.62;
-    coreMaterial.opacity = 0.08;
+    // OX portal stays always-open visual.
+    ringMaterial.emissiveIntensity = 0.86 + pulse * 0.72;
+    ringMaterial.opacity = 0.84 + pulse * 0.14;
+    coreMaterial.opacity = 0.65 + pulse * 0.23;
     if (coreGlowMaterial) {
-      coreGlowMaterial.opacity = 0.12;
+      coreGlowMaterial.opacity = 0.4 + pulse * 0.26;
     }
-    this.portalGroup.scale.set(1, 1, 1);
-    this.portalReplicaGroup?.scale.set(1, 1, 1);
+    const oxScale = 1 + pulse * 0.06;
+    this.portalGroup.scale.set(oxScale, oxScale, oxScale);
+    this.portalReplicaGroup?.scale.set(oxScale, oxScale, oxScale);
   }
 
   updatePortalTimeBillboard(delta = 0, force = false) {
@@ -8593,7 +8644,7 @@ export class GameRuntime {
       }
     }
     const line1 = `시작시간 : ${startLabel}`;
-    const line2 = `현지 시간 : ${localTime}`;
+    const line2 = `현재 시간 : ${localTime}`;
     const line3 = "";
 
     if (
@@ -8607,37 +8658,12 @@ export class GameRuntime {
 
     const context = this.portalBillboardContext;
     const canvas = this.portalBillboardCanvas;
-    const width = canvas.width;
-    const height = canvas.height;
-
-    context.clearRect(0, 0, width, height);
-    const bgGradient = context.createLinearGradient(0, 0, width, height);
-    bgGradient.addColorStop(0, "rgba(6, 16, 28, 0.50)");
-    bgGradient.addColorStop(1, "rgba(8, 24, 39, 0.58)");
-    context.fillStyle = bgGradient;
-    context.fillRect(0, 0, width, height);
-
-    context.strokeStyle = "rgba(122, 191, 235, 0.72)";
-    context.lineWidth = 6;
-    context.strokeRect(8, 8, width - 16, height - 16);
-
-    context.fillStyle = "rgba(88, 150, 198, 0.12)";
-    for (let y = 22; y < height; y += 8) {
-      context.fillRect(14, y, width - 28, 1);
-    }
-
-    context.textAlign = "center";
-    context.textBaseline = "middle";
-    context.shadowColor = "rgba(90, 199, 255, 0.65)";
-    context.shadowBlur = 12;
-    context.fillStyle = "#d8f2ff";
-    context.font = "700 70px Bahnschrift";
-    context.fillText(line1, width * 0.5, 120);
-
-    context.shadowBlur = 10;
-    context.fillStyle = "#9de7ff";
-    context.font = "700 62px Bahnschrift";
-    context.fillText(line2, width * 0.5, 218);
+    this.drawPortalBillboardLines(context, canvas, {
+      line1,
+      line2,
+      line3,
+      palette: this.portalBillboardPalette
+    });
 
     this.portalBillboardTexture.needsUpdate = true;
     this.portalBillboardCache = { line1, line2, line3 };
