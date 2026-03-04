@@ -2809,6 +2809,9 @@ export class GameRuntime {
     const hallPortalBillboard = this.createPortalTimeBillboard({
       dynamic: true,
       topAdImageUrl: HALL_FIXED_PORTAL_IMAGE_URL,
+      billboardBaseYOffset: 1.35,
+      topAdPanelYOffset: 1.65,
+      topAdScale: 1.36,
       rotationY: 0,
       palette: {
         bgFrom: "rgba(27, 11, 29, 0.56)",
@@ -6782,9 +6785,21 @@ export class GameRuntime {
     const rotationY = Number.isFinite(rotationYRaw) ? rotationYRaw : Math.PI;
     const palette = options?.palette ?? {};
     const board = new THREE.Group();
-    const billboardBaseY = 7.1;
+    const billboardBaseYOffsetRaw = Number(options?.billboardBaseYOffset);
+    const billboardBaseYOffset = Number.isFinite(billboardBaseYOffsetRaw)
+      ? Math.min(6, Math.max(-2, billboardBaseYOffsetRaw))
+      : 0;
+    const topAdPanelYOffsetRaw = Number(options?.topAdPanelYOffset);
+    const topAdPanelYOffset = Number.isFinite(topAdPanelYOffsetRaw)
+      ? Math.min(6, Math.max(-2, topAdPanelYOffsetRaw))
+      : 0;
+    const topAdScaleRaw = Number(options?.topAdScale);
+    const topAdScale = Number.isFinite(topAdScaleRaw)
+      ? Math.min(2.4, Math.max(0.5, topAdScaleRaw))
+      : 1;
+    const billboardBaseY = 7.1 + billboardBaseYOffset;
     const schedulePanelY = 2.55;
-    const topAdPanelY = 7.8;
+    const topAdPanelY = 7.8 + topAdPanelYOffset;
     board.position.set(0, billboardBaseY, 0);
     board.rotation.y = rotationY;
 
@@ -6825,8 +6840,8 @@ export class GameRuntime {
     screen.position.set(0, schedulePanelY, 0.08);
     screen.renderOrder = 14;
 
-    const portalTopAdMaxWidth = 14.5;
-    const portalTopAdMaxHeight = 7.2;
+    const portalTopAdMaxWidth = 14.5 * topAdScale;
+    const portalTopAdMaxHeight = 7.2 * topAdScale;
     const portalTopAdDefaultAspect = 16 / 9;
     const getTopAdSize = (rawAspect) => {
       const safeAspect =
