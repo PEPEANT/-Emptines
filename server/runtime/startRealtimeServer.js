@@ -132,6 +132,7 @@ export function startRealtimeServer(options = {}) {
   httpServer.listen(config.port, () => {
     log.log(`Chat server running on http://localhost:${config.port}`);
     log.log(`Persistent room: ${config.defaultRoomCode} (capacity ${config.maxRoomPlayers})`);
+    log.log(`[paint] store path: ${config.surfacePaintStorePath || "(disabled)"}`);
   });
 
   // Flush pending surface paint to disk before process exits

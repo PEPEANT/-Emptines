@@ -113,6 +113,9 @@ Copy `.env.example` to `.env` when needed.
   - Default main portal destination (recommended: same domain + `/ox/`)
 - `DEFAULT_A_ZONE_PORTAL_TARGET_URL` (server env)
   - Default A-zone portal destination (recommended: `https://reclaim-fps.onrender.com/`)
+- `SURFACE_PAINT_STORE_PATH` (server env, strongly recommended on Render)
+  - Persistent save path for edited world state (platforms/ropes/object positions/promo/surface paint)
+  - Recommended value on Render Disk: `/var/data/surface-paint.json`
 - `HOST_CLAIM_KEY` (server env, optional but recommended)
   - Secret key required for `room:host:claim`
 
@@ -129,6 +132,8 @@ Single endpoint deployment (recommended):
 2. Deploy `server.js` (and `dist/`) to one Node host (Render/Railway/Fly/VM)
 3. Use one public URL only (e.g. `https://emptines-chat-2.onrender.com`)
 4. Optional share links on same domain: `?zone=lobby`, `?zone=fps`, `?zone=ox`
+5. For persistent world edits on Render, attach a Disk and set:
+   - `SURFACE_PAINT_STORE_PATH=/var/data/surface-paint.json`
 
 Socket server health endpoints:
 

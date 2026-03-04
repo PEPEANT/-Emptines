@@ -5,6 +5,7 @@ export const DEFAULT_PORTAL_TARGET_URL =
 export const DEFAULT_A_ZONE_PORTAL_TARGET_URL =
   "https://reclaim-fps.onrender.com/";
 export const DEFAULT_SURFACE_PAINT_STORE_PATH = "server/data/surface-paint.json";
+export const DEFAULT_RENDER_SURFACE_PAINT_STORE_PATH = "/var/data/surface-paint.json";
 export const DEFAULT_SURFACE_PAINT_SAVE_DEBOUNCE_MS = 300;
 export const DEFAULT_MAX_SOCKET_PAYLOAD_BYTES = 35_000_000;
 export const DEFAULT_STATIC_CLIENT_DIR = "dist";
@@ -49,6 +50,32 @@ function parseOptionalString(value, maxLength = 256) {
     return "";
   }
   return text.slice(0, Math.max(1, Math.trunc(maxLength)));
+}
+
+function trimTrailingSlashes(value) {
+  return String(value ?? "").replace(/[\\/]+$/, "");
+}
+
+function resolveSurfacePaintStorePath(env = process.env) {
+  const explicitPath = parseOptionalString(env.SURFACE_PAINT_STORE_PATH, 2048);
+  if (explicitPath) {
+    return explicitPath;
+  }
+
+  const renderDiskMountPath = parseOptionalString(
+    env.RENDER_DISK_MOUNT_PATH ?? env.DISK_MOUNT_PATH ?? "",
+    2048
+  );
+  if (renderDiskMountPath) {
+    return `${trimTrailingSlashes(renderDiskMountPath)}/surface-paint.json`;
+  }
+
+  const isRender = parseOptionalString(env.RENDER, 16).toLowerCase() === "true";
+  if (isRender) {
+    return DEFAULT_RENDER_SURFACE_PAINT_STORE_PATH;
+  }
+
+  return DEFAULT_SURFACE_PAINT_STORE_PATH;
 }
 
 function normalizeAbsoluteHttpUrl(rawValue, fallback = "") {
@@ -156,8 +183,7 @@ export function loadRuntimeConfig(env = process.env) {
     hostClaimKey: parseOptionalString(env.HOST_CLAIM_KEY, 256),
     defaultPortalTargetUrl,
     defaultAZonePortalTargetUrl,
-    surfacePaintStorePath:
-      parseOptionalString(env.SURFACE_PAINT_STORE_PATH, 2048) || DEFAULT_SURFACE_PAINT_STORE_PATH,
+    surfacePaintStorePath: resolveSurfacePaintStorePath(env),
     surfacePaintSaveDebounceMs: Math.trunc(
       parseBoundedNumber(
         env.SURFACE_PAINT_SAVE_DEBOUNCE_MS,
