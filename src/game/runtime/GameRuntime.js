@@ -16139,11 +16139,21 @@ export class GameRuntime {
       this.playerPosition.z += correctionZ;
     }
 
-    // Y correction only when server is ABOVE client (client fell through floor).
-    // Never correct Y when client is above server — that would cancel a jump.
-    if (dy > 0.25) {
-      this.playerPosition.y += dy * 0.14;
-      if (dy > 1.0) {
+    // Vertical correction:
+    // - Always allow upward correction (client below server).
+    // - Allow downward correction only while descending/grounded to avoid canceling jump ascent.
+    const ascendingFast = !this.onGround && this.verticalVelocity > 1.2;
+    const canCorrectDownward = !ascendingFast;
+    if (dy > 0.2 || (canCorrectDownward && dy < -0.35)) {
+      const yAlpha = dy > 0 ? 0.14 : 0.1;
+      const yStepCap = dy > 0 ? 0.42 : 0.28;
+      const correctionY = THREE.MathUtils.clamp(dy * yAlpha, -yStepCap, yStepCap);
+      this.playerPosition.y += correctionY;
+      if (Math.abs(correctionY) > 0.04) {
+        // Dampen velocity so correction doesn't immediately bounce back and jitter.
+        this.verticalVelocity *= 0.7;
+      }
+      if (Math.abs(dy) > 1.1) {
         this.verticalVelocity = 0;
         this.onGround = targetY <= GAME_CONSTANTS.PLAYER_HEIGHT + 0.001;
       }
