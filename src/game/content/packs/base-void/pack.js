@@ -192,8 +192,8 @@ export const BASE_VOID_PACK = {
         openSeconds: 24,
         targetUrl: "https://singularity-ox.onrender.com/?v=08d5432",
         aZoneTargetUrl: "https://reclaim-fps.onrender.com/",
-        // Old OX position now hosts the concert hall portal.
-        hallPosition: [0, 0.08, 22],
+        // Keep hall portal at the lobby edge so corridor travel stays short.
+        hallPosition: [0, 0.08, 12],
         hallTargetUrl: "/performance/index.html?from=emptines"
       }
     },
