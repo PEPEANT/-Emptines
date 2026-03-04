@@ -8680,6 +8680,30 @@ export class GameRuntime {
     }
   }
 
+  resolveExternalPortalUrl(rawTarget = "") {
+    const text = String(rawTarget ?? "").trim();
+    if (!text) {
+      return "";
+    }
+
+    const normalized = this.normalizePortalTargetUrl(text, "");
+    if (!normalized) {
+      return "";
+    }
+
+    try {
+      const parsed = new URL(normalized, window.location.href);
+      const pathname = String(parsed.pathname ?? "").trim().toLowerCase();
+      if (pathname === "/ox" || pathname.startsWith("/ox/")) {
+        return parsed.toString();
+      }
+    } catch {
+      return "";
+    }
+
+    return "";
+  }
+
   resolvePortalTransferDestination(rawTarget, fallbackTarget = "") {
     const rawText = String(rawTarget ?? "").trim();
     const fallbackText = String(fallbackTarget ?? "").trim();
@@ -8691,6 +8715,11 @@ export class GameRuntime {
     const legacyOxExternalUrl = this.resolveLegacyOxPortalExternalUrl(candidate);
     if (legacyOxExternalUrl) {
       return { type: "external", url: legacyOxExternalUrl };
+    }
+
+    const explicitExternalUrl = this.resolveExternalPortalUrl(candidate);
+    if (explicitExternalUrl) {
+      return { type: "external", url: explicitExternalUrl };
     }
 
     const zone = this.resolvePortalTransferZone(candidate, "");
