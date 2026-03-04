@@ -80,11 +80,11 @@ const ROOM_ZONE_STATE_BY_ID = Object.freeze({
     pitch: -0.02
   }),
   ox: Object.freeze({
-    // Spawn in front of the OX-side portal so re-entry is intentional.
-    x: 54,
+    // Spawn in front of the central portal used for OX transfers.
+    x: 0,
     y: 1.72,
-    z: -2,
-    yaw: 1.46,
+    z: 15.8,
+    yaw: 0,
     pitch: -0.02
   })
 });
