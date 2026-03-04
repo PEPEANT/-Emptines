@@ -1,7 +1,7 @@
 export const SERVICE_NAME = "reclaim-fps-chat";
 export const DEFAULT_ROOM_CODE = "GLOBAL";
 export const DEFAULT_PORTAL_TARGET_URL =
-  "https://emptines-chat-2.onrender.com/ox/";
+  "https://singularity-ox.onrender.com/?v=08d5432";
 export const DEFAULT_A_ZONE_PORTAL_TARGET_URL =
   "https://emptines-chat-2.onrender.com/?zone=fps";
 export const DEFAULT_SURFACE_PAINT_STORE_PATH = "server/data/surface-paint.json";

@@ -86,7 +86,7 @@ const MAX_LEFT_BILLBOARD_IMAGE_CHARS = 4_200_000;
 const MAX_BILLBOARD_VIDEO_DATA_URL_CHARS = 30_000_000;
 const MAX_BILLBOARD_VIDEO_BYTES = 20 * 1024 * 1024;
 const DEFAULT_PORTAL_TARGET_URL =
-  "https://emptines-chat-2.onrender.com/ox/";
+  "https://singularity-ox.onrender.com/?v=08d5432";
 const A_ZONE_FIXED_PORTAL_TARGET_URL = "https://emptines-chat-2.onrender.com/?zone=fps";
 const ROOM_ZONE_IDS = Object.freeze(["lobby", "fps", "ox"]);
 const ROOM_ZONE_LABELS = Object.freeze({
@@ -8560,9 +8560,6 @@ export class GameRuntime {
       }
 
       const host = String(parsed.hostname ?? "").toLowerCase();
-      if (host.includes("singularity-ox")) {
-        return "ox";
-      }
       if (host.includes("reclaim-fps")) {
         return "fps";
       }
@@ -8674,7 +8671,7 @@ export class GameRuntime {
       if (zone !== "ox" || (pathname && pathname !== "/")) {
         return "";
       }
-      return `${parsed.origin}/ox/`;
+      return DEFAULT_PORTAL_TARGET_URL;
     } catch {
       return "";
     }
@@ -8693,6 +8690,9 @@ export class GameRuntime {
 
     try {
       const parsed = new URL(normalized, window.location.href);
+      if (parsed.origin !== window.location.origin) {
+        return parsed.toString();
+      }
       const pathname = String(parsed.pathname ?? "").trim().toLowerCase();
       if (pathname === "/ox" || pathname.startsWith("/ox/")) {
         return parsed.toString();
