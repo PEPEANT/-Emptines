@@ -327,7 +327,7 @@ export class AuthoritativeWorld {
 
     const input = player.input;
     const inputAgeMs = now - Number(input.updatedAt || 0);
-    const staleMs = Number(this.config?.sim?.inputStaleMs || 380);
+    const staleMs = Number(this.config?.sim?.inputStaleMs || 600);
     const staleInput = inputAgeMs > staleMs;
 
     const inputMoveX = staleInput ? 0 : clamp(input.moveX, -1, 1, 0);
@@ -353,7 +353,7 @@ export class AuthoritativeWorld {
     }
 
     const gravity = Number(this.config?.sim?.playerGravity || -24);
-    const jumpForce = Number(this.config?.sim?.jumpForce || 8.8);
+    const jumpForce = Number(this.config?.sim?.jumpForce || 11.5);
     const playerHeight = Number(this.config?.sim?.playerHeight || 1.72);
     let velocityY = Number(player.velocityY) || 0;
     let onGround = Boolean(player.onGround);
