@@ -184,13 +184,17 @@ export const BASE_VOID_PACK = {
         spawn: [0, GAME_CONSTANTS.PLAYER_HEIGHT, -8]
       },
       portal: {
-        position: [0, 0.08, 22],
+        // OX portal moved to B-zone (opposite side of FPS portal).
+        position: [60, 0.08, 0],
         radius: 4.4,
         cooldownSeconds: 60,
         warningSeconds: 16,
         openSeconds: 24,
         targetUrl: "https://singularity-ox.onrender.com/?v=08d5432",
-        aZoneTargetUrl: "https://reclaim-fps.onrender.com/"
+        aZoneTargetUrl: "https://reclaim-fps.onrender.com/",
+        // Old OX position now hosts the concert hall portal.
+        hallPosition: [0, 0.08, 22],
+        hallTargetUrl: "/performance/index.html?from=emptines"
       }
     },
     postProcessing: {

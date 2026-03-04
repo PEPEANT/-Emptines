@@ -88,6 +88,7 @@ const MAX_BILLBOARD_VIDEO_BYTES = 20 * 1024 * 1024;
 const DEFAULT_PORTAL_TARGET_URL =
   "https://singularity-ox.onrender.com/?v=08d5432";
 const A_ZONE_FIXED_PORTAL_TARGET_URL = "https://reclaim-fps.onrender.com/";
+const HALL_FIXED_PORTAL_TARGET_URL = "/performance/index.html?from=emptines";
 const ROOM_ZONE_IDS = Object.freeze(["lobby", "fps", "ox"]);
 const ROOM_ZONE_LABELS = Object.freeze({
   lobby: "대기방",
@@ -95,6 +96,7 @@ const ROOM_ZONE_LABELS = Object.freeze({
   ox: "OX 존"
 });
 const A_ZONE_FIXED_PORTAL_IMAGE_URL = new URL("../../../png/REC_FPS.png", import.meta.url).href;
+const HALL_FIXED_PORTAL_IMAGE_URL = new URL("../../../png/Gemini.png", import.meta.url).href;
 const BOX_FACE_KEYS = ["px", "nx", "py", "ny", "pz", "nz"];
 const NPC_GREETING_SESSION_KEY = "emptines_npc_greeting_seen_v1";
 const CITY_AD_BILLBOARD_BASE_PREFIX = "city_ad_board_";
@@ -835,10 +837,16 @@ export class GameRuntime {
       portalConfig?.aZoneTargetUrl ?? A_ZONE_FIXED_PORTAL_TARGET_URL,
       A_ZONE_FIXED_PORTAL_TARGET_URL
     );
+    this.hallPortalTargetUrl = this.normalizePortalTargetUrl(
+      portalConfig?.hallTargetUrl ?? HALL_FIXED_PORTAL_TARGET_URL,
+      this.normalizePortalTargetUrl(HALL_FIXED_PORTAL_TARGET_URL, "")
+    );
     this.hostAZonePortalTargetCandidate = this.aZonePortalTargetUrl;
     this.hostAZonePortalTargetSynced = true;
     this.aZonePortalFloorPosition = new THREE.Vector3(-60, 0.08, 0);
     this.aZonePortalRadius = Math.max(2.2, this.portalRadius * 0.88);
+    this.hallPortalFloorPosition = parseVec3(portalConfig?.hallPosition, [0, 0.08, 22]);
+    this.hallPortalRadius = Math.max(2.2, Number(portalConfig?.hallRadius) || this.portalRadius * 0.92);
     this.portalPhase = this.hubFlowEnabled ? "open" : "idle";
     this.portalPhaseClock = 0;
     this.portalTransitioning = false;
@@ -880,6 +888,11 @@ export class GameRuntime {
     this.aZonePortalCore = null;
     this.aZonePortalCoreGlow = null;
     this.aZonePortalBillboardGroup = null;
+    this.hallPortalGroup = null;
+    this.hallPortalRing = null;
+    this.hallPortalCore = null;
+    this.hallPortalCoreGlow = null;
+    this.hallPortalBillboardGroup = null;
     this.portalBillboardCanvas = null;
     this.portalBillboardContext = null;
     this.portalBillboardTexture = null;
@@ -1211,6 +1224,11 @@ export class GameRuntime {
     this.aZonePortalCore = null;
     this.aZonePortalCoreGlow = null;
     this.aZonePortalBillboardGroup = null;
+    this.hallPortalGroup = null;
+    this.hallPortalRing = null;
+    this.hallPortalCore = null;
+    this.hallPortalCoreGlow = null;
+    this.hallPortalBillboardGroup = null;
     this.portalCoreGlow = null;
     this.portalReplicaCoreGlow = null;
     this.npcTemplePortalCore = null;
@@ -1250,6 +1268,11 @@ export class GameRuntime {
     this.aZonePortalCore = null;
     this.aZonePortalCoreGlow = null;
     this.aZonePortalBillboardGroup = null;
+    this.hallPortalGroup = null;
+    this.hallPortalRing = null;
+    this.hallPortalCore = null;
+    this.hallPortalCoreGlow = null;
+    this.hallPortalBillboardGroup = null;
     this.npcGuideGroup = null;
     this.npcTemplePortalCore = null;
     this.npcTemplePortalGlow = null;
@@ -2680,6 +2703,123 @@ export class GameRuntime {
     aZonePortalBillboard.add(aZoneFrame, aZoneGlow, aZoneScreen);
     aZonePortalGroup.add(aZonePortalBillboard);
 
+    const hallPortalRadius = Math.max(2.2, Number(this.hallPortalRadius) || this.portalRadius * 0.92);
+    const hallPortalGroup = new THREE.Group();
+    hallPortalGroup.position.set(this.hallPortalFloorPosition.x, 0, this.hallPortalFloorPosition.z);
+    this.hallPortalFloorPosition.set(
+      hallPortalGroup.position.x,
+      this.portalFloorPosition.y,
+      hallPortalGroup.position.z
+    );
+    this.hallPortalRadius = hallPortalRadius;
+    const hallFacingDirection = new THREE.Vector3(
+      this.citySpawn.x - hallPortalGroup.position.x,
+      0,
+      this.citySpawn.z - hallPortalGroup.position.z
+    );
+    if (hallFacingDirection.lengthSq() < 0.0001) {
+      hallFacingDirection.set(0, 0, -1);
+    } else {
+      hallFacingDirection.normalize();
+    }
+    hallPortalGroup.rotation.y = Math.atan2(hallFacingDirection.x, hallFacingDirection.z);
+
+    const hallPortalBase = new THREE.Mesh(
+      new THREE.TorusGeometry(hallPortalRadius * 0.9, 0.22, 18, this.mobileEnabled ? 26 : 52),
+      new THREE.MeshStandardMaterial({
+        color: 0x6a4b84,
+        roughness: 0.24,
+        metalness: 0.4,
+        emissive: 0x3b2462,
+        emissiveIntensity: 0.24
+      })
+    );
+    hallPortalBase.rotation.x = Math.PI / 2;
+    hallPortalBase.position.y = 0.2;
+    hallPortalGroup.add(hallPortalBase);
+
+    const hallPortalRing = new THREE.Mesh(
+      new THREE.TorusGeometry(hallPortalRadius, 0.32, 24, this.mobileEnabled ? 42 : 68),
+      new THREE.MeshStandardMaterial({
+        color: 0xff6ec7,
+        roughness: 0.14,
+        metalness: 0.34,
+        emissive: 0xff2fa8,
+        emissiveIntensity: 0.72,
+        transparent: true,
+        opacity: 0.88
+      })
+    );
+    hallPortalRing.position.y = 2.42;
+    hallPortalGroup.add(hallPortalRing);
+
+    const hallPortalCore = new THREE.Mesh(
+      new THREE.CircleGeometry(hallPortalRadius * 0.82, this.mobileEnabled ? 28 : 50),
+      new THREE.MeshBasicMaterial({
+        color: 0xff6ec7,
+        transparent: true,
+        opacity: 0.58,
+        side: THREE.DoubleSide,
+        depthWrite: false
+      })
+    );
+    hallPortalCore.position.y = 2.42;
+    const hallPortalCoreGlow = new THREE.Mesh(
+      new THREE.CircleGeometry(hallPortalRadius * 0.7, this.mobileEnabled ? 24 : 44),
+      new THREE.MeshBasicMaterial({
+        color: 0xff3fba,
+        transparent: true,
+        opacity: 0.38,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+      })
+    );
+    hallPortalCoreGlow.position.y = 2.42;
+    hallPortalCoreGlow.renderOrder = 12;
+    hallPortalGroup.add(hallPortalCore, hallPortalCoreGlow);
+
+    const hallPortalBillboard = new THREE.Group();
+    hallPortalBillboard.position.set(0, 8.1, 0);
+    const hallBoardWidth = 7.8;
+    const hallBoardHeight = 3.4;
+    const hallFrame = new THREE.Mesh(
+      new THREE.BoxGeometry(hallBoardWidth + 0.36, hallBoardHeight + 0.36, 0.28),
+      new THREE.MeshStandardMaterial({
+        color: 0x131225,
+        roughness: 0.32,
+        metalness: 0.5,
+        emissive: 0x33294e,
+        emissiveIntensity: 0.22
+      })
+    );
+    hallFrame.position.z = -0.02;
+    hallFrame.castShadow = false;
+    hallFrame.receiveShadow = true;
+    const hallScreen = new THREE.Mesh(
+      new THREE.PlaneGeometry(hallBoardWidth, hallBoardHeight),
+      this.createFutureCityFixedBillboardScreenMaterial(HALL_FIXED_PORTAL_IMAGE_URL, 1.04)
+    );
+    hallScreen.position.z = 0.16;
+    hallScreen.renderOrder = 14;
+    const hallGlow = new THREE.Mesh(
+      new THREE.PlaneGeometry(hallBoardWidth + 0.4, hallBoardHeight + 0.4),
+      new THREE.MeshBasicMaterial({
+        color: 0xff8bde,
+        transparent: true,
+        opacity: 0.2,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        fog: false,
+        toneMapped: false
+      })
+    );
+    hallGlow.position.z = 0.14;
+    hallGlow.renderOrder = 13;
+    hallPortalBillboard.add(hallFrame, hallGlow, hallScreen);
+    hallPortalGroup.add(hallPortalBillboard);
+
     this.hubFlowGroup = group;
     this.portalGroup = portalGroup;
     this.portalRing = portalRing;
@@ -2700,6 +2840,11 @@ export class GameRuntime {
     this.aZonePortalCore = aZonePortalCore;
     this.aZonePortalCoreGlow = aZonePortalCoreGlow;
     this.aZonePortalBillboardGroup = aZonePortalBillboard;
+    this.hallPortalGroup = hallPortalGroup;
+    this.hallPortalRing = hallPortalRing;
+    this.hallPortalCore = hallPortalCore;
+    this.hallPortalCoreGlow = hallPortalCoreGlow;
+    this.hallPortalBillboardGroup = hallPortalBillboard;
     this.npcGuideGroup = npcGuide;
     this.mirrorGateGroup = mirrorGate;
     this.mirrorGatePanel = null;
@@ -2715,7 +2860,8 @@ export class GameRuntime {
       bridgeFarEndTempleGate,
       cityEntryTempleGate,
       portalGroup,
-      aZonePortalGroup
+      aZonePortalGroup,
+      hallPortalGroup
     );
     this.scene.add(group);
     this.loadSavedObjectPositions();
@@ -8064,6 +8210,14 @@ export class GameRuntime {
     this.updateSpawnPortalVeilVisibility();
 
     // Keep portal transfer unconditional across hub-flow stages.
+    if (!this.portalTransitioning && this.isPlayerInHallPortalZone()) {
+      this.triggerPortalTransfer(this.buildHallPortalTransferUrl(), {
+        immediate: true,
+        transitionText: "공연장 포탈 이동 중...",
+        portalHint: "hall"
+      });
+      return;
+    }
     if (!this.portalTransitioning && this.isPlayerInAZonePortalZone()) {
       this.triggerPortalTransfer(this.buildAZonePortalTransferUrl(), {
         immediate: true,
@@ -8297,6 +8451,21 @@ export class GameRuntime {
         this.aZonePortalGroup.scale.set(scale, scale, scale);
       }
     }
+    if (this.hallPortalRing && this.hallPortalCore && this.hallPortalGroup) {
+      const hallRingMaterial = this.hallPortalRing.material;
+      const hallCoreMaterial = this.hallPortalCore.material;
+      const hallCoreGlowMaterial = this.hallPortalCoreGlow?.material ?? null;
+      if (hallRingMaterial && hallCoreMaterial) {
+        hallRingMaterial.emissiveIntensity = 0.74 + pulse * 0.66;
+        hallRingMaterial.opacity = 0.82 + pulse * 0.14;
+        hallCoreMaterial.opacity = 0.56 + pulse * 0.22;
+        if (hallCoreGlowMaterial) {
+          hallCoreGlowMaterial.opacity = 0.34 + pulse * 0.24;
+        }
+        const hallScale = 1 + pulse * 0.055;
+        this.hallPortalGroup.scale.set(hallScale, hallScale, hallScale);
+      }
+    }
     if (this.portalPhase === "open") {
       ringMaterial.emissiveIntensity = 0.9 + pulse * 0.85;
       ringMaterial.opacity = 0.9;
@@ -8414,6 +8583,14 @@ export class GameRuntime {
     const triggerRadiusSquared = triggerRadius * triggerRadius;
     const dx = this.playerPosition.x - this.aZonePortalFloorPosition.x;
     const dz = this.playerPosition.z - this.aZonePortalFloorPosition.z;
+    return dx * dx + dz * dz <= triggerRadiusSquared;
+  }
+
+  isPlayerInHallPortalZone() {
+    const triggerRadius = this.hallPortalRadius * 0.78;
+    const triggerRadiusSquared = triggerRadius * triggerRadius;
+    const dx = this.playerPosition.x - this.hallPortalFloorPosition.x;
+    const dz = this.playerPosition.z - this.hallPortalFloorPosition.z;
     return dx * dx + dz * dz <= triggerRadiusSquared;
   }
 
@@ -8552,6 +8729,26 @@ export class GameRuntime {
       if (text.includes("ox") || text.includes("singularity-ox") || text.includes("quiz")) {
         return "ox";
       }
+      if (
+        text.includes("hall") ||
+        text.includes("performance") ||
+        text.includes("concert") ||
+        text.includes("show")
+      ) {
+        return "hall";
+      }
+    }
+
+    const fallbackText = String(fallback ?? "")
+      .trim()
+      .toLowerCase();
+    if (
+      fallbackText.includes("hall") ||
+      fallbackText.includes("performance") ||
+      fallbackText.includes("concert") ||
+      fallbackText.includes("show")
+    ) {
+      return "hall";
     }
 
     const fallbackZone = this.normalizeRoomZone(fallback, "");
@@ -8619,12 +8816,19 @@ export class GameRuntime {
     const normalizedHint = this.normalizeReturnPortalHint(portalHint, "");
     const isOx = normalizedHint === "ox";
     const isFps = normalizedHint === "fps";
-    if (!isOx && !isFps) {
+    const isHall = normalizedHint === "hall";
+    if (!isOx && !isFps && !isHall) {
       return null;
     }
 
-    const portalPosition = isFps ? this.aZonePortalFloorPosition : this.portalFloorPosition;
-    const rawPortalRadius = Number(isFps ? this.aZonePortalRadius : this.portalRadius);
+    const portalPosition = isFps
+      ? this.aZonePortalFloorPosition
+      : isHall
+        ? this.hallPortalFloorPosition
+        : this.portalFloorPosition;
+    const rawPortalRadius = Number(
+      isFps ? this.aZonePortalRadius : isHall ? this.hallPortalRadius : this.portalRadius
+    );
     const portalRadius = Number.isFinite(rawPortalRadius) ? rawPortalRadius : 4.4;
     if (!portalPosition || !Number.isFinite(portalPosition.x) || !Number.isFinite(portalPosition.z)) {
       return null;
@@ -8685,7 +8889,7 @@ export class GameRuntime {
   }
 
   resolvePortalTransferZone(rawTarget, fallbackZone = "lobby") {
-    const normalizedFallback = this.normalizeRoomZone(fallbackZone, "lobby") || "lobby";
+    const normalizedFallback = this.normalizeRoomZone(fallbackZone, "");
     const rawText = String(rawTarget ?? "").trim();
     if (!rawText) {
       return normalizedFallback;
@@ -8815,6 +9019,12 @@ export class GameRuntime {
   buildAZonePortalTransferUrl() {
     const target = String(this.aZonePortalTargetUrl ?? "").trim();
     return target || A_ZONE_FIXED_PORTAL_TARGET_URL;
+  }
+
+  buildHallPortalTransferUrl() {
+    const target = String(this.hallPortalTargetUrl ?? "").trim();
+    const fallback = this.normalizePortalTargetUrl(HALL_FIXED_PORTAL_TARGET_URL, "");
+    return target || fallback;
   }
 
   buildLobbyReturnUrl(portalHint = "") {
