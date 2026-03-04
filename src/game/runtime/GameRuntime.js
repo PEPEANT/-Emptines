@@ -8649,11 +8649,34 @@ export class GameRuntime {
   }
 
   buildPortalTransferUrl() {
-    return this.resolvePortalTransferZone(this.portalTargetUrl, "ox");
+    const target = String(this.portalTargetUrl ?? "").trim();
+    return target || DEFAULT_PORTAL_TARGET_URL;
   }
 
   buildAZonePortalTransferUrl() {
-    return this.resolvePortalTransferZone(this.aZonePortalTargetUrl, "fps");
+    const target = String(this.aZonePortalTargetUrl ?? "").trim();
+    return target || A_ZONE_FIXED_PORTAL_TARGET_URL;
+  }
+
+  resolvePortalTransferDestination(rawTarget, fallbackTarget = "") {
+    const rawText = String(rawTarget ?? "").trim();
+    const fallbackText = String(fallbackTarget ?? "").trim();
+    const candidate = rawText || fallbackText;
+    if (!candidate) {
+      return null;
+    }
+
+    const zone = this.resolvePortalTransferZone(candidate, "");
+    if (zone) {
+      return { type: "zone", zone };
+    }
+
+    const externalUrl = this.normalizePortalTargetUrl(candidate, "");
+    if (externalUrl) {
+      return { type: "external", url: externalUrl };
+    }
+
+    return null;
   }
 
   applyPortalZoneSwitchState(rawState = null) {
@@ -8705,14 +8728,61 @@ export class GameRuntime {
     const immediate = Boolean(options?.immediate);
     const silent = Boolean(options?.silent);
 
-    let targetZone = this.resolvePortalTransferZone(
+    const target = this.resolvePortalTransferDestination(
       overrideDestination,
       this.buildPortalTransferUrl()
     );
-    if (!targetZone) {
+    if (!target) {
       this.appendChatLine("", "포탈 전환 대상을 확인할 수 없습니다.", "system");
       return;
     }
+    if (target.type === "external") {
+      const targetUrl = String(target.url ?? "").trim();
+      if (!targetUrl) {
+        this.appendChatLine("", "외부 포탈 주소가 비어 있습니다.", "system");
+        return;
+      }
+
+      const previousStage = this.flowStage;
+      const transitionText =
+        String(options?.transitionText ?? "").trim() || "외부 게임으로 이동 중...";
+
+      this.portalTransitioning = true;
+      this.portalZoneSwitchInFlight = false;
+      this.portalTransferReturnStage = previousStage;
+      this.flowStage = "portal_transfer";
+      this.hud.setStatus(this.getStatusText());
+      this.syncGameplayUiForFlow();
+      this.setPortalTransition(true, transitionText);
+
+      const safeNavigate = () => {
+        try {
+          window.location.assign(targetUrl);
+        } catch {
+          if (!this.portalTransitioning) {
+            return;
+          }
+          this.portalTransitioning = false;
+          this.portalTransferBlockedUntil =
+            (typeof performance !== "undefined" ? performance.now() : Date.now()) + 1800;
+          const restoreStage =
+            String(this.portalTransferReturnStage ?? "").trim() || "city_live";
+          this.portalTransferReturnStage = null;
+          this.flowStage = restoreStage === "portal_transfer" ? "city_live" : restoreStage;
+          this.hud.setStatus(this.getStatusText());
+          this.syncGameplayUiForFlow();
+          this.setPortalTransition(false, "");
+          if (!silent) {
+            this.appendChatLine("", "외부 포탈 이동에 실패했습니다.", "system");
+          }
+        }
+      };
+
+      window.setTimeout(safeNavigate, immediate ? 0 : 180);
+      return;
+    }
+
+    let targetZone = target.zone;
     if (!options?.force && targetZone === this.localRoomZone) {
       // If the portal points to the current zone, treat it as "exit to lobby".
       if (targetZone === "lobby") {
