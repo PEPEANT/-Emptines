@@ -642,6 +642,7 @@ canvas {
 }
 
 #host-delay-minutes,
+#host-delay-unit,
 #host-portal-target,
 #host-gray-object-width,
 #host-gray-object-height,
@@ -691,6 +692,7 @@ canvas {
 }
 
 #host-apply-delay:disabled,
+#host-delay-unit:disabled,
 #host-portal-target-apply:disabled,
 #host-portal-target:disabled,
 #host-a-zone-portal-target-apply:disabled,
@@ -1066,6 +1068,29 @@ canvas {
   font: 700 0.86rem/1.2 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+#hall-portal-countdown {
+  position: fixed;
+  inset: 0;
+  z-index: 91;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(0.9);
+  transition: opacity 140ms ease, transform 140ms ease;
+  color: #f6fbff;
+  font: 800 clamp(120px, 26vw, 320px) / 1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  text-shadow:
+    0 0 24px rgba(122, 191, 235, 0.9),
+    0 0 64px rgba(122, 191, 235, 0.65),
+    0 10px 34px rgba(0, 0, 0, 0.55);
+}
+
+#hall-portal-countdown.on {
+  opacity: 1;
+  transform: scale(1);
 }
 
 #boundary-warning {

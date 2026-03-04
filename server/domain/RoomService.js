@@ -83,7 +83,7 @@ const ROOM_ZONE_STATE_BY_ID = Object.freeze({
     // Spawn in front of the B-zone portal used for OX transfers.
     x: 54,
     y: 1.72,
-    z: -2,
+    z: 0,
     yaw: 1.46,
     pitch: -0.02
   })
