@@ -74,6 +74,15 @@ function getContentType(filePath) {
   return MIME_TYPES[ext] ?? "application/octet-stream";
 }
 
+function resolveDeployMeta() {
+  const gitSha = String(process.env.RENDER_GIT_COMMIT ?? process.env.GIT_SHA ?? "").trim();
+  const serviceId = String(process.env.RENDER_SERVICE_ID ?? "").trim();
+  return {
+    gitSha: gitSha || null,
+    serviceId: serviceId || null
+  };
+}
+
 async function serveStaticFile(res, method, rootDir, pathname) {
   if (!rootDir) {
     return false;
@@ -145,6 +154,7 @@ export function createStatusServer({
   const resolvedStaticDir = String(staticClientDir ?? "").trim()
     ? resolvePath(process.cwd(), String(staticClientDir))
     : "";
+  const deploy = resolveDeployMeta();
 
   return createServer(async (req, res) => {
     const pathname = requestPathname(req);
@@ -165,6 +175,7 @@ export function createStatusServer({
         globalPlayers: Number(stats?.globalPlayers) || 0,
         globalCapacity: Number(stats?.globalCapacity) || maxRoomPlayers,
         metrics,
+        deploy,
         now: Date.now()
       });
       return;
@@ -176,7 +187,8 @@ export function createStatusServer({
         message: "Emptines realtime sync server is running",
         room: defaultRoomCode,
         capacity: maxRoomPlayers,
-        health: "/health"
+        health: "/health",
+        deploy
       });
       return;
     }
@@ -202,7 +214,8 @@ export function createStatusServer({
         message: "Emptines realtime sync server is running",
         room: defaultRoomCode,
         capacity: maxRoomPlayers,
-        health: "/health"
+        health: "/health",
+        deploy
       });
       return;
     }

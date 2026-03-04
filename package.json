@@ -21,7 +21,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "node scripts/verify.mjs",
-    "check:smoke": "node scripts/verify.mjs --skip-build"
+    "check:smoke": "node scripts/verify.mjs --skip-build",
+    "check:live": "node scripts/live-check.mjs"
   },
   "dependencies": {
     "events": "^3.3.0",

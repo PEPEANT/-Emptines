@@ -58,6 +58,12 @@ Fast verification (no build):
 npm run check:smoke
 ```
 
+Live connectivity verification (Render lobby + OX/FPS URLs + socket join/zone switch):
+
+```bash
+npm run check:live
+```
+
 World configuration audit:
 
 ```bash
