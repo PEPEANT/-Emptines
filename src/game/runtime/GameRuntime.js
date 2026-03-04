@@ -849,6 +849,9 @@ export class GameRuntime {
     );
     this.hostAZonePortalTargetCandidate = this.aZonePortalTargetUrl;
     this.hostAZonePortalTargetSynced = true;
+    this.portalPrewarmLastAt = new Map();
+    this.portalPrewarmMinIntervalMs = 2 * 60 * 1000;
+    this.portalPrewarmKickTimer = null;
     this.aZonePortalFloorPosition = new THREE.Vector3(-60, 0.08, 0);
     this.aZonePortalRadius = Math.max(2.2, this.portalRadius * 0.88);
     this.hallPortalFloorPosition = parseVec3(portalConfig?.hallPosition, [0, 0.08, 22]);
@@ -980,6 +983,7 @@ export class GameRuntime {
     this.bindEvents();
     this.bindHubFlowUiEvents();
     this.connectNetwork();
+    this.schedulePortalPrewarm({ immediate: false });
 
     this.camera.rotation.order = "YXZ";
     this.applyInitialFlowSpawn();
@@ -8215,6 +8219,7 @@ export class GameRuntime {
     this.updateNpcTemplePortalVisual();
     this.updateBridgeBoundaryMarker(delta);
     this.updateSpawnPortalVeilVisibility();
+    this.requestPortalPrewarm();
 
     const hallSchedule = this.getPortalScheduleComputed(Date.now());
     const hallPortalOpenNow =
@@ -9101,6 +9106,7 @@ export class GameRuntime {
     if (normalized === this.hostPortalTargetCandidate) {
       this.hostPortalTargetSynced = true;
     }
+    this.schedulePortalPrewarm({ immediate: true });
     return true;
   }
 
@@ -9118,6 +9124,97 @@ export class GameRuntime {
     const target = String(this.hallPortalTargetUrl ?? "").trim();
     const fallback = this.normalizePortalTargetUrl(HALL_FIXED_PORTAL_TARGET_URL, "");
     return target || fallback;
+  }
+
+  normalizePortalPrewarmUrl(rawTarget = "") {
+    if (typeof window === "undefined") {
+      return "";
+    }
+
+    const destination = this.resolvePortalTransferDestination(rawTarget, "");
+    if (!destination || destination.type !== "external") {
+      return "";
+    }
+
+    try {
+      const parsed = new URL(destination.url, window.location.href);
+      if (parsed.origin === window.location.origin) {
+        return "";
+      }
+
+      if (parsed.hostname.endsWith("onrender.com")) {
+        parsed.pathname = "/health";
+        parsed.search = "";
+        parsed.hash = "";
+        return parsed.toString();
+      }
+
+      parsed.hash = "";
+      parsed.searchParams.set("_prewarm", "1");
+      if (!parsed.searchParams.has("from")) {
+        parsed.searchParams.set("from", "emptines-prewarm");
+      }
+      return parsed.toString();
+    } catch {
+      return "";
+    }
+  }
+
+  collectPortalPrewarmUrls() {
+    const candidates = [
+      this.buildPortalTransferUrl(),
+      this.buildAZonePortalTransferUrl(),
+      this.buildHallPortalTransferUrl()
+    ];
+    const unique = new Set();
+    for (const target of candidates) {
+      const url = this.normalizePortalPrewarmUrl(target);
+      if (url) {
+        unique.add(url);
+      }
+    }
+    return Array.from(unique);
+  }
+
+  requestPortalPrewarm({ force = false } = {}) {
+    if (typeof window === "undefined" || typeof fetch !== "function") {
+      return;
+    }
+
+    const now = Date.now();
+    const minIntervalMs = Math.max(15_000, Math.trunc(Number(this.portalPrewarmMinIntervalMs) || 0));
+    for (const url of this.collectPortalPrewarmUrls()) {
+      const lastAt = Math.max(0, Math.trunc(Number(this.portalPrewarmLastAt.get(url)) || 0));
+      if (!force && now - lastAt < minIntervalMs) {
+        continue;
+      }
+      this.portalPrewarmLastAt.set(url, now);
+      try {
+        fetch(url, {
+          method: "GET",
+          mode: "no-cors",
+          cache: "no-store",
+          keepalive: true
+        }).catch(() => {});
+      } catch {
+        // no-op
+      }
+    }
+  }
+
+  schedulePortalPrewarm({ immediate = false } = {}) {
+    if (typeof window === "undefined") {
+      return;
+    }
+    if (this.portalPrewarmKickTimer) {
+      window.clearTimeout(this.portalPrewarmKickTimer);
+      this.portalPrewarmKickTimer = null;
+    }
+    const delayMs = immediate ? 120 : 900;
+    this.portalPrewarmKickTimer = window.setTimeout(() => {
+      this.portalPrewarmKickTimer = null;
+      this.requestPortalPrewarm({ force: true });
+    }, delayMs);
   }
 
   buildLobbyReturnUrl(portalHint = "") {
@@ -10958,6 +11055,7 @@ export class GameRuntime {
     if (normalized === this.hostAZonePortalTargetCandidate) {
       this.hostAZonePortalTargetSynced = true;
     }
+    this.schedulePortalPrewarm({ immediate: true });
     return true;
   }
 
