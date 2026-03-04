@@ -112,7 +112,7 @@ Copy `.env.example` to `.env` when needed.
 - `DEFAULT_PORTAL_TARGET_URL` (server env)
   - Default main portal destination (recommended: same domain + `/ox/`)
 - `DEFAULT_A_ZONE_PORTAL_TARGET_URL` (server env)
-  - Default A-zone portal destination (recommended: same domain + `?zone=fps`)
+  - Default A-zone portal destination (recommended: `https://reclaim-fps.onrender.com/`)
 - `HOST_CLAIM_KEY` (server env, optional but recommended)
   - Secret key required for `room:host:claim`
 

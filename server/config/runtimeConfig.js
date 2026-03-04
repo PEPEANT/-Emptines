@@ -3,7 +3,7 @@ export const DEFAULT_ROOM_CODE = "GLOBAL";
 export const DEFAULT_PORTAL_TARGET_URL =
   "https://singularity-ox.onrender.com/?v=08d5432";
 export const DEFAULT_A_ZONE_PORTAL_TARGET_URL =
-  "https://emptines-chat-2.onrender.com/?zone=fps";
+  "https://reclaim-fps.onrender.com/";
 export const DEFAULT_SURFACE_PAINT_STORE_PATH = "server/data/surface-paint.json";
 export const DEFAULT_SURFACE_PAINT_SAVE_DEBOUNCE_MS = 300;
 export const DEFAULT_MAX_SOCKET_PAYLOAD_BYTES = 35_000_000;
@@ -95,6 +95,29 @@ function migrateLegacyOxZonePortalTarget(rawUrl, fallback = "") {
   return normalized;
 }
 
+function migrateLegacyFpsZonePortalTarget(rawUrl, fallback = "") {
+  const normalized = normalizeAbsoluteHttpUrl(rawUrl, fallback);
+  if (!normalized) {
+    return fallback;
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    return normalized;
+  }
+
+  const zone = String(parsed.searchParams.get("zone") ?? parsed.searchParams.get("z") ?? "")
+    .trim()
+    .toLowerCase();
+  const pathname = String(parsed.pathname ?? "").trim();
+  if (zone === "fps" && (pathname === "" || pathname === "/")) {
+    return DEFAULT_A_ZONE_PORTAL_TARGET_URL;
+  }
+  return normalized;
+}
+
 export function parseCorsOrigins(rawValue) {
   const value = String(rawValue ?? "").trim();
   if (!value || value === "*") {
@@ -121,9 +144,9 @@ export function loadRuntimeConfig(env = process.env) {
     env.DEFAULT_PORTAL_TARGET_URL,
     DEFAULT_PORTAL_TARGET_URL
   );
-  const defaultAZonePortalTargetUrl = normalizeAbsoluteHttpUrl(
+  const defaultAZonePortalTargetUrl = migrateLegacyFpsZonePortalTarget(
     env.DEFAULT_A_ZONE_PORTAL_TARGET_URL,
-    defaultPortalTargetUrl
+    DEFAULT_A_ZONE_PORTAL_TARGET_URL
   );
 
   return {

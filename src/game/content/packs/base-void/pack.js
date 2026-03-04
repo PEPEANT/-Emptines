@@ -190,7 +190,7 @@ export const BASE_VOID_PACK = {
         warningSeconds: 16,
         openSeconds: 24,
         targetUrl: "https://singularity-ox.onrender.com/?v=08d5432",
-        aZoneTargetUrl: "https://emptines-chat-2.onrender.com/?zone=fps"
+        aZoneTargetUrl: "https://reclaim-fps.onrender.com/"
       }
     },
     postProcessing: {

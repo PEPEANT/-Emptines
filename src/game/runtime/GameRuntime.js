@@ -87,7 +87,7 @@ const MAX_BILLBOARD_VIDEO_DATA_URL_CHARS = 30_000_000;
 const MAX_BILLBOARD_VIDEO_BYTES = 20 * 1024 * 1024;
 const DEFAULT_PORTAL_TARGET_URL =
   "https://singularity-ox.onrender.com/?v=08d5432";
-const A_ZONE_FIXED_PORTAL_TARGET_URL = "https://emptines-chat-2.onrender.com/?zone=fps";
+const A_ZONE_FIXED_PORTAL_TARGET_URL = "https://reclaim-fps.onrender.com/";
 const ROOM_ZONE_IDS = Object.freeze(["lobby", "fps", "ox"]);
 const ROOM_ZONE_LABELS = Object.freeze({
   lobby: "대기방",
@@ -8677,6 +8677,28 @@ export class GameRuntime {
     }
   }
 
+  resolveLegacyFpsPortalExternalUrl(rawTarget = "") {
+    const text = String(rawTarget ?? "").trim();
+    if (!text) {
+      return "";
+    }
+
+    try {
+      const parsed = new URL(text, window.location.href);
+      const zone = this.normalizeRoomZone(
+        parsed.searchParams.get("zone") ?? parsed.searchParams.get("z") ?? "",
+        ""
+      );
+      const pathname = String(parsed.pathname ?? "").trim();
+      if (zone !== "fps" || (pathname && pathname !== "/")) {
+        return "";
+      }
+      return A_ZONE_FIXED_PORTAL_TARGET_URL;
+    } catch {
+      return "";
+    }
+  }
+
   resolveExternalPortalUrl(rawTarget = "") {
     const text = String(rawTarget ?? "").trim();
     if (!text) {
@@ -8715,6 +8737,11 @@ export class GameRuntime {
     const legacyOxExternalUrl = this.resolveLegacyOxPortalExternalUrl(candidate);
     if (legacyOxExternalUrl) {
       return { type: "external", url: legacyOxExternalUrl };
+    }
+
+    const legacyFpsExternalUrl = this.resolveLegacyFpsPortalExternalUrl(candidate);
+    if (legacyFpsExternalUrl) {
+      return { type: "external", url: legacyFpsExternalUrl };
     }
 
     const explicitExternalUrl = this.resolveExternalPortalUrl(candidate);
