@@ -269,6 +269,32 @@ export function registerSocketHandlers({
       joinDefaultAndAck(null, ackFn);
     });
 
+    socket.on("room:zone:switch", (payload = {}, ackFn) => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        ack(ackFn, { ok: false, error: "room not found" });
+        return;
+      }
+
+      const result = roomService.switchPlayerZone(
+        room,
+        socket.id,
+        payload?.zone ?? payload?.target ?? payload?.id ?? ""
+      );
+      if (!result.ok) {
+        ack(ackFn, result);
+        return;
+      }
+
+      roomService.emitRoomUpdate(room);
+      ack(ackFn, {
+        ok: true,
+        changed: Boolean(result.changed),
+        zone: result.zone,
+        state: result.state
+      });
+    });
+
     socket.on("paint:surface:set", async (payload = {}, ackFn) => {
       const room = roomService.getRoomBySocket(socket);
       if (!room) {

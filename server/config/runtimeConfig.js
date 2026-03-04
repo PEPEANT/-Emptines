@@ -1,12 +1,13 @@
 export const SERVICE_NAME = "reclaim-fps-chat";
 export const DEFAULT_ROOM_CODE = "GLOBAL";
 export const DEFAULT_PORTAL_TARGET_URL =
-  "https://singularity-ox.onrender.com/?v=08d5432";
+  "https://emptines-chat-2.onrender.com/?zone=ox";
 export const DEFAULT_A_ZONE_PORTAL_TARGET_URL =
-  "https://reclaim-fps.vercel.app/";
+  "https://emptines-chat-2.onrender.com/?zone=fps";
 export const DEFAULT_SURFACE_PAINT_STORE_PATH = "server/data/surface-paint.json";
 export const DEFAULT_SURFACE_PAINT_SAVE_DEBOUNCE_MS = 300;
 export const DEFAULT_MAX_SOCKET_PAYLOAD_BYTES = 35_000_000;
+export const DEFAULT_STATIC_CLIENT_DIR = "dist";
 
 const DEFAULT_MAX_ROOM_PLAYERS = 120;
 const MIN_ROOM_PLAYERS = 16;
@@ -18,9 +19,9 @@ export const DEFAULT_SERVER_SIM_CONFIG = {
   playerSpeed: 8.8,
   playerSprint: 13.2,
   playerGravity: -24,
-  jumpForce: 8.8,
+  jumpForce: 11.5,
   worldLimit: 120,
-  inputStaleMs: 900,
+  inputStaleMs: 600,
   minInputIntervalMs: 8,
   maxInputPerSecond: 90
 };
@@ -127,6 +128,8 @@ export function loadRuntimeConfig(env = process.env) {
         50_000_000
       )
     ),
+    staticClientDir:
+      parseOptionalString(env.STATIC_CLIENT_DIR, 2048) || DEFAULT_STATIC_CLIENT_DIR,
     sim: {
       tickRateHz: parseBoundedNumber(
         env.SIM_TICK_RATE_HZ,

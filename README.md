@@ -95,7 +95,7 @@ npm run preview
 - `Enter`: send chat (while input is open)
 - Host button `포탈 열기`: instantly open portal for room (host only)
 - `/host`: claim room host role (chat command)
-- `/portal https://...`: host-only portal link update (chat command)
+- `/portal https://...`: host-only portal target update (same-domain `?zone=` links recommended)
 - `B`: toggle chalk tool
 - `1..5`: switch chalk color
 - `Left Mouse`: draw on ground (chalk tool)
@@ -107,8 +107,12 @@ Copy `.env.example` to `.env` when needed.
 - `CORS_ORIGIN` (server env)
   - Optional comma-separated allow-list for Socket.io CORS
   - If unset, server allows all origins
+- `STATIC_CLIENT_DIR` (server env, optional)
+  - Directory for static client hosting on the same server (`dist` by default)
 - `DEFAULT_PORTAL_TARGET_URL` (server env)
-  - Default portal destination used by all clients in room
+  - Default main portal destination (recommended: same domain + `?zone=ox`)
+- `DEFAULT_A_ZONE_PORTAL_TARGET_URL` (server env)
+  - Default A-zone portal destination (recommended: same domain + `?zone=fps`)
 - `HOST_CLAIM_KEY` (server env, optional but recommended)
   - Secret key required for `room:host:claim`
 
@@ -119,11 +123,12 @@ Host auto-claim (client query string):
 
 ## Deploy Notes
 
-Client and socket server are separate.
+Single endpoint deployment (recommended):
 
-1. Deploy static client (`dist`) to GitHub Pages/Netlify/Vercel
-2. Deploy `server.js` to a Node host (Render/Railway/Fly/VM)
-3. Keep socket server accessible from the client origin
+1. Build client: `npm run build`
+2. Deploy `server.js` (and `dist/`) to one Node host (Render/Railway/Fly/VM)
+3. Use one public URL only (e.g. `https://emptines-chat-2.onrender.com`)
+4. Optional share links on same domain: `?zone=lobby`, `?zone=fps`, `?zone=ox`
 
 Socket server health endpoints:
 
@@ -204,4 +209,4 @@ Socket server health endpoints:
 
 ## Saved Links
 
-- https://pepeant.github.io/-Emptines/  (saved: 2026-02-28)
+- https://emptines-chat-2.onrender.com  (single endpoint)

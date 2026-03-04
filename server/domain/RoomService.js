@@ -62,6 +62,30 @@ const PROMO_BLOCKED_BRIDGE_HALF_WIDTH = 7;
 const CHAT_MESSAGE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,80}$/;
 const MAX_CHAT_MESSAGES = 5000;
 const MAX_CHAT_TEXT_CHARS = 200;
+const ROOM_ZONE_IDS = Object.freeze(["lobby", "fps", "ox"]);
+const ROOM_ZONE_STATE_BY_ID = Object.freeze({
+  lobby: Object.freeze({
+    x: 0,
+    y: 1.72,
+    z: -8,
+    yaw: 0,
+    pitch: -0.02
+  }),
+  fps: Object.freeze({
+    x: -84,
+    y: 1.72,
+    z: 0,
+    yaw: 1.5708,
+    pitch: -0.02
+  }),
+  ox: Object.freeze({
+    x: 84,
+    y: 1.72,
+    z: 0,
+    yaw: -1.5708,
+    pitch: -0.02
+  })
+});
 
 function normalizeRoomPortalTarget(rawValue, fallback = "") {
   const text = String(rawValue ?? "").trim().slice(0, 2048);
@@ -82,6 +106,29 @@ function normalizeRoomPortalTarget(rawValue, fallback = "") {
   }
 
   return parsed.toString();
+}
+
+function normalizeRoomZone(rawValue, fallback = "lobby") {
+  const value = String(rawValue ?? "")
+    .trim()
+    .toLowerCase();
+  if (ROOM_ZONE_IDS.includes(value)) {
+    return value;
+  }
+
+  const fallbackValue = String(fallback ?? "")
+    .trim()
+    .toLowerCase();
+  if (ROOM_ZONE_IDS.includes(fallbackValue)) {
+    return fallbackValue;
+  }
+  return "";
+}
+
+function getRoomZoneSpawnState(rawZone) {
+  const zone = normalizeRoomZone(rawZone, "lobby");
+  const base = ROOM_ZONE_STATE_BY_ID[zone] ?? ROOM_ZONE_STATE_BY_ID.lobby;
+  return sanitizePlayerState(base);
 }
 
 function normalizeSurfaceId(rawValue) {
@@ -856,7 +903,8 @@ export class RoomService {
       players: Array.from(room.players.values()).map((player) => ({
         id: player.id,
         name: player.name,
-        state: player.state ?? null
+        state: player.state ?? null,
+        zone: normalizeRoomZone(player?.zone ?? "lobby", "lobby")
       }))
     };
   }
@@ -2049,6 +2097,57 @@ export class RoomService {
     return changed;
   }
 
+  switchPlayerZone(room, socketId, rawZone) {
+    if (!room || !socketId) {
+      return { ok: false, error: "room not found" };
+    }
+
+    this.pruneRoomPlayers(room);
+    const player = room.players.get(socketId);
+    if (!player) {
+      return { ok: false, error: "player not in room" };
+    }
+
+    const zone = normalizeRoomZone(rawZone, "");
+    if (!zone) {
+      return { ok: false, error: "invalid zone" };
+    }
+
+    const previousZone = normalizeRoomZone(player?.zone ?? "lobby", "lobby");
+    const nextState = getRoomZoneSpawnState(zone);
+    const now = Date.now();
+    const previousSeq = Math.max(0, Math.trunc(Number(player?.lastInputSeq) || 0));
+
+    player.zone = zone;
+    player.state = nextState;
+    player.velocityY = 0;
+    player.onGround = true;
+    player.input = {
+      seq: previousSeq,
+      moveX: 0,
+      moveZ: 0,
+      sprint: false,
+      jump: false,
+      yaw: Number(nextState?.yaw) || 0,
+      pitch: Number(nextState?.pitch) || 0,
+      updatedAt: now
+    };
+    player.lastProcessedInputSeq = previousSeq;
+
+    return {
+      ok: true,
+      changed: previousZone !== zone,
+      zone,
+      state: {
+        x: Number(nextState?.x) || 0,
+        y: Number(nextState?.y) || 1.72,
+        z: Number(nextState?.z) || 0,
+        yaw: Number(nextState?.yaw) || 0,
+        pitch: Number(nextState?.pitch) || 0
+      }
+    };
+  }
+
   leaveCurrentRoom(socket) {
     const roomCode = socket.data.roomCode;
     if (!roomCode) {
@@ -2086,6 +2185,7 @@ export class RoomService {
     if (socket.data.roomCode === room.code && room.players.has(socket.id)) {
       const existing = room.players.get(socket.id);
       existing.name = name;
+      existing.zone = normalizeRoomZone(existing?.zone ?? "lobby", "lobby");
       this.emitRoomUpdate(room);
       return { ok: true, room: this.serializeRoom(room) };
     }
@@ -2104,6 +2204,7 @@ export class RoomService {
     room.players.set(socket.id, {
       id: socket.id,
       name,
+      zone: "lobby",
       state: initialState,
       mode: "authoritative",
       velocityY: 0,

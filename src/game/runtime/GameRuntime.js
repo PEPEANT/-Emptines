@@ -86,8 +86,14 @@ const MAX_LEFT_BILLBOARD_IMAGE_CHARS = 4_200_000;
 const MAX_BILLBOARD_VIDEO_DATA_URL_CHARS = 30_000_000;
 const MAX_BILLBOARD_VIDEO_BYTES = 20 * 1024 * 1024;
 const DEFAULT_PORTAL_TARGET_URL =
-  "https://singularity-ox.onrender.com/?v=08d5432";
-const A_ZONE_FIXED_PORTAL_TARGET_URL = "https://reclaim-fps.vercel.app/";
+  "https://emptines-chat-2.onrender.com/?zone=ox";
+const A_ZONE_FIXED_PORTAL_TARGET_URL = "https://emptines-chat-2.onrender.com/?zone=fps";
+const ROOM_ZONE_IDS = Object.freeze(["lobby", "fps", "ox"]);
+const ROOM_ZONE_LABELS = Object.freeze({
+  lobby: "대기방",
+  fps: "FPS 존",
+  ox: "OX 존"
+});
 const A_ZONE_FIXED_PORTAL_IMAGE_URL = new URL("../../../png/REC_FPS.png", import.meta.url).href;
 const BOX_FACE_KEYS = ["px", "nx", "py", "ny", "pz", "nz"];
 const NPC_GREETING_SESSION_KEY = "emptines_npc_greeting_seen_v1";
@@ -494,6 +500,12 @@ export class GameRuntime {
       hostQueryValue === "1" || hostQueryValue === "true" || hostQueryValue === "yes";
     // Auto-claim only for explicit host links (or when hostKey is present).
     this.autoHostClaimEnabled = hostFlagEnabled || Boolean(this.hostClaimKey);
+    this.requestedEntryZone = this.normalizeRoomZone(
+      this.queryParams.get("zone") ?? this.queryParams.get("z") ?? "",
+      ""
+    );
+    this.localRoomZone = "lobby";
+    this.entryZoneSwitchRequested = false;
     // Auto-fullscreen is disabled to avoid interrupting host control popups.
     this.autoFullscreenEnabled = false;
     this.fullscreenRestorePending = false;
@@ -829,6 +841,7 @@ export class GameRuntime {
     this.portalPhase = this.hubFlowEnabled ? "open" : "idle";
     this.portalPhaseClock = 0;
     this.portalTransitioning = false;
+    this.portalZoneSwitchInFlight = false;
     this.portalTransferReturnStage = null;
     this.portalTransferBlockedUntil = 0;
     this.portalPulseClock = 0;
@@ -8547,6 +8560,76 @@ export class GameRuntime {
     return value === "1" || value === "true" || value === "yes" || value === "on";
   }
 
+  normalizeRoomZone(rawValue, fallback = "lobby") {
+    const value = String(rawValue ?? "")
+      .trim()
+      .toLowerCase();
+    if (ROOM_ZONE_IDS.includes(value)) {
+      return value;
+    }
+
+    const fallbackValue = String(fallback ?? "")
+      .trim()
+      .toLowerCase();
+    if (ROOM_ZONE_IDS.includes(fallbackValue)) {
+      return fallbackValue;
+    }
+    return "";
+  }
+
+  getRoomZoneLabel(rawZone) {
+    const zone = this.normalizeRoomZone(rawZone, "lobby") || "lobby";
+    return ROOM_ZONE_LABELS[zone] ?? ROOM_ZONE_LABELS.lobby;
+  }
+
+  resolvePortalTransferZone(rawTarget, fallbackZone = "lobby") {
+    const normalizedFallback = this.normalizeRoomZone(fallbackZone, "lobby") || "lobby";
+    const rawText = String(rawTarget ?? "").trim();
+    if (!rawText) {
+      return normalizedFallback;
+    }
+
+    const text = rawText.toLowerCase();
+    const directZone = this.normalizeRoomZone(text.replace(/^zone:/, ""), "");
+    if (directZone) {
+      return directZone;
+    }
+
+    try {
+      const parsed = new URL(rawText, window.location.href);
+      const zoneFromQuery = this.normalizeRoomZone(
+        parsed.searchParams.get("zone") ?? parsed.searchParams.get("z") ?? "",
+        ""
+      );
+      if (zoneFromQuery) {
+        return zoneFromQuery;
+      }
+
+      const pathname = String(parsed.pathname ?? "").toLowerCase();
+      if (pathname.includes("/fps")) {
+        return "fps";
+      }
+      if (pathname.includes("/ox")) {
+        return "ox";
+      }
+      if (pathname.includes("/lobby")) {
+        return "lobby";
+      }
+
+      const host = String(parsed.hostname ?? "").toLowerCase();
+      if (host.includes("singularity-ox")) {
+        return "ox";
+      }
+      if (host.includes("reclaim-fps")) {
+        return "fps";
+      }
+    } catch {
+      // keep fallback
+    }
+
+    return normalizedFallback;
+  }
+
   normalizePortalTargetUrl(rawValue, fallback = "") {
     const text = String(rawValue ?? "").trim();
     if (!text) {
@@ -8623,113 +8706,164 @@ export class GameRuntime {
   }
 
   buildPortalTransferUrl() {
-    const normalizedTarget = this.normalizePortalTargetUrl(this.portalTargetUrl, "");
-    if (!normalizedTarget) {
-      return null;
-    }
-
-    // Keep outbound portal links exact (no extra query params), and open in same tab.
-    return normalizedTarget;
+    return this.resolvePortalTransferZone(this.portalTargetUrl, "ox");
   }
 
   buildAZonePortalTransferUrl() {
-    return this.normalizePortalTargetUrl(this.aZonePortalTargetUrl, "");
+    return this.resolvePortalTransferZone(this.aZonePortalTargetUrl, "fps");
+  }
+
+  applyPortalZoneSwitchState(rawState = null) {
+    const parsedState = this.parseChatMessageState(rawState ?? null);
+    if (!parsedState) {
+      return false;
+    }
+
+    this.playerPosition.set(parsedState.x, parsedState.y, parsedState.z);
+    this.yaw = this.normalizeYawAngle(parsedState.yaw);
+    this.pitch = THREE.MathUtils.clamp(parsedState.pitch, -1.52, 1.52);
+    this.verticalVelocity = 0;
+    this.onGround = parsedState.y <= GAME_CONSTANTS.PLAYER_HEIGHT + 0.001;
+    this.lastSafePosition.copy(this.playerPosition);
+    this.pendingAuthoritativeStateSync = true;
+    this.authoritativeSyncGraceUntil = performance.now() + 1200;
+    this.requestAuthoritativeStateSync({ minIntervalMs: 80 });
+    return true;
+  }
+
+  requestInitialZoneSwitch() {
+    if (this.entryZoneSwitchRequested) {
+      return;
+    }
+    const zone = this.normalizeRoomZone(this.requestedEntryZone, "");
+    if (!zone || zone === "lobby") {
+      return;
+    }
+    this.entryZoneSwitchRequested = true;
+    this.triggerPortalTransfer(zone, {
+      immediate: true,
+      skipCooldown: true,
+      transitionText: `${this.getRoomZoneLabel(zone)} 이동 중...`,
+      silent: true
+    });
   }
 
   triggerPortalTransfer(overrideDestination = "", options = null) {
-    if (this.portalTransitioning) {
-      return;
-    }
-    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
-    if (now < (Number(this.portalTransferBlockedUntil) || 0)) {
+    if (this.portalTransitioning || this.portalZoneSwitchInFlight) {
       return;
     }
 
-    const normalizedOverride = this.normalizePortalTargetUrl(overrideDestination, "");
-    const destination = normalizedOverride || this.buildPortalTransferUrl();
-    if (!destination) {
-      this.portalPhase = "cooldown";
-      this.portalPhaseClock = this.portalCooldownSeconds;
-      this.setFlowHeadline(
-        "포탈 설정 오류",
-        "URL에 ?portal=https://... 주소를 지정한 다음 다시 시도하세요."
-      );
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const skipCooldown = Boolean(options?.skipCooldown);
+    if (!skipCooldown && now < (Number(this.portalTransferBlockedUntil) || 0)) {
+      return;
+    }
+
+    const targetZone = this.resolvePortalTransferZone(
+      overrideDestination,
+      this.buildPortalTransferUrl()
+    );
+    if (!targetZone) {
+      this.appendChatLine("", "포탈 전환 대상을 확인할 수 없습니다.", "system");
+      return;
+    }
+    if (!options?.force && targetZone === this.localRoomZone) {
+      return;
+    }
+    if (!this.socket || !this.networkConnected) {
+      this.appendChatLine("", "온라인 연결 후 다시 시도하세요.", "system");
       return;
     }
 
     const previousStage = this.flowStage;
     const immediate = Boolean(options?.immediate);
-    const transitionText = String(options?.transitionText ?? "").trim() || "포탈 이동 중...";
+    const transitionText =
+      String(options?.transitionText ?? "").trim() ||
+      `${this.getRoomZoneLabel(targetZone)} 이동 중...`;
+    const silent = Boolean(options?.silent);
 
     this.portalTransitioning = true;
+    this.portalZoneSwitchInFlight = true;
     this.portalTransferReturnStage = previousStage;
     this.flowStage = "portal_transfer";
     this.hud.setStatus(this.getStatusText());
     this.syncGameplayUiForFlow();
     this.setPortalTransition(true, transitionText);
 
-    const sourceHref =
-      typeof window !== "undefined" && window.location?.href
-        ? String(window.location.href)
-        : "";
-    const recoverFromBlockedTransfer = () => {
+    const recoverFromFailedTransfer = (message = "") => {
       if (!this.portalTransitioning) {
         return;
       }
+      this.portalZoneSwitchInFlight = false;
       this.portalTransitioning = false;
       this.portalTransferBlockedUntil =
         (typeof performance !== "undefined" ? performance.now() : Date.now()) + 1800;
       const restoreStage =
         String(this.portalTransferReturnStage ?? "").trim() || "city_live";
       this.portalTransferReturnStage = null;
-      this.flowStage = restoreStage;
+      this.flowStage = restoreStage === "portal_transfer" ? "city_live" : restoreStage;
       this.hud.setStatus(this.getStatusText());
       this.syncGameplayUiForFlow();
       this.setPortalTransition(false, "");
-      this.appendChatLine("", "포탈 이동이 차단되었습니다. 다시 진입해 주세요.", "system");
-    };
-
-    const tryNavigate = () => {
-      try {
-        window.location.assign(destination);
-      } catch {
-        // Some webviews block scripted assign; fallback below.
+      if (!silent) {
+        const reason = String(message ?? "").trim();
+        this.appendChatLine(
+          "",
+          reason || "포탈 전환이 실패했습니다. 다시 진입해 주세요.",
+          "system"
+        );
       }
-
-      window.setTimeout(() => {
-        if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-          return;
-        }
-        if (
-          sourceHref &&
-          typeof window !== "undefined" &&
-          String(window.location.href) !== sourceHref
-        ) {
-          return;
-        }
-        try {
-          window.location.replace(destination);
-        } catch {
-          recoverFromBlockedTransfer();
-        }
-      }, 160);
-
-      window.setTimeout(() => {
-        if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-          return;
-        }
-        if (
-          sourceHref &&
-          typeof window !== "undefined" &&
-          String(window.location.href) !== sourceHref
-        ) {
-          return;
-        }
-        recoverFromBlockedTransfer();
-      }, 1900);
     };
 
-    window.setTimeout(tryNavigate, immediate ? 0 : 780);
+    const finalizeZoneTransfer = (response = {}) => {
+      if (!this.portalTransitioning) {
+        return;
+      }
+      this.portalZoneSwitchInFlight = false;
+      this.localRoomZone = targetZone;
+      this.applyPortalZoneSwitchState(response?.state ?? null);
+      this.portalTransitioning = false;
+      this.portalTransferBlockedUntil =
+        (typeof performance !== "undefined" ? performance.now() : Date.now()) + 1200;
+      const restoreStage =
+        String(this.portalTransferReturnStage ?? "").trim() || "city_live";
+      this.portalTransferReturnStage = null;
+      this.flowStage = restoreStage === "portal_transfer" ? "city_live" : restoreStage;
+      this.hud.setStatus(this.getStatusText());
+      this.syncGameplayUiForFlow();
+      this.setPortalTransition(false, "");
+      if (!silent) {
+        this.appendChatLine("", `${this.getRoomZoneLabel(targetZone)}으로 이동했습니다.`, "system");
+      }
+    };
+
+    const requestTimeoutMs = Math.max(1200, Math.trunc(Number(options?.timeoutMs) || 3200));
+    let resolved = false;
+    const trySwitchZone = () => {
+      const timeoutId = window.setTimeout(() => {
+        if (resolved) {
+          return;
+        }
+        resolved = true;
+        recoverFromFailedTransfer("존 전환 응답이 지연되었습니다. 다시 시도하세요.");
+      }, requestTimeoutMs);
+
+      this.socket.emit("room:zone:switch", { zone: targetZone }, (response = {}) => {
+        if (resolved) {
+          return;
+        }
+        resolved = true;
+        window.clearTimeout(timeoutId);
+        if (!response?.ok) {
+          const errorMessage = String(response?.error ?? "").trim();
+          recoverFromFailedTransfer(errorMessage || "존 전환 요청이 거부되었습니다.");
+          return;
+        }
+        finalizeZoneTransfer(response);
+      });
+    };
+
+    window.setTimeout(trySwitchZone, immediate ? 0 : 420);
   }
 
   syncPlayerNameIfConnected() {
@@ -14504,11 +14638,14 @@ export class GameRuntime {
       this.autoHostClaimLastAttemptMs = 0;
       this.hostPortalTargetSynced = false;
       this.hostAZonePortalTargetSynced = false;
+      this.localRoomZone = "lobby";
+      this.entryZoneSwitchRequested = false;
       this.portalTargetSetInFlight = false;
       this.aZonePortalTargetSetInFlight = false;
       this.portalForceOpenInFlight = false;
       this.portalCloseInFlight = false;
       this.portalScheduleSetInFlight = false;
+      this.portalZoneSwitchInFlight = false;
       this.platformSaveInFlight = false;
       this.platformSavePending = false;
       this.platformSavePendingForceFlush = false;
@@ -14570,6 +14707,7 @@ export class GameRuntime {
       this.updateSurfacePainterSaveAvailability();
       this.startNetworkPing();
       this.requestHostClaim();
+      this.requestInitialZoneSwitch();
       this.syncPromoPanelUi();
     });
 
@@ -14581,11 +14719,13 @@ export class GameRuntime {
       this.autoHostClaimLastAttemptMs = 0;
       this.hostPortalTargetSynced = false;
       this.hostAZonePortalTargetSynced = false;
+      this.localRoomZone = "lobby";
       this.portalTargetSetInFlight = false;
       this.aZonePortalTargetSetInFlight = false;
       this.portalForceOpenInFlight = false;
       this.portalCloseInFlight = false;
       this.portalScheduleSetInFlight = false;
+      this.portalZoneSwitchInFlight = false;
       this.platformSaveInFlight = false;
       this.platformSavePending = false;
       this.platformSavePendingForceFlush = false;
@@ -14652,6 +14792,7 @@ export class GameRuntime {
       this.portalScheduleSetInFlight = false;
       this.portalForceOpenInFlight = false;
       this.portalCloseInFlight = false;
+      this.portalZoneSwitchInFlight = false;
       this.platformSaveInFlight = false;
       this.platformSavePending = false;
       this.platformSavePendingForceFlush = false;
@@ -15035,6 +15176,10 @@ export class GameRuntime {
       }
       if (id === this.localPlayerId) {
         this.localPlayerName = this.formatPlayerName(player?.name);
+        const nextZone = this.normalizeRoomZone(player?.zone ?? "", this.localRoomZone || "lobby");
+        if (nextZone) {
+          this.localRoomZone = nextZone;
+        }
         continue;
       }
       remotePool.push(player);
@@ -16576,10 +16721,11 @@ export class GameRuntime {
       }
       return this.socketEndpoint ? "오프라인" : "오프라인 / 서버 필요";
     }
+    const zoneLabel = this.getRoomZoneLabel(this.localRoomZone);
     if (this.pointerLockSupported && !this.pointerLocked && !this.mobileEnabled) {
-      return withHostTag("온라인 / 클릭해 고정");
+      return withHostTag(`온라인 / ${zoneLabel} / 클릭해 고정`);
     }
-    return withHostTag("온라인");
+    return withHostTag(`온라인 / ${zoneLabel}`);
   }
 
   loop() {

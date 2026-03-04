@@ -35,6 +35,7 @@ export function startRealtimeServer(options = {}) {
     serviceName: config.serviceName,
     defaultRoomCode: config.defaultRoomCode,
     maxRoomPlayers: config.maxRoomPlayers,
+    staticClientDir: config.staticClientDir,
     getOnlineCount: () => playerCounter.get(),
     getRoomStats: () => roomService?.getHealthSnapshot() ?? buildFallbackRoomStats(config.maxRoomPlayers),
     getMetrics: () => worldRuntime?.getMetrics() ?? null
