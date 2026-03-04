@@ -84,7 +84,7 @@ async function serveStaticFile(res, method, rootDir, pathname) {
     return false;
   }
 
-  const candidatePath =
+  let candidatePath =
     segments.length > 0
       ? resolvePath(rootDir, ...segments)
       : resolvePath(rootDir, "index.html");
@@ -97,6 +97,17 @@ async function serveStaticFile(res, method, rootDir, pathname) {
     info = await stat(candidatePath);
   } catch {
     return false;
+  }
+  if (info?.isDirectory?.()) {
+    candidatePath = resolvePath(candidatePath, "index.html");
+    if (!candidatePath.startsWith(rootDir)) {
+      return false;
+    }
+    try {
+      info = await stat(candidatePath);
+    } catch {
+      return false;
+    }
   }
   if (!info?.isFile?.()) {
     return false;

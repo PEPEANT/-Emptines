@@ -1,7 +1,7 @@
 export const SERVICE_NAME = "reclaim-fps-chat";
 export const DEFAULT_ROOM_CODE = "GLOBAL";
 export const DEFAULT_PORTAL_TARGET_URL =
-  "https://emptines-chat-2.onrender.com/?zone=ox";
+  "https://emptines-chat-2.onrender.com/ox/";
 export const DEFAULT_A_ZONE_PORTAL_TARGET_URL =
   "https://emptines-chat-2.onrender.com/?zone=fps";
 export const DEFAULT_SURFACE_PAINT_STORE_PATH = "server/data/surface-paint.json";
@@ -72,6 +72,29 @@ function normalizeAbsoluteHttpUrl(rawValue, fallback = "") {
   return parsed.toString();
 }
 
+function migrateLegacyOxZonePortalTarget(rawUrl, fallback = "") {
+  const normalized = normalizeAbsoluteHttpUrl(rawUrl, fallback);
+  if (!normalized) {
+    return fallback;
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    return normalized;
+  }
+
+  const zone = String(parsed.searchParams.get("zone") ?? parsed.searchParams.get("z") ?? "")
+    .trim()
+    .toLowerCase();
+  const pathname = String(parsed.pathname ?? "").trim();
+  if (zone === "ox" && (pathname === "" || pathname === "/")) {
+    return `${parsed.origin}/ox/`;
+  }
+  return normalized;
+}
+
 export function parseCorsOrigins(rawValue) {
   const value = String(rawValue ?? "").trim();
   if (!value || value === "*") {
@@ -94,7 +117,7 @@ export function loadRuntimeConfig(env = process.env) {
 
   const parsedPort = Number(env.PORT ?? 3001);
   const port = Number.isFinite(parsedPort) ? Math.max(1, Math.trunc(parsedPort)) : 3001;
-  const defaultPortalTargetUrl = normalizeAbsoluteHttpUrl(
+  const defaultPortalTargetUrl = migrateLegacyOxZonePortalTarget(
     env.DEFAULT_PORTAL_TARGET_URL,
     DEFAULT_PORTAL_TARGET_URL
   );

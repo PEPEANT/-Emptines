@@ -110,7 +110,7 @@ Copy `.env.example` to `.env` when needed.
 - `STATIC_CLIENT_DIR` (server env, optional)
   - Directory for static client hosting on the same server (`dist` by default)
 - `DEFAULT_PORTAL_TARGET_URL` (server env)
-  - Default main portal destination (recommended: same domain + `?zone=ox`)
+  - Default main portal destination (recommended: same domain + `/ox/`)
 - `DEFAULT_A_ZONE_PORTAL_TARGET_URL` (server env)
   - Default A-zone portal destination (recommended: same domain + `?zone=fps`)
 - `HOST_CLAIM_KEY` (server env, optional but recommended)

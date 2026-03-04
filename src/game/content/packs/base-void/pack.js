@@ -189,7 +189,7 @@ export const BASE_VOID_PACK = {
         cooldownSeconds: 60,
         warningSeconds: 16,
         openSeconds: 24,
-        targetUrl: "https://emptines-chat-2.onrender.com/?zone=ox",
+        targetUrl: "https://emptines-chat-2.onrender.com/ox/",
         aZoneTargetUrl: "https://emptines-chat-2.onrender.com/?zone=fps"
       }
     },

@@ -86,7 +86,7 @@ const MAX_LEFT_BILLBOARD_IMAGE_CHARS = 4_200_000;
 const MAX_BILLBOARD_VIDEO_DATA_URL_CHARS = 30_000_000;
 const MAX_BILLBOARD_VIDEO_BYTES = 20 * 1024 * 1024;
 const DEFAULT_PORTAL_TARGET_URL =
-  "https://emptines-chat-2.onrender.com/?zone=ox";
+  "https://emptines-chat-2.onrender.com/ox/";
 const A_ZONE_FIXED_PORTAL_TARGET_URL = "https://emptines-chat-2.onrender.com/?zone=fps";
 const ROOM_ZONE_IDS = Object.freeze(["lobby", "fps", "ox"]);
 const ROOM_ZONE_LABELS = Object.freeze({
@@ -8658,12 +8658,39 @@ export class GameRuntime {
     return target || A_ZONE_FIXED_PORTAL_TARGET_URL;
   }
 
+  resolveLegacyOxPortalExternalUrl(rawTarget = "") {
+    const text = String(rawTarget ?? "").trim();
+    if (!text) {
+      return "";
+    }
+
+    try {
+      const parsed = new URL(text, window.location.href);
+      const zone = this.normalizeRoomZone(
+        parsed.searchParams.get("zone") ?? parsed.searchParams.get("z") ?? "",
+        ""
+      );
+      const pathname = String(parsed.pathname ?? "").trim();
+      if (zone !== "ox" || (pathname && pathname !== "/")) {
+        return "";
+      }
+      return `${parsed.origin}/ox/`;
+    } catch {
+      return "";
+    }
+  }
+
   resolvePortalTransferDestination(rawTarget, fallbackTarget = "") {
     const rawText = String(rawTarget ?? "").trim();
     const fallbackText = String(fallbackTarget ?? "").trim();
     const candidate = rawText || fallbackText;
     if (!candidate) {
       return null;
+    }
+
+    const legacyOxExternalUrl = this.resolveLegacyOxPortalExternalUrl(candidate);
+    if (legacyOxExternalUrl) {
+      return { type: "external", url: legacyOxExternalUrl };
     }
 
     const zone = this.resolvePortalTransferZone(candidate, "");
