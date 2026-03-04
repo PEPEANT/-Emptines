@@ -72,17 +72,19 @@ const ROOM_ZONE_STATE_BY_ID = Object.freeze({
     pitch: -0.02
   }),
   fps: Object.freeze({
-    x: -84,
+    // Spawn in front of the FPS-side portal so re-entry is intentional.
+    x: -54,
     y: 1.72,
-    z: 0,
-    yaw: 1.5708,
+    z: -2,
+    yaw: -1.46,
     pitch: -0.02
   }),
   ox: Object.freeze({
-    x: 84,
+    // Spawn in front of the OX-side portal so re-entry is intentional.
+    x: 54,
     y: 1.72,
-    z: 0,
-    yaw: -1.5708,
+    z: -2,
+    yaw: 1.46,
     pitch: -0.02
   })
 });
