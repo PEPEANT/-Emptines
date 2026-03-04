@@ -504,6 +504,7 @@ export class GameRuntime {
       this.queryParams.get("zone") ?? this.queryParams.get("z") ?? "",
       ""
     );
+    this.returnEntryPortal = this.resolveReturnEntryPortalHint();
     this.localRoomZone = "lobby";
     this.entryZoneSwitchRequested = false;
     // Auto-fullscreen is disabled to avoid interrupting host control popups.
@@ -1835,46 +1836,25 @@ export class GameRuntime {
         toBridge.normalize();
       }
 
-      const lowerBoardWidth = THREE.MathUtils.clamp(footprint * 1.24, 6.2, 9.8);
-      const lowerBoardHeight = THREE.MathUtils.clamp(footprint * 0.82, 3.8, 5.8);
-      const lowerBoardY = THREE.MathUtils.clamp(footprint * 0.62 + 2.5, 4.8, 7.2);
-      // Keep the lower ad board clearly in front of the podium edge strips.
-      const lowerOffset = THREE.MathUtils.clamp(footprint * 1.14, 9.6, 14.4);
-
-      const lowerBoard = buildCityAdBoard({
-        boardWidth: lowerBoardWidth,
-        boardHeight: lowerBoardHeight,
-        boardThickness,
-        frameThickness,
-        position: new THREE.Vector3(
-          towerX + toBridge.x * lowerOffset,
-          lowerBoardY,
-          towerZ + toBridge.z * lowerOffset
-        ),
-        facingDirection: toBridge,
-        surfaceBaseId,
-        glowOpacity: 0.26,
-        parentGroup
-      });
-
       const upperBoardWidth = THREE.MathUtils.clamp(footprint * 1.2, 6.2, 9.2);
       const upperBoardHeight = THREE.MathUtils.clamp(footprint * 0.78, 3.6, 5.4);
       const upperFloatHeight = Math.max(3.2, footprint * 0.56);
       const upperBoardY = towerHeight + upperFloatHeight;
-      const upperOffset = footprint * 0.44;
+      const upperOffset = footprint * 0.52;
       const upperBoard = buildCityAdBoard({
         boardWidth: upperBoardWidth,
         boardHeight: upperBoardHeight,
         boardThickness,
         frameThickness,
         position: new THREE.Vector3(
-          towerX + toCenter.x * upperOffset,
+          towerX + toBridge.x * upperOffset,
           upperBoardY,
-          towerZ + toCenter.z * upperOffset
+          towerZ + toBridge.z * upperOffset
         ),
-        facingDirection: toCenter,
-        sharedScreenMaterials: lowerBoard.screenMesh.material,
-        glowOpacity: 0.2,
+        // Keep rooftop billboards facing the front spawn approach.
+        facingDirection: toBridge,
+        surfaceBaseId,
+        glowOpacity: 0.22,
         parentGroup
       });
       upperBoard.boardGroup.rotation.x = -0.12;
@@ -4505,6 +4485,8 @@ export class GameRuntime {
     const baseCenter = center.clone().addScaledVector(forward, this.mobileEnabled ? -46 : -40);
     const topBillboardForwardOffset = this.mobileEnabled ? 9 : 14;
     const styleCycle = ["cyan", "slate", "amber"];
+    const spawnFacingTarget = this.bridgeApproachSpawn?.clone?.() ?? new THREE.Vector3(0, 0, -98);
+    spawnFacingTarget.y = 0;
 
     for (let index = 0; index < assetUrls.length; index += 1) {
       const imageUrl = assetUrls[index];
@@ -4611,7 +4593,17 @@ export class GameRuntime {
         }
       }
 
-      const billboardDirection = toPlayer.clone();
+      const billboardDirection = spawnFacingTarget.clone().sub(anchor);
+      billboardDirection.y = 0;
+      if (billboardDirection.lengthSq() < 0.0001) {
+        billboardDirection.copy(toPlayer);
+        billboardDirection.y = 0;
+      }
+      if (billboardDirection.lengthSq() < 0.0001) {
+        billboardDirection.set(0, 0, -1);
+      } else {
+        billboardDirection.normalize();
+      }
       const billboardYaw = Math.atan2(billboardDirection.x, billboardDirection.z);
       const topBoardWidth = footprint * 1.44;
       const topBoardHeight = topBoardWidth * 0.48;
@@ -6803,6 +6795,26 @@ export class GameRuntime {
     if (savedNickname.length >= 2) {
       this.localPlayerName = this.formatPlayerName(savedNickname);
     }
+    const returnPortalHint = this.normalizeReturnPortalHint(this.returnEntryPortal, "");
+    if (returnPortalHint === "ox" || returnPortalHint === "fps") {
+      const returnSpawnState = this.buildReturnPortalSpawnState(returnPortalHint);
+      if (returnSpawnState) {
+        this.pendingPlayerNameSync = true;
+        this.pendingAuthoritativeStateSync = true;
+        this.flowStage = "city_live";
+        this.bridgeNpcPlayApproved = true;
+        this.playerPosition.copy(returnSpawnState.position);
+        this.yaw = returnSpawnState.yaw;
+        this.pitch = returnSpawnState.pitch;
+        this.hubFlowUiEl?.classList.add("hidden");
+        this.hideNicknameGate();
+        this.hideNpcChoiceGate();
+        this.setMirrorGateVisible(false);
+        this.lastSafePosition.copy(this.playerPosition);
+        this.ensureEntryMusicPlayback();
+        return;
+      }
+    }
     const allowFastCityRejoin =
       this.parseQueryFlag("skip_bridge") ||
       this.parseQueryFlag("skipBridge") ||
@@ -8055,7 +8067,8 @@ export class GameRuntime {
     if (!this.portalTransitioning && this.isPlayerInAZonePortalZone()) {
       this.triggerPortalTransfer(this.buildAZonePortalTransferUrl(), {
         immediate: true,
-        transitionText: "FPS 포탈 이동 중..."
+        transitionText: "FPS 포탈 이동 중...",
+        portalHint: "fps"
       });
       return;
     }
@@ -8064,7 +8077,8 @@ export class GameRuntime {
       if (destination) {
         this.triggerPortalTransfer(destination, {
           immediate: true,
-          transitionText: "OX 포탈 이동 중..."
+          transitionText: "OX 포탈 이동 중...",
+          portalHint: "ox"
         });
       }
       return;
@@ -8503,6 +8517,151 @@ export class GameRuntime {
     return value === "1" || value === "true" || value === "yes" || value === "on";
   }
 
+  parseQueryText(...names) {
+    for (const rawName of names) {
+      const name = String(rawName ?? "").trim();
+      if (!name) {
+        continue;
+      }
+      const value = String(this.queryParams.get(name) ?? "").trim();
+      if (value) {
+        return value;
+      }
+    }
+    return "";
+  }
+
+  normalizeReturnPortalHint(rawValue, fallback = "") {
+    const directZone = this.normalizeRoomZone(rawValue, "");
+    if (directZone === "ox" || directZone === "fps") {
+      return directZone;
+    }
+
+    const text = String(rawValue ?? "")
+      .trim()
+      .toLowerCase();
+    if (text) {
+      if (
+        text.includes("fps") ||
+        text.includes("reclaim-fps") ||
+        text.includes("a-zone") ||
+        text.includes("azone")
+      ) {
+        return "fps";
+      }
+      if (text.includes("ox") || text.includes("singularity-ox") || text.includes("quiz")) {
+        return "ox";
+      }
+    }
+
+    const fallbackZone = this.normalizeRoomZone(fallback, "");
+    return fallbackZone === "ox" || fallbackZone === "fps" ? fallbackZone : "";
+  }
+
+  resolveReturnEntryPortalHint() {
+    const queryHint = this.parseQueryText(
+      "returnPortal",
+      "return_portal",
+      "returnportal",
+      "portalReturn",
+      "portal_return",
+      "fromPortal",
+      "from_portal",
+      "from"
+    );
+    const normalizedQueryHint = this.normalizeReturnPortalHint(queryHint, "");
+    if (normalizedQueryHint) {
+      return normalizedQueryHint;
+    }
+
+    if (typeof document === "undefined") {
+      return "";
+    }
+
+    const referrer = String(document.referrer ?? "").trim();
+    if (!referrer) {
+      return "";
+    }
+
+    try {
+      const parsed = new URL(referrer, window.location.href);
+      const referrerQueryHint =
+        parsed.searchParams.get("returnPortal") ??
+        parsed.searchParams.get("return_portal") ??
+        parsed.searchParams.get("portalReturn") ??
+        parsed.searchParams.get("from") ??
+        parsed.searchParams.get("zone") ??
+        parsed.searchParams.get("z") ??
+        "";
+      const normalizedReferrerQueryHint = this.normalizeReturnPortalHint(referrerQueryHint, "");
+      if (normalizedReferrerQueryHint) {
+        return normalizedReferrerQueryHint;
+      }
+
+      const normalizedReferrerHint = this.normalizeReturnPortalHint(
+        `${parsed.hostname}${parsed.pathname}`,
+        ""
+      );
+      if (normalizedReferrerHint) {
+        return normalizedReferrerHint;
+      }
+    } catch {
+      const normalizedFallback = this.normalizeReturnPortalHint(referrer, "");
+      if (normalizedFallback) {
+        return normalizedFallback;
+      }
+    }
+
+    return "";
+  }
+
+  buildReturnPortalSpawnState(portalHint = "") {
+    const normalizedHint = this.normalizeReturnPortalHint(portalHint, "");
+    const isOx = normalizedHint === "ox";
+    const isFps = normalizedHint === "fps";
+    if (!isOx && !isFps) {
+      return null;
+    }
+
+    const portalPosition = isFps ? this.aZonePortalFloorPosition : this.portalFloorPosition;
+    const rawPortalRadius = Number(isFps ? this.aZonePortalRadius : this.portalRadius);
+    const portalRadius = Number.isFinite(rawPortalRadius) ? rawPortalRadius : 4.4;
+    if (!portalPosition || !Number.isFinite(portalPosition.x) || !Number.isFinite(portalPosition.z)) {
+      return null;
+    }
+
+    const directionToCity = new THREE.Vector3(
+      this.citySpawn.x - portalPosition.x,
+      0,
+      this.citySpawn.z - portalPosition.z
+    );
+    if (directionToCity.lengthSq() < 0.0001) {
+      directionToCity.set(0, 0, 1);
+    } else {
+      directionToCity.normalize();
+    }
+
+    const spawnDistance = Math.max(5.2, portalRadius + 1.8);
+    const spawnPosition = new THREE.Vector3(
+      portalPosition.x + directionToCity.x * spawnDistance,
+      GAME_CONSTANTS.PLAYER_HEIGHT,
+      portalPosition.z + directionToCity.z * spawnDistance
+    );
+
+    const lookTarget = new THREE.Vector3(
+      portalPosition.x,
+      GAME_CONSTANTS.PLAYER_HEIGHT,
+      portalPosition.z
+    );
+    const yaw = this.getLookYaw(spawnPosition, lookTarget);
+
+    return {
+      position: spawnPosition,
+      yaw,
+      pitch: -0.02
+    };
+  }
+
   normalizeRoomZone(rawValue, fallback = "lobby") {
     const value = String(rawValue ?? "")
       .trim()
@@ -8562,6 +8721,9 @@ export class GameRuntime {
       const host = String(parsed.hostname ?? "").toLowerCase();
       if (host.includes("reclaim-fps")) {
         return "fps";
+      }
+      if (host.includes("singularity-ox")) {
+        return "ox";
       }
     } catch {
       // keep fallback
@@ -8653,6 +8815,48 @@ export class GameRuntime {
   buildAZonePortalTransferUrl() {
     const target = String(this.aZonePortalTargetUrl ?? "").trim();
     return target || A_ZONE_FIXED_PORTAL_TARGET_URL;
+  }
+
+  buildLobbyReturnUrl(portalHint = "") {
+    if (typeof window === "undefined") {
+      return "";
+    }
+    try {
+      const normalizedHint = this.normalizeReturnPortalHint(portalHint, "");
+      const returnUrl = new URL("/", window.location.href);
+      returnUrl.searchParams.set("zone", "lobby");
+      if (normalizedHint) {
+        returnUrl.searchParams.set("returnPortal", normalizedHint);
+        returnUrl.searchParams.set("from", normalizedHint);
+      }
+      return returnUrl.toString();
+    } catch {
+      return "";
+    }
+  }
+
+  appendPortalReturnContextToExternalUrl(rawUrl, portalHint = "") {
+    const targetUrl = String(rawUrl ?? "").trim();
+    if (!targetUrl) {
+      return "";
+    }
+    try {
+      const parsed = new URL(targetUrl, window.location.href);
+      const normalizedHint = this.normalizeReturnPortalHint(portalHint, "");
+      if (!parsed.searchParams.has("from")) {
+        parsed.searchParams.set("from", "emptines");
+      }
+      if (normalizedHint && !parsed.searchParams.has("returnPortal")) {
+        parsed.searchParams.set("returnPortal", normalizedHint);
+      }
+      const returnUrl = this.buildLobbyReturnUrl(normalizedHint);
+      if (returnUrl && !parsed.searchParams.has("returnUrl")) {
+        parsed.searchParams.set("returnUrl", returnUrl);
+      }
+      return parsed.toString();
+    } catch {
+      return targetUrl;
+    }
   }
 
   resolveLegacyOxPortalExternalUrl(rawTarget = "") {
@@ -8825,6 +9029,10 @@ export class GameRuntime {
         this.appendChatLine("", "외부 포탈 주소가 비어 있습니다.", "system");
         return;
       }
+      const portalHint =
+        this.normalizeReturnPortalHint(options?.portalHint ?? options?.returnPortal, "") ||
+        this.normalizeReturnPortalHint(targetUrl, "");
+      const finalTargetUrl = this.appendPortalReturnContextToExternalUrl(targetUrl, portalHint);
 
       const previousStage = this.flowStage;
       const transitionText =
@@ -8840,7 +9048,7 @@ export class GameRuntime {
 
       const safeNavigate = () => {
         try {
-          window.location.assign(targetUrl);
+          window.location.assign(finalTargetUrl || targetUrl);
         } catch {
           if (!this.portalTransitioning) {
             return;
