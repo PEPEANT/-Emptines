@@ -186,6 +186,8 @@ export const BASE_VOID_PACK = {
       portal: {
         // OX portal moved to B-zone (opposite side of FPS portal).
         position: [60, 0.08, 0],
+        // Rotate OX portal by 90deg so it faces the intended lane.
+        yawDegrees: -90,
         radius: 4.4,
         cooldownSeconds: 60,
         warningSeconds: 16,

@@ -825,6 +825,9 @@ export class GameRuntime {
     this.bridgeRailColor = bridgeConfig?.railColor ?? 0x8fa2b8;
     this.portalFloorPosition = parseVec3(portalConfig?.position, [0, 0.08, 22]);
     this.portalRadius = Math.max(2.2, Number(portalConfig?.radius) || 4.4);
+    const portalYawDegreesRaw = Number(portalConfig?.yawDegrees);
+    const portalYawDegrees = Number.isFinite(portalYawDegreesRaw) ? portalYawDegreesRaw : 0;
+    this.portalYawRadians = (portalYawDegrees * Math.PI) / 180;
     this.shrinePortalPosition = parseVec3(
       bridgeConfig?.shrinePortalPosition,
       [this.bridgeMirrorPosition.x, 0.08, this.bridgeMirrorPosition.z + 4.8]
@@ -2522,6 +2525,7 @@ export class GameRuntime {
     const portalGroup = new THREE.Group();
     portalGroup.position.copy(this.portalFloorPosition);
     portalGroup.position.y = 0;
+    portalGroup.rotation.y = this.portalYawRadians;
 
     const portalBase = new THREE.Mesh(
       new THREE.TorusGeometry(this.portalRadius * 0.92, 0.24, 18, this.mobileEnabled ? 28 : 56),
