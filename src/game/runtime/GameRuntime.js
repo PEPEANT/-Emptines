@@ -902,6 +902,7 @@ export class GameRuntime {
     this.hallPortalCore = null;
     this.hallPortalCoreGlow = null;
     this.hallPortalBillboardGroup = null;
+    this.hallVenueGroup = null;
     this.portalBillboardCanvas = null;
     this.portalBillboardContext = null;
     this.portalBillboardTexture = null;
@@ -1259,6 +1260,7 @@ export class GameRuntime {
     this.hallPortalCore = null;
     this.hallPortalCoreGlow = null;
     this.hallPortalBillboardGroup = null;
+    this.hallVenueGroup = null;
     this.portalCoreGlow = null;
     this.portalReplicaCoreGlow = null;
     this.npcTemplePortalCore = null;
@@ -1303,6 +1305,7 @@ export class GameRuntime {
     this.hallPortalCore = null;
     this.hallPortalCoreGlow = null;
     this.hallPortalBillboardGroup = null;
+    this.hallVenueGroup = null;
     this.npcGuideGroup = null;
     this.npcTemplePortalCore = null;
     this.npcTemplePortalGlow = null;
@@ -2826,6 +2829,147 @@ export class GameRuntime {
     });
     hallPortalGroup.add(hallPortalBillboard);
 
+    // Low-poly concert hall building behind the hall portal.
+    const hallBackDirection = hallFacingDirection.clone().multiplyScalar(-1);
+    const hallVenueOffset = Math.max(18, hallPortalRadius * 4.25);
+    const hallVenueCenter = new THREE.Vector3(
+      hallPortalGroup.position.x + hallBackDirection.x * hallVenueOffset,
+      0,
+      hallPortalGroup.position.z + hallBackDirection.z * hallVenueOffset
+    );
+    const hallVenueGroup = new THREE.Group();
+    hallVenueGroup.position.copy(hallVenueCenter);
+
+    const hallVenueWallMat = new THREE.MeshStandardMaterial({
+      color: 0x3e4554,
+      roughness: 0.7,
+      metalness: 0.12,
+      emissive: 0x1f2a3b,
+      emissiveIntensity: 0.12
+    });
+    const hallVenueRoofMat = new THREE.MeshStandardMaterial({
+      color: 0x7f4567,
+      roughness: 0.42,
+      metalness: 0.18,
+      emissive: 0x3d2136,
+      emissiveIntensity: 0.2
+    });
+    const hallVenueTrimMat = new THREE.MeshStandardMaterial({
+      color: 0x8998ad,
+      roughness: 0.48,
+      metalness: 0.26,
+      emissive: 0x364961,
+      emissiveIntensity: 0.18
+    });
+    const hallVenueGlassMat = new THREE.MeshStandardMaterial({
+      color: 0x7fd9ff,
+      roughness: 0.18,
+      metalness: 0.34,
+      emissive: 0x2f97be,
+      emissiveIntensity: 0.3,
+      transparent: true,
+      opacity: 0.72
+    });
+
+    const hallVenueBase = new THREE.Mesh(
+      new THREE.BoxGeometry(31.5, 0.7, 27),
+      hallVenueTrimMat
+    );
+    hallVenueBase.position.set(0, 0.35, 0.2);
+    hallVenueBase.castShadow = !this.mobileEnabled;
+    hallVenueBase.receiveShadow = true;
+
+    const hallVenueMain = new THREE.Mesh(
+      new THREE.BoxGeometry(24.8, 11.6, 18.2),
+      hallVenueWallMat
+    );
+    hallVenueMain.position.set(0, 6.1, 2.2);
+    hallVenueMain.castShadow = !this.mobileEnabled;
+    hallVenueMain.receiveShadow = true;
+
+    const hallVenueWingLeft = new THREE.Mesh(
+      new THREE.BoxGeometry(7.4, 8.2, 12.4),
+      hallVenueWallMat
+    );
+    hallVenueWingLeft.position.set(-14.2, 4.3, 0.8);
+    hallVenueWingLeft.castShadow = !this.mobileEnabled;
+    hallVenueWingLeft.receiveShadow = true;
+
+    const hallVenueWingRight = hallVenueWingLeft.clone();
+    hallVenueWingRight.position.x = 14.2;
+
+    const hallVenueRoof = new THREE.Mesh(
+      new THREE.CylinderGeometry(14.2, 15.6, 3.8, 4),
+      hallVenueRoofMat
+    );
+    hallVenueRoof.rotation.y = Math.PI * 0.25;
+    hallVenueRoof.position.set(0, 12.5, 2.3);
+    hallVenueRoof.castShadow = !this.mobileEnabled;
+    hallVenueRoof.receiveShadow = true;
+
+    const hallVenueCanopy = new THREE.Mesh(
+      new THREE.BoxGeometry(11.2, 0.9, 4.6),
+      hallVenueTrimMat
+    );
+    hallVenueCanopy.position.set(0, 4.2, -8.5);
+    hallVenueCanopy.castShadow = !this.mobileEnabled;
+    hallVenueCanopy.receiveShadow = true;
+
+    const hallVenueDoor = new THREE.Mesh(
+      new THREE.BoxGeometry(4.1, 5.3, 0.28),
+      hallVenueGlassMat
+    );
+    hallVenueDoor.position.set(0, 2.95, -8.95);
+    hallVenueDoor.castShadow = false;
+    hallVenueDoor.receiveShadow = true;
+
+    const hallVenueSign = new THREE.Mesh(
+      new THREE.PlaneGeometry(9.8, 2.1),
+      new THREE.MeshBasicMaterial({
+        color: 0xffd1f0,
+        transparent: true,
+        opacity: 0.78,
+        side: THREE.DoubleSide
+      })
+    );
+    hallVenueSign.position.set(0, 8.8, -8.92);
+    hallVenueSign.renderOrder = 18;
+
+    const hallVenueFrame = new THREE.Mesh(
+      new THREE.BoxGeometry(11.2, 0.34, 0.34),
+      hallVenueTrimMat
+    );
+    hallVenueFrame.position.set(0, 10.02, -8.82);
+    hallVenueFrame.castShadow = false;
+    hallVenueFrame.receiveShadow = true;
+
+    hallVenueGroup.add(
+      hallVenueBase,
+      hallVenueMain,
+      hallVenueWingLeft,
+      hallVenueWingRight,
+      hallVenueRoof,
+      hallVenueCanopy,
+      hallVenueDoor,
+      hallVenueSign,
+      hallVenueFrame
+    );
+
+    const registerHallVenueCollider = (localX, localZ, width, depth, minY = -2, maxY = 40) => {
+      return this.registerStaticWorldBoxCollider(
+        hallVenueCenter.x + (Number(localX) || 0),
+        hallVenueCenter.z + (Number(localZ) || 0),
+        width,
+        depth,
+        minY,
+        maxY
+      );
+    };
+    registerHallVenueCollider(0, 2.2, 24.8, 18.2, 0, 17);
+    registerHallVenueCollider(-14.2, 0.8, 7.4, 12.4, 0, 13);
+    registerHallVenueCollider(14.2, 0.8, 7.4, 12.4, 0, 13);
+    registerHallVenueCollider(0, -8.5, 11.2, 4.6, 0.5, 7);
+
     this.hubFlowGroup = group;
     this.portalGroup = portalGroup;
     this.portalRing = portalRing;
@@ -2851,6 +2995,7 @@ export class GameRuntime {
     this.hallPortalCore = hallPortalCore;
     this.hallPortalCoreGlow = hallPortalCoreGlow;
     this.hallPortalBillboardGroup = hallPortalBillboard;
+    this.hallVenueGroup = hallVenueGroup;
     this.npcGuideGroup = npcGuide;
     this.mirrorGateGroup = mirrorGate;
     this.mirrorGatePanel = null;
@@ -2867,7 +3012,8 @@ export class GameRuntime {
       cityEntryTempleGate,
       portalGroup,
       aZonePortalGroup,
-      hallPortalGroup
+      hallPortalGroup,
+      hallVenueGroup
     );
     this.scene.add(group);
     this.loadSavedObjectPositions();
