@@ -5,6 +5,24 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { io } from "socket.io-client";
 
 const skipBuild = process.argv.includes("--skip-build");
+const DEFAULT_LINK_GATE_VERSION = "2026-03-03-allowlist-v1";
+
+function resolveLinkGateAuth(env = process.env) {
+  const linkGateVersion = String(env.EMPTINES_LINK_GATE_VERSION ?? DEFAULT_LINK_GATE_VERSION).trim();
+  const disabledRaw = String(env.EMPTINES_LINK_GATE_DISABLED ?? "").trim().toLowerCase();
+  const linkGateEnabled =
+    linkGateVersion.length > 0 &&
+    disabledRaw !== "1" &&
+    disabledRaw !== "true" &&
+    disabledRaw !== "yes";
+  if (!linkGateEnabled) {
+    return null;
+  }
+  return {
+    linkGateVersion,
+    linkGateMode: "player"
+  };
+}
 
 function assert(condition, message) {
   if (!condition) {
@@ -110,13 +128,15 @@ async function checkSocketServer() {
     "data",
     `verify-test-persist-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}.json`
   );
+  const verifyEnv = {
+    ...process.env,
+    PORT: String(port),
+    SURFACE_PAINT_STORE_PATH: verifyStorePath
+  };
+  const linkGateAuth = resolveLinkGateAuth(verifyEnv);
   const server = spawn(process.execPath, ["server.js"], {
     cwd: process.cwd(),
-    env: {
-      ...process.env,
-      PORT: String(port),
-      SURFACE_PAINT_STORE_PATH: verifyStorePath
-    },
+    env: verifyEnv,
     stdio: ["ignore", "pipe", "pipe"]
   });
 
@@ -155,14 +175,16 @@ async function checkSocketServer() {
       timeout: 5000,
       reconnection: true,
       reconnectionAttempts: 8,
-      reconnectionDelay: 120
+      reconnectionDelay: 120,
+      auth: linkGateAuth ?? undefined
     });
     c2 = io(`http://localhost:${port}`, {
       transports: ["websocket"],
       timeout: 5000,
       reconnection: true,
       reconnectionAttempts: 8,
-      reconnectionDelay: 120
+      reconnectionDelay: 120,
+      auth: linkGateAuth ?? undefined
     });
 
     await Promise.all([waitFor(() => c1.connected, 6000), waitFor(() => c2.connected, 6000)]);
