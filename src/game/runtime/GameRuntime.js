@@ -14646,7 +14646,7 @@ export class GameRuntime {
 
     const socket = io(endpoint, {
       transports: ["websocket", "polling"],
-      timeout: 3200,
+      timeout: 12000,
       reconnection: true,
       reconnectionDelay: 900,
       reconnectionDelayMax: 5000,
