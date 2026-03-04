@@ -89,6 +89,20 @@ const ROOM_ZONE_STATE_BY_ID = Object.freeze({
   })
 });
 
+function normalizeMapLayoutVersion(rawValue, fallback = "default-layout-v1") {
+  const value = String(rawValue ?? "")
+    .trim()
+    .replace(/[^a-zA-Z0-9._:-]/g, "")
+    .slice(0, 96);
+  if (!value) {
+    return String(fallback ?? "default-layout-v1")
+      .trim()
+      .replace(/[^a-zA-Z0-9._:-]/g, "")
+      .slice(0, 96);
+  }
+  return value;
+}
+
 function normalizeRoomPortalTarget(rawValue, fallback = "") {
   const text = String(rawValue ?? "").trim().slice(0, 2048);
   if (!text) {
@@ -628,6 +642,7 @@ export class RoomService {
     portalOpenSeconds = 24,
     portalFinalCountdownSeconds = 10,
     surfacePaintStorePath = "",
+    mapLayoutVersion = "default-layout-v1",
     surfacePaintSaveDebounceMs = 300,
     log = console
   }) {
@@ -647,6 +662,7 @@ export class RoomService {
     );
     this.rooms = new Map();
     this.surfacePaintStorePath = this.resolveSurfacePaintStorePath(surfacePaintStorePath);
+    this.mapLayoutVersion = normalizeMapLayoutVersion(mapLayoutVersion);
     this.surfacePaintSaveDebounceMs = Math.max(
       50,
       Math.trunc(Number(surfacePaintSaveDebounceMs) || 300)
@@ -718,6 +734,8 @@ export class RoomService {
     const ropeRevision = normalizeStateRevision(parsed?.ropeRevision, 0);
     const objectRevision = normalizeStateRevision(parsed?.objectRevision, 0);
     const chatHistorySource = Array.isArray(parsed?.chatHistory) ? parsed.chatHistory : [];
+    const savedLayoutVersion = normalizeMapLayoutVersion(parsed?.layoutVersion, "");
+    const shouldRestoreLayoutState = savedLayoutVersion === this.mapLayoutVersion;
     const leftBillboard = this.serializeLeftBillboard({ leftBillboard: parsed?.leftBillboard });
     const rightBillboard = this.serializeRightBillboard({ rightBillboard: parsed?.rightBillboard });
     const restored = new Map();
@@ -748,13 +766,19 @@ export class RoomService {
     room.leftBillboard = leftBillboard;
     room.rightBillboard = rightBillboard;
     room.objectEditor = normalizeObjectEditorState(parsed?.objectEditor, room.objectEditor);
-    room.platformRevision = platformRevision;
-    room.ropeRevision = ropeRevision;
-    room.objectRevision = objectRevision;
-    this.setObjectPositions(room, objectPositions, { persist: false, bumpRevision: false });
-    this.setPlatforms(room, platforms, { persist: false, bumpRevision: false });
-    this.setRopes(room, ropes, { persist: false, bumpRevision: false });
-    this.setPromoObjects(room, promoObjects, { persist: false });
+    if (shouldRestoreLayoutState) {
+      room.platformRevision = platformRevision;
+      room.ropeRevision = ropeRevision;
+      room.objectRevision = objectRevision;
+      this.setObjectPositions(room, objectPositions, { persist: false, bumpRevision: false });
+      this.setPlatforms(room, platforms, { persist: false, bumpRevision: false });
+      this.setRopes(room, ropes, { persist: false, bumpRevision: false });
+      this.setPromoObjects(room, promoObjects, { persist: false });
+    } else {
+      this.log?.warn?.(
+        `[paint] Skip layout restore due to version mismatch (saved=${savedLayoutVersion || "none"}, runtime=${this.mapLayoutVersion})`
+      );
+    }
     if (restored.size > 0) {
       this.log?.log?.(
         `[paint] Restored ${restored.size} painted surfaces from ${this.surfacePaintStorePath}`
@@ -818,6 +842,7 @@ export class RoomService {
       version: SURFACE_PAINT_STORE_VERSION,
       savedAt: Date.now(),
       defaultRoomCode: this.defaultRoomCode,
+      layoutVersion: this.mapLayoutVersion,
       surfaces: this.serializeSurfacePaint(room),
       chatHistory: this.serializeChatHistory(room),
       leftBillboard: this.serializeLeftBillboard(room),

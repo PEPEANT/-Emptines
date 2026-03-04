@@ -116,6 +116,10 @@ Copy `.env.example` to `.env` when needed.
 - `SURFACE_PAINT_STORE_PATH` (server env, strongly recommended on Render)
   - Persistent save path for edited world state (platforms/ropes/object positions/promo/surface paint)
   - Recommended value on Render Disk: `/var/data/surface-paint.json`
+- `MAP_LAYOUT_VERSION` (server env, optional but recommended)
+  - Layout compatibility key for disk snapshots (default: `2026-03-04-layout-v1`)
+  - If this value changes, server skips restoring saved layout objects (platforms/ropes/object positions/promo)
+  - Use this when map geometry/portal placement was changed in code and old snapshot should not override it
 - `HOST_CLAIM_KEY` (server env, optional but recommended)
   - Secret key required for `room:host:claim`
 
@@ -134,6 +138,7 @@ Single endpoint deployment (recommended):
 4. Optional share links on same domain: `?zone=lobby`, `?zone=fps`, `?zone=ox`
 5. For persistent world edits on Render, attach a Disk and set:
    - `SURFACE_PAINT_STORE_PATH=/var/data/surface-paint.json`
+   - `MAP_LAYOUT_VERSION=2026-03-04-layout-v1` (bump value when map layout changes)
 
 Socket server health endpoints:
 

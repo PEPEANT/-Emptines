@@ -9,6 +9,7 @@ export const DEFAULT_RENDER_SURFACE_PAINT_STORE_PATH = "/var/data/surface-paint.
 export const DEFAULT_SURFACE_PAINT_SAVE_DEBOUNCE_MS = 300;
 export const DEFAULT_MAX_SOCKET_PAYLOAD_BYTES = 35_000_000;
 export const DEFAULT_STATIC_CLIENT_DIR = "dist";
+export const DEFAULT_MAP_LAYOUT_VERSION = "2026-03-04-layout-v1";
 
 const DEFAULT_MAX_ROOM_PLAYERS = 120;
 const MIN_ROOM_PLAYERS = 16;
@@ -184,6 +185,8 @@ export function loadRuntimeConfig(env = process.env) {
     defaultPortalTargetUrl,
     defaultAZonePortalTargetUrl,
     surfacePaintStorePath: resolveSurfacePaintStorePath(env),
+    mapLayoutVersion:
+      parseOptionalString(env.MAP_LAYOUT_VERSION, 128) || DEFAULT_MAP_LAYOUT_VERSION,
     surfacePaintSaveDebounceMs: Math.trunc(
       parseBoundedNumber(
         env.SURFACE_PAINT_SAVE_DEBOUNCE_MS,

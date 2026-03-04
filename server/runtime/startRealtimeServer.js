@@ -78,6 +78,7 @@ export function startRealtimeServer(options = {}) {
     defaultPortalTargetUrl: config.defaultPortalTargetUrl,
     defaultAZonePortalTargetUrl: config.defaultAZonePortalTargetUrl,
     surfacePaintStorePath: config.surfacePaintStorePath,
+    mapLayoutVersion: config.mapLayoutVersion,
     surfacePaintSaveDebounceMs: config.surfacePaintSaveDebounceMs,
     log
   });
@@ -133,6 +134,7 @@ export function startRealtimeServer(options = {}) {
     log.log(`Chat server running on http://localhost:${config.port}`);
     log.log(`Persistent room: ${config.defaultRoomCode} (capacity ${config.maxRoomPlayers})`);
     log.log(`[paint] store path: ${config.surfacePaintStorePath || "(disabled)"}`);
+    log.log(`[paint] map layout version: ${config.mapLayoutVersion}`);
   });
 
   // Flush pending surface paint to disk before process exits
