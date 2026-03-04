@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "savedAt": 1772503007084,
+  "defaultRoomCode": "GLOBAL",
+  "surfaces": [
+    {
+      "surfaceId": "city_ad_board_0:pz",
+      "imageDataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WnqJ5wAAAAASUVORK5CYII=",
+      "updatedAt": 1772502963760
+    }
+  ],
+  "platforms": [],
+  "ropes": [],
+  "promoObjects": [
+    {
+      "ownerKey": "OWNERKEY12345",
+      "ownerName": "PLAYER_5820",
+      "x": 3,
+      "y": 1.7,
+      "z": 10,
+      "yaw": 0,
+      "scale": 1,
+      "linkUrl": "https://example.com/",
+      "mediaDataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WnqJ5wAAAAASUVORK5CYII=",
+      "mediaKind": "image",
+      "allowOthersDraw": true,
+      "updatedAt": 1772503006773
+    }
+  ],
+  "objectEditor": {
+    "platformLimit": 400,
+    "ropeLimit": 200,
+    "platformScale": 1,
+    "ropeScale": 1,
+    "updatedAt": 1772502963662
+  }
+}
