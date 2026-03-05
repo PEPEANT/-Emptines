@@ -59,6 +59,14 @@ const PROMO_BLOCKED_BRIDGE_A_Z = -86;
 const PROMO_BLOCKED_BRIDGE_B_X = 0;
 const PROMO_BLOCKED_BRIDGE_B_Z = -18;
 const PROMO_BLOCKED_BRIDGE_HALF_WIDTH = 7;
+const PROMO_BLOCKED_CENTER_X = 0;
+const PROMO_BLOCKED_CENTER_Z = 0;
+const PROMO_BLOCKED_CENTER_RADIUS = 11.5;
+const PROMO_BLOCKED_PORTAL_ZONES = Object.freeze([
+  Object.freeze({ x: 60, z: 0, radius: 6.4 }),
+  Object.freeze({ x: -60, z: 0, radius: 6.4 }),
+  Object.freeze({ x: 0, z: 22, radius: 6.2 })
+]);
 const CHAT_MESSAGE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,80}$/;
 const MAX_CHAT_MESSAGES = 5000;
 const MAX_CHAT_TEXT_CHARS = 200;
@@ -617,25 +625,42 @@ function getPromoPlacementBlockReason(x, z) {
   const abx = PROMO_BLOCKED_BRIDGE_B_X - PROMO_BLOCKED_BRIDGE_A_X;
   const abz = PROMO_BLOCKED_BRIDGE_B_Z - PROMO_BLOCKED_BRIDGE_A_Z;
   const abLenSq = abx * abx + abz * abz;
-  if (abLenSq <= 0.001) {
-    return "";
+  if (abLenSq > 0.001) {
+    const apx = safeX - PROMO_BLOCKED_BRIDGE_A_X;
+    const apz = safeZ - PROMO_BLOCKED_BRIDGE_A_Z;
+    const rawT = (apx * abx + apz * abz) / abLenSq;
+    const edgeMargin = 0.08;
+    if (rawT >= -edgeMargin && rawT <= 1 + edgeMargin) {
+      const t = Math.max(0, Math.min(1, rawT));
+      const nearX = PROMO_BLOCKED_BRIDGE_A_X + abx * t;
+      const nearZ = PROMO_BLOCKED_BRIDGE_A_Z + abz * t;
+      const lateralDx = safeX - nearX;
+      const lateralDz = safeZ - nearZ;
+      if (
+        lateralDx * lateralDx + lateralDz * lateralDz <=
+        PROMO_BLOCKED_BRIDGE_HALF_WIDTH * PROMO_BLOCKED_BRIDGE_HALF_WIDTH
+      ) {
+        return "bridge";
+      }
+    }
   }
-  const apx = safeX - PROMO_BLOCKED_BRIDGE_A_X;
-  const apz = safeZ - PROMO_BLOCKED_BRIDGE_A_Z;
-  const rawT = (apx * abx + apz * abz) / abLenSq;
-  const edgeMargin = 0.08;
-  if (rawT < -edgeMargin || rawT > 1 + edgeMargin) {
-    return "";
+
+  for (const zone of PROMO_BLOCKED_PORTAL_ZONES) {
+    const dx = safeX - (Number(zone?.x) || 0);
+    const dz = safeZ - (Number(zone?.z) || 0);
+    const radius = Math.max(1.8, Number(zone?.radius) || 0);
+    if (dx * dx + dz * dz <= radius * radius) {
+      return "portal";
+    }
   }
-  const t = Math.max(0, Math.min(1, rawT));
-  const nearX = PROMO_BLOCKED_BRIDGE_A_X + abx * t;
-  const nearZ = PROMO_BLOCKED_BRIDGE_A_Z + abz * t;
-  const lateralDx = safeX - nearX;
-  const lateralDz = safeZ - nearZ;
-  return lateralDx * lateralDx + lateralDz * lateralDz <=
-    PROMO_BLOCKED_BRIDGE_HALF_WIDTH * PROMO_BLOCKED_BRIDGE_HALF_WIDTH
-    ? "bridge"
-    : "";
+
+  const centerDx = safeX - PROMO_BLOCKED_CENTER_X;
+  const centerDz = safeZ - PROMO_BLOCKED_CENTER_Z;
+  if (centerDx * centerDx + centerDz * centerDz <= PROMO_BLOCKED_CENTER_RADIUS * PROMO_BLOCKED_CENTER_RADIUS) {
+    return "center";
+  }
+
+  return "";
 }
 
 function normalizeRightBillboardVideoId(rawValue) {
@@ -1286,6 +1311,12 @@ export class RoomService {
       }
       if (blockReason === "bridge") {
         return { ok: false, error: "placement blocked on bridge" };
+      }
+      if (blockReason === "portal") {
+        return { ok: false, error: "placement blocked at portal" };
+      }
+      if (blockReason === "center") {
+        return { ok: false, error: "placement blocked at center" };
       }
     }
     if (!previous && map.size >= MAX_PROMO_OBJECTS) {

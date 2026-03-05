@@ -127,6 +127,14 @@ const PROMO_LINK_INTERACT_RADIUS = 4.2;
 const PROMO_BLOCK_WIDTH = 2.8;
 const PROMO_BLOCK_HEIGHT = 2.2;
 const PROMO_BLOCK_DEPTH = 1.8;
+const PLAYER_PLACEABLE_BLOCK_BASE_COLOR = 0x6f7782;
+const PLAYER_PLACEABLE_BLOCK_EDGE_COLOR = 0xcfd6df;
+const PLAYER_PLACEABLE_BLOCK_EMISSIVE_COLOR = 0x151b22;
+const PLAYER_PLACEABLE_BLOCK_EMISSIVE_INTENSITY = 0.06;
+const PLAYER_PLACEABLE_BLOCKED_MESSAGE =
+  "포탈존 , 스폰지점 , 다리 , 중앙 에서는 설치가 불가능합니다";
+const PROMO_BLOCKED_CENTER_RADIUS = 11.5;
+const PROMO_BLOCKED_PORTAL_RADIUS_PADDING = 1.9;
 
 function resolveRuntimeAssetUrl(relativePath) {
   const normalized = String(relativePath ?? "").trim().replace(/^\/+/, "");
@@ -2285,11 +2293,11 @@ export class GameRuntime {
     }
 
     const bridgeDistrictPaintMat = new THREE.MeshStandardMaterial({
-      color: 0xaeb8c3,
+      color: PLAYER_PLACEABLE_BLOCK_BASE_COLOR,
       roughness: 0.68,
       metalness: 0.08,
-      emissive: 0x1b242e,
-      emissiveIntensity: 0.11
+      emissive: PLAYER_PLACEABLE_BLOCK_EMISSIVE_COLOR,
+      emissiveIntensity: PLAYER_PLACEABLE_BLOCK_EMISSIVE_INTENSITY
     });
     const bridgeDistrictCandidates = this.mobileEnabled
       ? [
@@ -2348,11 +2356,11 @@ export class GameRuntime {
     }
 
     const bridgePaintMat = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
+      color: PLAYER_PLACEABLE_BLOCK_BASE_COLOR,
       roughness: 0.66,
       metalness: 0.06,
-      emissive: 0x1c2128,
-      emissiveIntensity: 0.08
+      emissive: PLAYER_PLACEABLE_BLOCK_EMISSIVE_COLOR,
+      emissiveIntensity: PLAYER_PLACEABLE_BLOCK_EMISSIVE_INTENSITY
     });
     const bridgePanelOffsets = this.mobileEnabled
       ? [-24, -12, 0, 12, 24]
@@ -11190,34 +11198,87 @@ export class GameRuntime {
     const abx = bx - ax;
     const abz = bz - az;
     const abLenSq = abx * abx + abz * abz;
-    if (abLenSq <= 0.001) {
-      return "";
+    if (abLenSq > 0.001) {
+      const apx = x - ax;
+      const apz = z - az;
+      const rawT = (apx * abx + apz * abz) / abLenSq;
+      const bridgeEdgeMargin = 0.08;
+      if (rawT >= -bridgeEdgeMargin && rawT <= 1 + bridgeEdgeMargin) {
+        const t = THREE.MathUtils.clamp(rawT, 0, 1);
+        const nearestX = ax + abx * t;
+        const nearestZ = az + abz * t;
+        const lateralDx = x - nearestX;
+        const lateralDz = z - nearestZ;
+        const bridgeHalfWidth = Math.max(4.8, Number(this.bridgeWidth) * 0.6 + 1.5);
+        if (lateralDx * lateralDx + lateralDz * lateralDz <= bridgeHalfWidth * bridgeHalfWidth) {
+          return "bridge";
+        }
+      }
     }
-    const apx = x - ax;
-    const apz = z - az;
-    const rawT = (apx * abx + apz * abz) / abLenSq;
-    const bridgeEdgeMargin = 0.08;
-    if (rawT < -bridgeEdgeMargin || rawT > 1 + bridgeEdgeMargin) {
-      return "";
+
+    const portalZones = [
+      {
+        center: this.portalFloorPosition,
+        radius: Math.max(4.6, (Number(this.portalRadius) || 4.4) + PROMO_BLOCKED_PORTAL_RADIUS_PADDING)
+      },
+      {
+        center: this.aZonePortalFloorPosition,
+        radius: Math.max(4.6, (Number(this.aZonePortalRadius) || 4.2) + PROMO_BLOCKED_PORTAL_RADIUS_PADDING)
+      },
+      {
+        center: this.hallPortalFloorPosition,
+        radius: Math.max(4.4, (Number(this.hallPortalRadius) || 4.0) + PROMO_BLOCKED_PORTAL_RADIUS_PADDING)
+      }
+    ];
+    for (const zone of portalZones) {
+      const portalX = Number(zone.center?.x);
+      const portalZ = Number(zone.center?.z);
+      if (!Number.isFinite(portalX) || !Number.isFinite(portalZ)) {
+        continue;
+      }
+      const dx = x - portalX;
+      const dz = z - portalZ;
+      const radius = Math.max(1.8, Number(zone.radius) || 0);
+      if (dx * dx + dz * dz <= radius * radius) {
+        return "portal";
+      }
     }
-    const t = THREE.MathUtils.clamp(rawT, 0, 1);
-    const nearestX = ax + abx * t;
-    const nearestZ = az + abz * t;
-    const lateralDx = x - nearestX;
-    const lateralDz = z - nearestZ;
-    const bridgeHalfWidth = Math.max(4.8, Number(this.bridgeWidth) * 0.6 + 1.5);
-    return lateralDx * lateralDx + lateralDz * lateralDz <= bridgeHalfWidth * bridgeHalfWidth
-      ? "bridge"
-      : "";
+
+    const centerX = Number(this.citySpawn?.x) || 0;
+    const centerZ = (Number(this.citySpawn?.z) || -8) + 8;
+    const centerDx = x - centerX;
+    const centerDz = z - centerZ;
+    if (centerDx * centerDx + centerDz * centerDz <= PROMO_BLOCKED_CENTER_RADIUS * PROMO_BLOCKED_CENTER_RADIUS) {
+      return "center";
+    }
+
+    return "";
   }
 
   getPromoPlacementBlockReasonMessage(blockReason = "") {
     const reason = String(blockReason ?? "").trim().toLowerCase();
-    if (reason === "spawn") {
-      return "스폰지점에는 설치가 불가능합니다";
+    if (reason === "spawn" || reason === "bridge" || reason === "portal" || reason === "center") {
+      return PLAYER_PLACEABLE_BLOCKED_MESSAGE;
     }
-    if (reason === "bridge") {
-      return "다리 위에는 설치가 불가능합니다";
+    return "";
+  }
+
+  getPromoPlacementBlockReasonFromServerError(rawErrorText = "") {
+    const errorText = String(rawErrorText ?? "").trim().toLowerCase();
+    if (!errorText) {
+      return "";
+    }
+    if (errorText === "placement blocked at spawn") {
+      return "spawn";
+    }
+    if (errorText === "placement blocked on bridge") {
+      return "bridge";
+    }
+    if (errorText === "placement blocked at portal") {
+      return "portal";
+    }
+    if (errorText === "placement blocked at center") {
+      return "center";
     }
     return "";
   }
@@ -11233,9 +11294,9 @@ export class GameRuntime {
 
     const group = new THREE.Group();
     const bodyMaterial = new THREE.MeshStandardMaterial({
-      color: 0x31ff9d,
-      emissive: 0x31ff9d,
-      emissiveIntensity: 0.48,
+      color: PLAYER_PLACEABLE_BLOCK_BASE_COLOR,
+      emissive: PLAYER_PLACEABLE_BLOCK_EMISSIVE_COLOR,
+      emissiveIntensity: 0.22,
       transparent: true,
       opacity: 0.3,
       depthWrite: false,
@@ -11248,7 +11309,7 @@ export class GameRuntime {
     body.receiveShadow = false;
 
     const edgeMaterial = new THREE.LineBasicMaterial({
-      color: 0xcaffea,
+      color: PLAYER_PLACEABLE_BLOCK_EDGE_COLOR,
       transparent: true,
       opacity: 0.95,
       toneMapped: false
@@ -11276,11 +11337,12 @@ export class GameRuntime {
     }
     const bodyMaterial = preview.userData.previewBodyMaterial;
     const edgeMaterial = preview.userData.previewEdgeMaterial;
-    const baseColor = blocked ? 0xff5f72 : 0x31ff9d;
-    const edgeColor = blocked ? 0xffd2d8 : 0xcaffea;
+    const baseColor = blocked ? 0xff5f72 : PLAYER_PLACEABLE_BLOCK_BASE_COLOR;
+    const emissiveColor = blocked ? 0x5a1722 : PLAYER_PLACEABLE_BLOCK_EMISSIVE_COLOR;
+    const edgeColor = blocked ? 0xffd2d8 : PLAYER_PLACEABLE_BLOCK_EDGE_COLOR;
 
     bodyMaterial?.color?.setHex?.(baseColor);
-    bodyMaterial?.emissive?.setHex?.(baseColor);
+    bodyMaterial?.emissive?.setHex?.(emissiveColor);
     edgeMaterial?.color?.setHex?.(edgeColor);
   }
 
@@ -11387,7 +11449,8 @@ export class GameRuntime {
     this.updatePromoPlacementPreview();
     const blockReason = this.promoPlacementPreviewBlockReason;
     if (blockReason) {
-      const message = this.getPromoPlacementBlockReasonMessage(blockReason);
+      const message =
+        this.getPromoPlacementBlockReasonMessage(blockReason) || PLAYER_PLACEABLE_BLOCKED_MESSAGE;
       if (message) {
         this.appendChatLine("", message, "system");
       }
@@ -11524,7 +11587,8 @@ export class GameRuntime {
       Math.abs(Number(transform.x) - Number(own.x)) > 0.001 ||
       Math.abs(Number(transform.z) - Number(own.z)) > 0.001;
     if (blockReason && hasPositionChange) {
-      const reasonMessage = this.getPromoPlacementBlockReasonMessage(blockReason);
+      const reasonMessage =
+        this.getPromoPlacementBlockReasonMessage(blockReason) || PLAYER_PLACEABLE_BLOCKED_MESSAGE;
       this.appendChatLine("", reasonMessage, "system");
       return;
     }
@@ -11591,10 +11655,12 @@ export class GameRuntime {
         this.promoSetInFlight = false;
         if (!response?.ok) {
           const errorText = String(response?.error ?? "unknown");
-          if (errorText === "placement blocked at spawn") {
-            this.appendChatLine("", "스폰지점에는 설치가 불가능합니다", "system");
-          } else if (errorText === "placement blocked on bridge") {
-            this.appendChatLine("", "다리 위에는 설치가 불가능합니다", "system");
+          const blockedReason = this.getPromoPlacementBlockReasonFromServerError(errorText);
+          if (blockedReason) {
+            const blockedMessage =
+              this.getPromoPlacementBlockReasonMessage(blockedReason) ||
+              PLAYER_PLACEABLE_BLOCKED_MESSAGE;
+            this.appendChatLine("", blockedMessage, "system");
           } else {
             this.appendChatLine("", `홍보 오브젝트 저장 실패: ${errorText}`, "system");
           }
@@ -11754,11 +11820,11 @@ export class GameRuntime {
     group.rotation.y = this.normalizePromoYaw(entry.yaw, 0);
 
     const bodyMaterialTemplate = new THREE.MeshStandardMaterial({
-      color: 0xa7adb4,
+      color: PLAYER_PLACEABLE_BLOCK_BASE_COLOR,
       roughness: 0.82,
       metalness: 0.08,
-      emissive: 0x1e2328,
-      emissiveIntensity: 0.08
+      emissive: PLAYER_PLACEABLE_BLOCK_EMISSIVE_COLOR,
+      emissiveIntensity: PLAYER_PLACEABLE_BLOCK_EMISSIVE_INTENSITY
     });
     bodyMaterialTemplate.toneMapped = true;
     const { videoEl, videoTexture, imageTexture } = this.createPromoScreenMediaResources(
@@ -11767,8 +11833,8 @@ export class GameRuntime {
       {
         videoEmissive: 0.08,
         imageEmissive: 0.1,
-        emptyColor: 0xa7adb4,
-        emptyEmissive: 0.08
+        emptyColor: PLAYER_PLACEABLE_BLOCK_BASE_COLOR,
+        emptyEmissive: PLAYER_PLACEABLE_BLOCK_EMISSIVE_INTENSITY
       }
     );
 
@@ -16927,7 +16993,7 @@ export class GameRuntime {
       this.playerPosition.y += this.verticalVelocity * delta;
 
       let platformTopY = null;
-      if (this.verticalVelocity <= 0.1 && this.jumpPlatforms.length > 0) {
+      if (this.verticalVelocity <= 0.1) {
         const feetY = this.playerPosition.y - GAME_CONSTANTS.PLAYER_HEIGHT;
         const candidatePlatforms = this.getNearbyPlatformCandidates(
           this.playerPosition.x,
@@ -16942,21 +17008,23 @@ export class GameRuntime {
             candidatePlatforms.push(promoPlatform);
           }
         }
-        for (const p of candidatePlatforms) {
-          const halfW = Math.max(0.1, Number(p.w) || 0) * 0.5 + 0.28;
-          const halfD = Math.max(0.1, Number(p.d) || 0) * 0.5 + 0.28;
-          if (
-            Math.abs(this.playerPosition.x - (Number(p.x) || 0)) >= halfW ||
-            Math.abs(this.playerPosition.z - (Number(p.z) || 0)) >= halfD
-          ) {
-            continue;
-          }
-          const topY = (Number(p.y) || 0) + Math.max(0.05, Number(p.h) || 0.3) * 0.5;
-          const swept = prevFeetY >= topY && feetY <= topY; // swept through from above
-          const nearTop = feetY >= topY - 0.6 && feetY <= topY + 0.1;
-          if (swept || nearTop) {
-            if (platformTopY === null || topY > platformTopY) {
-              platformTopY = topY;
+        if (candidatePlatforms.length > 0) {
+          for (const p of candidatePlatforms) {
+            const halfW = Math.max(0.1, Number(p.w) || 0) * 0.5 + 0.28;
+            const halfD = Math.max(0.1, Number(p.d) || 0) * 0.5 + 0.28;
+            if (
+              Math.abs(this.playerPosition.x - (Number(p.x) || 0)) >= halfW ||
+              Math.abs(this.playerPosition.z - (Number(p.z) || 0)) >= halfD
+            ) {
+              continue;
+            }
+            const topY = (Number(p.y) || 0) + Math.max(0.05, Number(p.h) || 0.3) * 0.5;
+            const swept = prevFeetY >= topY && feetY <= topY; // swept through from above
+            const nearTop = feetY >= topY - 0.6 && feetY <= topY + 0.1;
+            if (swept || nearTop) {
+              if (platformTopY === null || topY > platformTopY) {
+                platformTopY = topY;
+              }
             }
           }
         }
@@ -19444,9 +19512,9 @@ export class GameRuntime {
   spawnPlatformMesh(p) {
     const geo = new THREE.BoxGeometry(p.w, p.h, p.d);
     const mat = new THREE.MeshStandardMaterial({
-      color: 0xa7adb4,
-      emissive: 0x1e2328,
-      emissiveIntensity: 0.12,
+      color: PLAYER_PLACEABLE_BLOCK_BASE_COLOR,
+      emissive: PLAYER_PLACEABLE_BLOCK_EMISSIVE_COLOR,
+      emissiveIntensity: 0.1,
       roughness: 0.64,
       metalness: 0.06,
     });
