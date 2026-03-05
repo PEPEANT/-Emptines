@@ -121,7 +121,7 @@ const HOST_CUSTOM_BLOCK_MAX_SIZE = 18;
 const HOST_CUSTOM_BLOCK_DEFAULT_SIZE = 2.5;
 const PROMO_OWNER_KEY_STORAGE_KEY = "promoOwnerKey_v1";
 const PROMO_MIN_SCALE = 0.35;
-const PROMO_MAX_SCALE = 42;
+const PROMO_MAX_SCALE = 8;
 const PROMO_DEFAULT_SCALE = 2.2;
 const PROMO_MAX_MEDIA_BYTES = 6 * 1024 * 1024;
 const PROMO_LINK_INTERACT_RADIUS = 4.2;
@@ -11011,15 +11011,6 @@ export class GameRuntime {
     }
     if (panelVisible) {
       this.initPromoDrawCanvasIfNeeded();
-      if (
-        !hasOwnPromo &&
-        connected &&
-        !busy &&
-        !this.promoPlacementPreviewActive &&
-        !this.hostCustomBlockPlacementPreviewActive
-      ) {
-        this.beginPromoPlacementPreview({ announce: false, syncUi: false });
-      }
     }
 
     if (this.promoScaleInputEl && document.activeElement !== this.promoScaleInputEl) {
@@ -14457,7 +14448,7 @@ export class GameRuntime {
       this.requestPromoUpsert({ placeInFront: false });
     });
     this.promoRemoveBtnEl?.addEventListener("click", () => {
-      this.requestPromoRemove({ startPlacementPreviewOnSuccess: true });
+      this.requestPromoRemove({ startPlacementPreviewOnSuccess: false });
     });
     if (this.promoLinkInputEl) {
       this.promoLinkInputEl.addEventListener("keydown", (event) => {
@@ -15932,8 +15923,14 @@ export class GameRuntime {
         }
       });
       this.requestSurfacePaintSnapshot();
-      this.socket.emit("player:key:set", { key: this.promoOwnerKey }, () => {
-        this.requestPromoState();
+      this.socket.emit("player:key:set", { key: this.promoOwnerKey }, (response = {}) => {
+        if (response?.ok) {
+          this.requestPromoState();
+          return;
+        }
+        if (String(response?.error ?? "").trim().toLowerCase() === "duplicate session") {
+          this.appendChatLine("", "중복 접속이 감지되어 현재 창 연결이 제한됩니다.", "system");
+        }
       });
       this.requestPlatformState();
       this.requestRopeState();
@@ -15946,6 +15943,10 @@ export class GameRuntime {
       this.startNetworkPing();
       this.requestHostClaim();
       this.syncPromoPanelUi();
+    });
+
+    socket.on("session:duplicate", () => {
+      this.appendChatLine("", "같은 계정 키로 이미 접속 중인 창이 있어 연결이 종료됩니다.", "system");
     });
 
     socket.on("disconnect", () => {

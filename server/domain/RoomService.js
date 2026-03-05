@@ -581,7 +581,7 @@ function normalizePromoMediaDataUrl(rawValue) {
 function normalizePromoScale(rawValue, fallback = 1) {
   const parsed = Number(rawValue);
   const safe = Number.isFinite(parsed) ? parsed : Number(fallback) || 1;
-  return Math.max(0.35, Math.min(42, safe));
+  return Math.max(0.35, Math.min(8, safe));
 }
 
 function normalizePromoYaw(rawValue, fallback = 0) {

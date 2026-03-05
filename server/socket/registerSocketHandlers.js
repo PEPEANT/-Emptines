@@ -22,6 +22,29 @@ function sanitizeOwnerKey(rawValue) {
   return text.replace(/[^a-zA-Z0-9:_-]/g, "").slice(0, 96);
 }
 
+function findDuplicateSessionSocketId(io, room, ownerKey, exceptSocketId = "") {
+  const normalizedKey = sanitizeOwnerKey(ownerKey);
+  if (!normalizedKey || !room?.players || typeof room.players.keys !== "function") {
+    return "";
+  }
+  const skipId = String(exceptSocketId ?? "").trim();
+  for (const socketId of room.players.keys()) {
+    const candidateId = String(socketId ?? "").trim();
+    if (!candidateId || candidateId === skipId) {
+      continue;
+    }
+    const candidateSocket = io?.sockets?.sockets?.get(candidateId);
+    if (!candidateSocket) {
+      continue;
+    }
+    const candidateKey = sanitizeOwnerKey(candidateSocket?.data?.playerKey ?? "");
+    if (candidateKey && candidateKey === normalizedKey) {
+      return candidateId;
+    }
+  }
+  return "";
+}
+
 const PAINT_SOCKET_WINDOW_MS = 15_000;
 const PAINT_SOCKET_MAX_WRITES = 64;
 const PAINT_SOCKET_MAX_SURFACES = 18;
@@ -236,6 +259,23 @@ export function registerSocketHandlers({
       const nextKey = sanitizeOwnerKey(payload?.key ?? payload?.ownerKey ?? "");
       if (!nextKey || nextKey.length < 8) {
         ack(ackFn, { ok: false, error: "invalid owner key" });
+        return;
+      }
+      const room = roomService.getRoomBySocket(socket);
+      const duplicateSocketId = findDuplicateSessionSocketId(io, room, nextKey, socket.id);
+      if (duplicateSocketId) {
+        ack(ackFn, { ok: false, error: "duplicate session" });
+        socket.emit("session:duplicate", {
+          reason: "duplicate session",
+          duplicateSocketId
+        });
+        setTimeout(() => {
+          try {
+            socket.disconnect(true);
+          } catch {
+            // ignore disconnect errors
+          }
+        }, 60);
         return;
       }
       socket.data.playerKey = nextKey;
