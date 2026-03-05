@@ -196,7 +196,8 @@ export const BASE_VOID_PACK = {
         aZoneTargetUrl: "https://reclaim-fps.onrender.com/",
         // Old OX position now hosts the concert hall portal.
         hallPosition: [0, 0.08, 22],
-        hallTargetUrl: "/performance/index.html?from=emptines"
+        hallTargetUrl:
+          "https://performance-i3w5.onrender.com/performance/?host=0&room=event01&from=emptines"
       }
     },
     postProcessing: {

@@ -88,7 +88,8 @@ const MAX_BILLBOARD_VIDEO_BYTES = 20 * 1024 * 1024;
 const DEFAULT_PORTAL_TARGET_URL =
   "https://singularity-ox.onrender.com/?v=08d5432";
 const A_ZONE_FIXED_PORTAL_TARGET_URL = "https://reclaim-fps.onrender.com/";
-const HALL_FIXED_PORTAL_TARGET_URL = "/performance/index.html?from=emptines";
+const HALL_FIXED_PORTAL_TARGET_URL =
+  "https://performance-i3w5.onrender.com/performance/?host=0&room=event01&from=emptines";
 const ROOM_ZONE_IDS = Object.freeze(["lobby", "fps", "ox"]);
 const ROOM_ZONE_LABELS = Object.freeze({
   lobby: "대기방",
@@ -3114,8 +3115,8 @@ export class GameRuntime {
   createKoreanTempleGateMesh(options = {}) {
     const includePortal = Boolean(options?.includePortal);
     const trackPortalRefs = Boolean(options?.trackPortalRefs);
-    const gateScale = Math.max(0.4, Number(options?.scale) || 1.48);
-    const portalScale = Math.max(0.4, Number(options?.portalScale) || 1.44);
+    const gateScale = Math.max(0.4, Number(options?.scale) || 2.45);
+    const portalScale = Math.max(0.4, Number(options?.portalScale) || 2.25);
     const gateGroup = new THREE.Group();
     const gateWoodMat = new THREE.MeshStandardMaterial({
       color: 0xa0622e,
@@ -7232,22 +7233,30 @@ export class GameRuntime {
 
     context.textAlign = "center";
     context.textBaseline = "middle";
+    const hasLine3 = Boolean(String(line3 ?? "").trim());
+    const fontScale = Math.max(0.75, Math.min(1.25, width / 1280));
+    const headlineFontPx = Math.round(78 * fontScale);
+    const timeLabelFontPx = Math.round(50 * fontScale);
+    const line1Y = Math.round(height * 0.34);
+    const line2Y = Math.round(hasLine3 ? height * 0.67 : height * 0.72);
+    const line3Y = Math.round(height * 0.86);
+
     context.shadowColor = String(palette?.shadow ?? "rgba(90, 199, 255, 0.65)");
     context.shadowBlur = 12;
     context.fillStyle = String(palette?.line1 ?? "#d8f2ff");
-    context.font = "700 70px Bahnschrift";
-    context.fillText(String(line1 ?? ""), width * 0.5, 120);
+    context.font = `700 ${headlineFontPx}px Bahnschrift, "Trebuchet MS", "Segoe UI", sans-serif`;
+    context.fillText(String(line1 ?? ""), width * 0.5, line1Y);
 
     context.shadowBlur = 10;
     context.fillStyle = String(palette?.line2 ?? "#9de7ff");
-    context.font = "700 62px Bahnschrift";
-    context.fillText(String(line2 ?? ""), width * 0.5, 218);
+    context.font = `700 ${timeLabelFontPx}px Bahnschrift, "Trebuchet MS", "Segoe UI", sans-serif`;
+    context.fillText(String(line2 ?? ""), width * 0.5, line2Y);
 
-    if (String(line3 ?? "").trim()) {
-      context.shadowBlur = 8;
+    if (hasLine3) {
+      context.shadowBlur = 10;
       context.fillStyle = String(palette?.line3 ?? "#8bd6f5");
-      context.font = "700 42px Bahnschrift";
-      context.fillText(String(line3 ?? ""), width * 0.5, 282);
+      context.font = `700 ${timeLabelFontPx}px Bahnschrift, "Trebuchet MS", "Segoe UI", sans-serif`;
+      context.fillText(String(line3 ?? ""), width * 0.5, line3Y);
     }
   }
 
@@ -7288,7 +7297,11 @@ export class GameRuntime {
       this.localPlayerName = this.formatPlayerName(savedNickname);
     }
     const returnPortalHint = this.normalizeReturnPortalHint(this.returnEntryPortal, "");
-    if (returnPortalHint === "ox" || returnPortalHint === "fps") {
+    if (
+      returnPortalHint === "ox" ||
+      returnPortalHint === "fps" ||
+      returnPortalHint === "hall"
+    ) {
       const returnSpawnState = this.buildReturnPortalSpawnState(returnPortalHint);
       if (returnSpawnState) {
         this.pendingPlayerNameSync = true;

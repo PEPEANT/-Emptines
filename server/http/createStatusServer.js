@@ -28,6 +28,10 @@ const MIME_TYPES = Object.freeze({
   ".ttf": "font/ttf"
 });
 
+const LEGACY_HALL_PORTAL_PATH = "/performance/index.html";
+const DEFAULT_EXTERNAL_HALL_PORTAL_URL =
+  "https://performance-i3w5.onrender.com/performance/";
+
 function writeJson(res, statusCode, payload) {
   res.writeHead(statusCode, {
     "content-type": "application/json; charset=utf-8",
@@ -45,6 +49,14 @@ function requestPathname(req) {
     return url.pathname || "/";
   } catch {
     return "/";
+  }
+}
+
+function requestUrl(req) {
+  try {
+    return new URL(req?.url ?? "/", "http://localhost");
+  } catch {
+    return new URL("/", "http://localhost");
   }
 }
 
@@ -157,6 +169,7 @@ export function createStatusServer({
   const deploy = resolveDeployMeta();
 
   return createServer(async (req, res) => {
+    const parsedRequestUrl = requestUrl(req);
     const pathname = requestPathname(req);
     const method = requestMethod(req);
     const canServeFile = method === "GET" || method === "HEAD";
@@ -191,6 +204,36 @@ export function createStatusServer({
         deploy
       });
       return;
+    }
+
+    // Backward compatibility: older clients still navigate to /performance/index.html.
+    // Redirect them to the dedicated external hall service instead of returning 404.
+    if (pathname === LEGACY_HALL_PORTAL_PATH) {
+      try {
+        const target = new URL(DEFAULT_EXTERNAL_HALL_PORTAL_URL);
+        for (const [key, value] of parsedRequestUrl.searchParams.entries()) {
+          if (!target.searchParams.has(key)) {
+            target.searchParams.set(key, value);
+          }
+        }
+        if (!target.searchParams.has("host")) {
+          target.searchParams.set("host", "0");
+        }
+        if (!target.searchParams.has("room")) {
+          target.searchParams.set("room", "event01");
+        }
+        if (!target.searchParams.has("from")) {
+          target.searchParams.set("from", "emptines");
+        }
+        res.writeHead(302, {
+          location: target.toString(),
+          "cache-control": "no-store"
+        });
+        res.end();
+        return;
+      } catch {
+        // fall through
+      }
     }
 
     if (canServeFile && resolvedStaticDir) {
