@@ -478,22 +478,6 @@
         var volSlider = document.getElementById('sp-volume');
         if (!btn || !panel) return;
 
-        var versionEl = document.getElementById('sp-version');
-        if (!versionEl) {
-          var versionRow = document.createElement('div');
-          versionRow.className = 'sp-row';
-          var versionLabel = document.createElement('span');
-          versionLabel.className = 'sp-label';
-          versionLabel.textContent = '\uBC84\uC804';
-          versionEl = document.createElement('span');
-          versionEl.id = 'sp-version';
-          versionEl.className = 'sp-value';
-          versionRow.appendChild(versionLabel);
-          versionRow.appendChild(versionEl);
-          panel.appendChild(versionRow);
-        }
-        versionEl.textContent = '0.1';
-
         function openPanel() {
           panel.classList.remove('hidden');
           btn.setAttribute('aria-expanded', 'true');
