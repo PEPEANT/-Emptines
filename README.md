@@ -1,5 +1,17 @@
 # Emptines
 
+## Vision Statement
+
+이 프로젝트는 단순한 게임이 아니라, 인간과 AI가 공존하는 포스트휴먼 메타도시를 위한 장기 설계도다.
+
+- 세계관 기준서: [`WORLD_LORE.md`](./WORLD_LORE.md)
+- 장기 선언문: [`WHITEPAPER.md`](./WHITEPAPER.md)
+- 기준 시작일: `2026-03-05`
+- 장기 목표 시점: `2046-03-05`
+
+이 저장소는 AGI/ASI 시대의 협업 제작을 염두에 두고,
+사람과 에이전트가 함께 이어서 만들 수 있는 구조를 지향한다.
+
 Minimal void-world multiplayer prototype built with Three.js + Vite.
 
 Current identity is intentionally simple:
