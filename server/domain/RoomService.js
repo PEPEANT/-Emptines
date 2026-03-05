@@ -31,6 +31,7 @@ const RIGHT_BILLBOARD_VIDEO_ID_LOOKUP = Object.freeze(
   })
 );
 const MAX_LEFT_BILLBOARD_IMAGE_CHARS = 4_200_000;
+const MAX_MAIN_PORTAL_AD_IMAGE_CHARS = 4_200_000;
 const MAX_BILLBOARD_VIDEO_DATA_URL_CHARS = 30_000_000;
 const SURFACE_PAINT_STORE_VERSION = 1;
 const MAX_SHARED_AUDIO_DATA_URL_CHARS = 12_000_000;
@@ -485,6 +486,14 @@ function createLeftBillboardState() {
   };
 }
 
+function createMainPortalAdState() {
+  return {
+    mode: "ad",
+    imageDataUrl: "",
+    updatedAt: Date.now()
+  };
+}
+
 function createSharedMusicState() {
   return {
     mode: "idle",
@@ -696,6 +705,17 @@ function normalizeLeftBillboardImageDataUrl(rawValue) {
   return value;
 }
 
+function normalizeMainPortalAdImageDataUrl(rawValue) {
+  const value = String(rawValue ?? "").trim();
+  if (!value || value.length > MAX_MAIN_PORTAL_AD_IMAGE_CHARS) {
+    return "";
+  }
+  if (!value.startsWith("data:image/")) {
+    return "";
+  }
+  return value;
+}
+
 function normalizeBillboardVideoDataUrl(rawValue) {
   const value = String(rawValue ?? "").trim();
   if (!value || value.length > MAX_BILLBOARD_VIDEO_DATA_URL_CHARS) {
@@ -722,6 +742,7 @@ function createPersistentRoom(code, defaultPortalTargetUrl, defaultAZonePortalTa
     portalTarget: defaultPortalTargetUrl,
     aZonePortalTarget: defaultAZonePortalTargetUrl,
     portalSchedule: createPortalScheduleState(),
+    mainPortalAd: createMainPortalAdState(),
     leftBillboard: createLeftBillboardState(),
     rightBillboard: createRightBillboardState(),
     sharedMusic: createSharedMusicState(),
@@ -846,6 +867,7 @@ export class RoomService {
     const chatHistorySource = Array.isArray(parsed?.chatHistory) ? parsed.chatHistory : [];
     const savedLayoutVersion = normalizeMapLayoutVersion(parsed?.layoutVersion, "");
     const shouldRestoreLayoutState = savedLayoutVersion === this.mapLayoutVersion;
+    const mainPortalAd = this.serializeMainPortalAd({ mainPortalAd: parsed?.mainPortalAd });
     const leftBillboard = this.serializeLeftBillboard({ leftBillboard: parsed?.leftBillboard });
     const rightBillboard = this.serializeRightBillboard({ rightBillboard: parsed?.rightBillboard });
     const restored = new Map();
@@ -873,6 +895,7 @@ export class RoomService {
     const room = this.getDefaultRoom();
     room.surfacePaint = restored;
     room.chatHistory = restoredChatHistory;
+    room.mainPortalAd = mainPortalAd;
     room.leftBillboard = leftBillboard;
     room.rightBillboard = rightBillboard;
     room.objectEditor = normalizeObjectEditorState(parsed?.objectEditor, room.objectEditor);
@@ -955,6 +978,7 @@ export class RoomService {
       layoutVersion: this.mapLayoutVersion,
       surfaces: this.serializeSurfacePaint(room),
       chatHistory: this.serializeChatHistory(room),
+      mainPortalAd: this.serializeMainPortalAd(room),
       leftBillboard: this.serializeLeftBillboard(room),
       rightBillboard: this.serializeRightBillboard(room),
       platforms: this.serializePlatforms(room),
@@ -1033,6 +1057,7 @@ export class RoomService {
       portalTarget: String(room.portalTarget ?? "").trim(),
       aZonePortalTarget: String(room.aZonePortalTarget ?? "").trim(),
       portalSchedule: this.serializePortalSchedule(room),
+      mainPortalAd: this.serializeMainPortalAd(room),
       rightBillboard: this.serializeRightBillboard(room),
       securityTest: this.serializeSecurityTest(room),
       objectEditor: this.serializeObjectEditor(room),
@@ -1563,6 +1588,85 @@ export class RoomService {
     return {
       enabled: Boolean(state.enabled),
       updatedAt: Math.max(0, Math.trunc(Number(state.updatedAt) || Date.now()))
+    };
+  }
+
+  serializeMainPortalAd(room) {
+    const state = room?.mainPortalAd ?? createMainPortalAdState();
+    const imageDataUrl = normalizeMainPortalAdImageDataUrl(state.imageDataUrl);
+    const modeRaw = String(state.mode ?? "ad").trim().toLowerCase();
+    const mode = modeRaw === "image" && imageDataUrl ? "image" : "ad";
+    return {
+      mode,
+      imageDataUrl: mode === "image" ? imageDataUrl : "",
+      updatedAt: Math.max(0, Math.trunc(Number(state.updatedAt) || Date.now()))
+    };
+  }
+
+  emitMainPortalAdUpdate(room) {
+    this.io.to(room.code).emit("portal:ad:update", this.serializeMainPortalAd(room));
+  }
+
+  setMainPortalAdImage(room, rawImageDataUrl) {
+    if (!room) {
+      return { ok: false, error: "room not found" };
+    }
+
+    const imageDataUrl = normalizeMainPortalAdImageDataUrl(rawImageDataUrl);
+    if (!imageDataUrl) {
+      return { ok: false, error: "invalid image data" };
+    }
+
+    const previous = this.serializeMainPortalAd(room);
+    if (previous.mode === "image" && previous.imageDataUrl === imageDataUrl) {
+      return {
+        ok: true,
+        changed: false,
+        state: previous
+      };
+    }
+
+    if (!room.mainPortalAd || typeof room.mainPortalAd !== "object") {
+      room.mainPortalAd = createMainPortalAdState();
+    }
+    room.mainPortalAd.mode = "image";
+    room.mainPortalAd.imageDataUrl = imageDataUrl;
+    room.mainPortalAd.updatedAt = Date.now();
+    this.scheduleSurfacePaintSave();
+
+    return {
+      ok: true,
+      changed: true,
+      state: this.serializeMainPortalAd(room)
+    };
+  }
+
+  resetMainPortalAd(room) {
+    if (!room) {
+      return { ok: false, error: "room not found" };
+    }
+
+    const previous = this.serializeMainPortalAd(room);
+    if (previous.mode === "ad" && !previous.imageDataUrl) {
+      return {
+        ok: true,
+        changed: false,
+        state: previous
+      };
+    }
+
+    if (!room.mainPortalAd || typeof room.mainPortalAd !== "object") {
+      room.mainPortalAd = createMainPortalAdState();
+    }
+    room.mainPortalAd.mode = "ad";
+    room.mainPortalAd.imageDataUrl = "";
+    room.mainPortalAd.updatedAt = Date.now();
+    this.scheduleSurfacePaintSave();
+
+    return {
+      ok: true,
+      changed: true,
+      state: this.serializeMainPortalAd(room)
     };
   }
 

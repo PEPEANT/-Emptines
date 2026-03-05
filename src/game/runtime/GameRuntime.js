@@ -83,6 +83,7 @@ const RIGHT_BILLBOARD_VIDEO_ID_LOOKUP = Object.freeze(
   }, { ...RIGHT_BILLBOARD_VIDEO_ID_ALIASES })
 );
 const MAX_LEFT_BILLBOARD_IMAGE_CHARS = 4_200_000;
+const MAX_MAIN_PORTAL_AD_IMAGE_CHARS = 4_200_000;
 const MAX_BILLBOARD_VIDEO_DATA_URL_CHARS = 30_000_000;
 const MAX_BILLBOARD_VIDEO_BYTES = 20 * 1024 * 1024;
 const DEFAULT_PORTAL_TARGET_URL =
@@ -443,6 +444,18 @@ export class GameRuntime {
     this.plazaBillboardRightVideoTexture = null;
     this.rightBillboardActiveVideoId = "";
     this.rightBillboardActiveVideoDataUrl = "";
+    this.mainPortalAdState = {
+      mode: "ad",
+      imageDataUrl: "",
+      updatedAt: Date.now()
+    };
+    this.mainPortalAdSetInFlight = false;
+    this.hostMainPortalAdPendingDataUrl = "";
+    this.portalTopAdBaseTexture = null;
+    this.portalTopAdCustomTexture = null;
+    this.portalTopAdScreenMaterial = null;
+    this.portalTopAdUpdateGeometry = null;
+    this.portalTopAdLoadNonce = 0;
     this.leftBillboardState = {
       mode: "ad",
       imageDataUrl: "",
@@ -646,6 +659,9 @@ export class GameRuntime {
     this.hostPortalTargetApplyBtnEl = document.getElementById("host-portal-target-apply");
     this.hostAZonePortalTargetInputEl = document.getElementById("host-a-zone-portal-target");
     this.hostAZonePortalTargetApplyBtnEl = document.getElementById("host-a-zone-portal-target-apply");
+    this.hostMainPortalAdFileInputEl = document.getElementById("host-main-portal-ad-file");
+    this.hostMainPortalAdApplyBtnEl = document.getElementById("host-main-portal-ad-apply");
+    this.hostMainPortalAdResetBtnEl = document.getElementById("host-main-portal-ad-reset");
     this.hostLeftImageFileInputEl = document.getElementById("host-left-image-file");
     this.hostResetLeftImageBtnEl = document.getElementById("host-left-image-reset");
     this.hostMusicFileInputEl = document.getElementById("host-music-file");
@@ -920,6 +936,10 @@ export class GameRuntime {
     this.portalReplicaCore = null;
     this.portalReplicaCoreGlow = null;
     this.portalBillboardGroup = null;
+    this.portalTopAdBaseTexture = null;
+    this.portalTopAdScreenMaterial = null;
+    this.portalTopAdUpdateGeometry = null;
+    this.portalTopAdLoadNonce = 0;
     this.spawnPortalVeilGroup = null;
     this.spawnPortalVeilWorldZ = this.bridgeNpcPosition.z;
     this.spawnPortalVeilMaterial = null;
@@ -1249,6 +1269,10 @@ export class GameRuntime {
       this.portalBillboardTexture.dispose?.();
       this.portalBillboardTexture = null;
     }
+    if (this.portalTopAdCustomTexture) {
+      this.portalTopAdCustomTexture.dispose?.();
+      this.portalTopAdCustomTexture = null;
+    }
     const spawnPortalVeilTexturesToDispose = new Set();
     if (this.spawnPortalVeilTexture) {
       spawnPortalVeilTexturesToDispose.add(this.spawnPortalVeilTexture);
@@ -1276,6 +1300,10 @@ export class GameRuntime {
     this.portalBillboardCanvas = null;
     this.portalBillboardContext = null;
     this.portalBillboardGroup = null;
+    this.portalTopAdBaseTexture = null;
+    this.portalTopAdScreenMaterial = null;
+    this.portalTopAdUpdateGeometry = null;
+    this.portalTopAdLoadNonce = 0;
     this.portalBillboardPalette = {
       bgFrom: "rgba(27, 11, 29, 0.56)",
       bgTo: "rgba(46, 14, 45, 0.64)",
@@ -2870,6 +2898,14 @@ export class GameRuntime {
       topAdPanelYOffset: 1.65,
       topAdScale: 1.36,
       rotationY: 0,
+      onTopAdReady: (payload = {}) => {
+        this.portalTopAdBaseTexture = payload?.texture ?? null;
+        this.portalTopAdScreenMaterial = payload?.material ?? null;
+        this.portalTopAdUpdateGeometry =
+          typeof payload?.updateGeometry === "function" ? payload.updateGeometry : null;
+        this.portalTopAdLoadNonce = 0;
+        this.applyMainPortalAdState(this.mainPortalAdState, { force: true });
+      },
       palette: {
         bgFrom: "rgba(27, 11, 29, 0.56)",
         bgTo: "rgba(46, 14, 45, 0.64)",
@@ -3464,6 +3500,111 @@ export class GameRuntime {
     return "";
   }
 
+  normalizeMainPortalAdState(rawState = {}) {
+    const imageDataUrl = String(rawState?.imageDataUrl ?? rawState?.dataUrl ?? "").trim();
+    const hasValidImage =
+      imageDataUrl.length > 0 &&
+      imageDataUrl.length <= MAX_MAIN_PORTAL_AD_IMAGE_CHARS &&
+      imageDataUrl.startsWith("data:image/");
+    const modeRaw = String(rawState?.mode ?? "ad").trim().toLowerCase();
+    const mode = modeRaw === "image" && hasValidImage ? "image" : "ad";
+    return {
+      mode,
+      imageDataUrl: mode === "image" ? imageDataUrl : "",
+      updatedAt: Math.max(0, Math.trunc(Number(rawState?.updatedAt) || Date.now()))
+    };
+  }
+
+  updatePortalTopAdGeometryFromTexture(texture) {
+    if (!this.portalTopAdUpdateGeometry || !texture?.image) {
+      return;
+    }
+    const width = Number(texture.image.width) || 0;
+    const height = Number(texture.image.height) || 0;
+    if (width > 0 && height > 0) {
+      this.portalTopAdUpdateGeometry(width / height);
+    }
+  }
+
+  applyMainPortalAdTexture(rawImageDataUrl) {
+    if (!this.portalTopAdScreenMaterial) {
+      return;
+    }
+
+    const imageDataUrl = String(rawImageDataUrl ?? "").trim();
+    this.portalTopAdLoadNonce += 1;
+
+    if (!imageDataUrl) {
+      if (this.portalTopAdCustomTexture) {
+        this.portalTopAdCustomTexture.dispose();
+        this.portalTopAdCustomTexture = null;
+      }
+      if (this.portalTopAdBaseTexture) {
+        this.portalTopAdScreenMaterial.map = this.portalTopAdBaseTexture;
+        this.portalTopAdScreenMaterial.needsUpdate = true;
+        this.updatePortalTopAdGeometryFromTexture(this.portalTopAdBaseTexture);
+      }
+      return;
+    }
+
+    const loadNonce = this.portalTopAdLoadNonce;
+    const texture = this.textureLoader.load(
+      imageDataUrl,
+      () => {
+        if (loadNonce !== this.portalTopAdLoadNonce) {
+          texture.dispose();
+          return;
+        }
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.minFilter = THREE.LinearMipmapLinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        texture.generateMipmaps = true;
+        const maxAnisotropy = Math.max(1, this.renderer?.capabilities?.getMaxAnisotropy?.() || 1);
+        texture.anisotropy = this.mobileEnabled
+          ? Math.min(2, maxAnisotropy)
+          : Math.min(8, maxAnisotropy);
+        texture.needsUpdate = true;
+
+        if (this.portalTopAdCustomTexture && this.portalTopAdCustomTexture !== texture) {
+          this.portalTopAdCustomTexture.dispose();
+        }
+        this.portalTopAdCustomTexture = texture;
+        this.portalTopAdScreenMaterial.map = texture;
+        this.portalTopAdScreenMaterial.needsUpdate = true;
+        this.updatePortalTopAdGeometryFromTexture(texture);
+      },
+      undefined,
+      () => {
+        if (loadNonce !== this.portalTopAdLoadNonce) {
+          texture.dispose();
+          return;
+        }
+        texture.dispose();
+        this.applyMainPortalAdTexture("");
+      }
+    );
+  }
+
+  applyMainPortalAdState(rawState = {}, { force = false } = {}) {
+    const next = this.normalizeMainPortalAdState(rawState);
+    const previous = this.normalizeMainPortalAdState(this.mainPortalAdState);
+    if (
+      !force &&
+      previous.mode === next.mode &&
+      previous.imageDataUrl === next.imageDataUrl
+    ) {
+      return false;
+    }
+
+    this.mainPortalAdState = next;
+    if (next.mode === "image" && next.imageDataUrl) {
+      this.applyMainPortalAdTexture(next.imageDataUrl);
+      return true;
+    }
+    this.applyMainPortalAdTexture("");
+    return true;
+  }
+
   normalizeRightBillboardState(rawState = {}) {
     const videoId = this.normalizeRightBillboardVideoId(rawState?.videoId ?? rawState?.id ?? "");
     const videoDataUrl = this.normalizeBillboardVideoDataUrl(rawState?.videoDataUrl ?? rawState?.dataUrl ?? "");
@@ -3904,6 +4045,129 @@ export class GameRuntime {
     if (this.isRoomHost || this.canUseOfflineHostMode()) {
       this.requestRightBillboardReset({ announceErrors: false });
     }
+  }
+
+  handleHostMainPortalAdFileSelected(file) {
+    if (!file) {
+      this.hostMainPortalAdPendingDataUrl = "";
+      return;
+    }
+    if (file.type && !String(file.type).toLowerCase().startsWith("image/")) {
+      this.hostMainPortalAdPendingDataUrl = "";
+      this.appendChatLine("", "메인 포탈 광고판은 이미지 파일만 업로드할 수 있습니다.", "system");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = String(event?.target?.result ?? "").trim();
+      const next = this.normalizeMainPortalAdState({
+        mode: "image",
+        imageDataUrl: dataUrl
+      });
+      if (next.mode !== "image" || !next.imageDataUrl) {
+        this.hostMainPortalAdPendingDataUrl = "";
+        this.appendChatLine("", "유효한 이미지(data:image) 파일을 다시 선택하세요.", "system");
+        return;
+      }
+      this.hostMainPortalAdPendingDataUrl = next.imageDataUrl;
+      this.appendChatLine("", "메인 포탈 광고판 이미지가 준비되었습니다. '메인 광고 적용'을 누르세요.", "system");
+    };
+    reader.onerror = () => {
+      this.hostMainPortalAdPendingDataUrl = "";
+      this.appendChatLine("", "이미지 파일을 읽지 못했습니다.", "system");
+    };
+    reader.readAsDataURL(file);
+  }
+
+  requestMainPortalAdSet(rawImageDataUrl, { announceErrors = true } = {}) {
+    const next = this.normalizeMainPortalAdState({
+      mode: "image",
+      imageDataUrl: rawImageDataUrl,
+      updatedAt: Date.now()
+    });
+    if (next.mode !== "image" || !next.imageDataUrl) {
+      if (announceErrors) {
+        this.appendChatLine("", "메인 포탈 광고 이미지(data:image)를 확인하세요.", "system");
+      }
+      return;
+    }
+
+    const localHostMode = this.canUseOfflineHostMode();
+    if (!this.socket || !this.networkConnected) {
+      if (localHostMode) {
+        this.applyMainPortalAdState(next, { force: true });
+      } else if (announceErrors) {
+        this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
+      }
+      return;
+    }
+    if (!this.isRoomHost) {
+      if (announceErrors) {
+        this.appendChatLine("", "메인 포탈 광고판 제어는 방장만 가능합니다.", "system");
+      }
+      return;
+    }
+    if (this.mainPortalAdSetInFlight) {
+      return;
+    }
+
+    this.mainPortalAdSetInFlight = true;
+    this.syncHostControls();
+    this.socket.emit("portal:ad:set", { imageDataUrl: next.imageDataUrl }, (response = {}) => {
+      this.mainPortalAdSetInFlight = false;
+      this.syncHostControls();
+      if (!response?.ok) {
+        if (announceErrors) {
+          const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
+          this.appendChatLine("", `메인 포탈 광고판 적용 실패: ${reason}`, "system");
+        }
+        return;
+      }
+      this.applyMainPortalAdState(response?.state ?? next, { force: true });
+    });
+  }
+
+  requestMainPortalAdReset({ announceErrors = true } = {}) {
+    const localHostMode = this.canUseOfflineHostMode();
+    if (!this.socket || !this.networkConnected) {
+      if (localHostMode) {
+        this.applyMainPortalAdState(
+          {
+            mode: "ad",
+            imageDataUrl: "",
+            updatedAt: Date.now()
+          },
+          { force: true }
+        );
+      } else if (announceErrors) {
+        this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
+      }
+      return;
+    }
+    if (!this.isRoomHost) {
+      if (announceErrors) {
+        this.appendChatLine("", "메인 포탈 광고판 제어는 방장만 가능합니다.", "system");
+      }
+      return;
+    }
+    if (this.mainPortalAdSetInFlight) {
+      return;
+    }
+
+    this.mainPortalAdSetInFlight = true;
+    this.syncHostControls();
+    this.socket.emit("portal:ad:reset", {}, (response = {}) => {
+      this.mainPortalAdSetInFlight = false;
+      this.syncHostControls();
+      if (!response?.ok) {
+        if (announceErrors) {
+          const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
+          this.appendChatLine("", `메인 포탈 광고판 초기화 실패: ${reason}`, "system");
+        }
+        return;
+      }
+      this.applyMainPortalAdState(response?.state ?? {}, { force: true });
+    });
   }
 
   requestLeftBillboardImageSet(rawImageDataUrl) {
@@ -7002,6 +7266,7 @@ export class GameRuntime {
 
   createPortalTimeBillboard(options = {}) {
     const dynamic = Boolean(options?.dynamic);
+    const onTopAdReady = typeof options?.onTopAdReady === "function" ? options.onTopAdReady : null;
     const topAdImageUrl = String(options?.topAdImageUrl ?? PORTAL_TOP_AD_IMAGE_URL).trim()
       || PORTAL_TOP_AD_IMAGE_URL;
     const line1 = String(options?.line1 ?? "상시 입장 가능").trim() || "상시 입장 가능";
@@ -7162,6 +7427,15 @@ export class GameRuntime {
     }
 
     board.add(glowBack, screen, topAdGlow, topAdBorder, topAdScreen);
+    if (onTopAdReady) {
+      onTopAdReady({
+        texture: topAdTexture,
+        screen: topAdScreen,
+        material: topAdScreen.material,
+        updateGeometry: updateTopAdGeometry,
+        imageUrl: topAdImageUrl
+      });
+    }
 
     if (dynamic) {
       this.portalBillboardCanvas = canvas;
@@ -10147,6 +10421,7 @@ export class GameRuntime {
       this.portalScheduleSetInFlight ||
       this.portalTargetSetInFlight ||
       this.aZonePortalTargetSetInFlight ||
+      this.mainPortalAdSetInFlight ||
       this.leftBillboardSetInFlight ||
       this.rightBillboardResetInFlight ||
       this.billboardVideoSetInFlight ||
@@ -10224,6 +10499,15 @@ export class GameRuntime {
         this.hostAZonePortalTargetApplyBtnEl.classList.toggle("hidden", MAIN_PORTAL_ONLY_MODE);
       }
       this.hostAZonePortalTargetApplyBtnEl.disabled = controlsBusy;
+    }
+    if (this.hostMainPortalAdFileInputEl) {
+      this.hostMainPortalAdFileInputEl.disabled = controlsBusy;
+    }
+    if (this.hostMainPortalAdApplyBtnEl) {
+      this.hostMainPortalAdApplyBtnEl.disabled = controlsBusy;
+    }
+    if (this.hostMainPortalAdResetBtnEl) {
+      this.hostMainPortalAdResetBtnEl.disabled = controlsBusy;
     }
     if (this.hostRightVideoSelectEl) {
       this.hostRightVideoSelectEl.disabled = controlsBusy;
@@ -14641,6 +14925,29 @@ export class GameRuntime {
         this.hostAZonePortalTargetApplyBtnEl?.click?.();
       });
     }
+    if (this.hostMainPortalAdFileInputEl) {
+      this.hostMainPortalAdFileInputEl.addEventListener("change", () => {
+        const file = this.hostMainPortalAdFileInputEl?.files?.[0] ?? null;
+        this.handleHostMainPortalAdFileSelected(file);
+        this.hostMainPortalAdFileInputEl.value = "";
+      });
+    }
+    if (this.hostMainPortalAdApplyBtnEl) {
+      this.hostMainPortalAdApplyBtnEl.addEventListener("click", () => {
+        const dataUrl = String(this.hostMainPortalAdPendingDataUrl ?? "").trim();
+        if (!dataUrl) {
+          this.appendChatLine("", "먼저 메인 포탈 광고 이미지 파일을 선택하세요.", "system");
+          this.hostMainPortalAdFileInputEl?.focus?.();
+          return;
+        }
+        this.requestMainPortalAdSet(dataUrl, { announceErrors: true });
+      });
+    }
+    if (this.hostMainPortalAdResetBtnEl) {
+      this.hostMainPortalAdResetBtnEl.addEventListener("click", () => {
+        this.requestMainPortalAdReset({ announceErrors: true });
+      });
+    }
     if (this.hostPlayRightVideoBtnEl) {
       this.hostPlayRightVideoBtnEl.addEventListener("click", () => {
         const videoId = String(this.hostRightVideoSelectEl?.value ?? "").trim();
@@ -15262,6 +15569,15 @@ export class GameRuntime {
         "host-a-zone-portal-target-apply"
       );
     }
+    if (!this.hostMainPortalAdFileInputEl) {
+      this.hostMainPortalAdFileInputEl = document.getElementById("host-main-portal-ad-file");
+    }
+    if (!this.hostMainPortalAdApplyBtnEl) {
+      this.hostMainPortalAdApplyBtnEl = document.getElementById("host-main-portal-ad-apply");
+    }
+    if (!this.hostMainPortalAdResetBtnEl) {
+      this.hostMainPortalAdResetBtnEl = document.getElementById("host-main-portal-ad-reset");
+    }
     if (!this.hostRightVideoSelectEl) {
       this.hostRightVideoSelectEl = document.getElementById("host-right-video");
     }
@@ -15871,6 +16187,7 @@ export class GameRuntime {
       this.leftBillboardSetInFlight = false;
       this.rightBillboardResetInFlight = false;
       this.billboardVideoSetInFlight = false;
+      this.mainPortalAdSetInFlight = false;
       this.hostMusicSetInFlight = false;
       this.applySharedMusicState({ mode: "idle" }, { announce: false });
       this.portalForceOpenInFlight = false;
@@ -15943,6 +16260,7 @@ export class GameRuntime {
       this.leftBillboardSetInFlight = false;
       this.rightBillboardResetInFlight = false;
       this.billboardVideoSetInFlight = false;
+      this.mainPortalAdSetInFlight = false;
       this.hostMusicSetInFlight = false;
       this.remoteSyncClock = 0;
       this.remoteUpdateClock = 0;
@@ -16036,6 +16354,7 @@ export class GameRuntime {
       this.leftBillboardSetInFlight = false;
       this.rightBillboardResetInFlight = false;
       this.billboardVideoSetInFlight = false;
+      this.mainPortalAdSetInFlight = false;
       this.hostMusicSetInFlight = false;
       this.securityTestSetInFlight = false;
       this.authoritativeStateSyncInFlight = false;
@@ -16103,6 +16422,7 @@ export class GameRuntime {
       this.leftBillboardSetInFlight = false;
       this.rightBillboardResetInFlight = false;
       this.billboardVideoSetInFlight = false;
+      this.mainPortalAdSetInFlight = false;
       this.hostMusicSetInFlight = false;
       this.securityTestSetInFlight = false;
       this.authoritativeStateSyncInFlight = false;
@@ -16147,6 +16467,10 @@ export class GameRuntime {
 
     socket.on("portal:a-zone-target:update", (payload = {}) => {
       this.applyAZonePortalTargetUpdate(payload?.targetUrl ?? payload?.url ?? "");
+    });
+
+    socket.on("portal:ad:update", (payload = {}) => {
+      this.applyMainPortalAdState(payload ?? {}, { force: true });
     });
 
     socket.on("portal:schedule:update", (payload = {}) => {
@@ -16432,6 +16756,9 @@ export class GameRuntime {
     }
     if (room?.portalSchedule && typeof room.portalSchedule === "object") {
       this.applyPortalScheduleUpdate(room.portalSchedule, { announce: false });
+    }
+    if (room?.mainPortalAd && typeof room.mainPortalAd === "object") {
+      this.applyMainPortalAdState(room.mainPortalAd);
     }
     if (room?.leftBillboard && typeof room.leftBillboard === "object") {
       this.applyLeftBillboardState(room.leftBillboard);

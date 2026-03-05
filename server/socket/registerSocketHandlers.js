@@ -159,6 +159,14 @@ export function registerSocketHandlers({
       socket.emit("billboard:left:update", roomService.serializeLeftBillboard(room));
     };
 
+    const emitMainPortalAdState = () => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        return;
+      }
+      socket.emit("portal:ad:update", roomService.serializeMainPortalAd(room));
+    };
+
     const emitPlatformState = () => {
       const room = roomService.getRoomBySocket(socket);
       if (!room) return;
@@ -226,6 +234,7 @@ export function registerSocketHandlers({
         emitSurfacePaintState();
         emitSharedMusicState();
         emitLeftBillboardState();
+        emitMainPortalAdState();
         emitPortalOpenCatchup();
         emitPromoState();
         emitObjectState();
@@ -247,6 +256,7 @@ export function registerSocketHandlers({
     emitSurfacePaintState();
     emitSharedMusicState();
     emitLeftBillboardState();
+    emitMainPortalAdState();
     emitPortalOpenCatchup();
     emitPlatformState();
     emitRopeState();
@@ -598,6 +608,61 @@ export function registerSocketHandlers({
         ok: true,
         changed: Boolean(result.changed),
         targetUrl: result.targetUrl
+      });
+    });
+
+    socket.on("portal:ad:set", (payload = {}, ackFn) => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        ack(ackFn, { ok: false, error: "room not found" });
+        return;
+      }
+      if (!roomService.isHost(room, socket.id)) {
+        ack(ackFn, { ok: false, error: "host only" });
+        return;
+      }
+
+      const result = roomService.setMainPortalAdImage(
+        room,
+        payload?.imageDataUrl ?? payload?.dataUrl ?? payload?.url ?? ""
+      );
+      if (!result.ok) {
+        ack(ackFn, result);
+        return;
+      }
+      if (result.changed) {
+        roomService.emitMainPortalAdUpdate(room);
+      }
+      ack(ackFn, {
+        ok: true,
+        changed: Boolean(result.changed),
+        state: result.state
+      });
+    });
+
+    socket.on("portal:ad:reset", (_payload = {}, ackFn) => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        ack(ackFn, { ok: false, error: "room not found" });
+        return;
+      }
+      if (!roomService.isHost(room, socket.id)) {
+        ack(ackFn, { ok: false, error: "host only" });
+        return;
+      }
+
+      const result = roomService.resetMainPortalAd(room);
+      if (!result.ok) {
+        ack(ackFn, result);
+        return;
+      }
+      if (result.changed) {
+        roomService.emitMainPortalAdUpdate(room);
+      }
+      ack(ackFn, {
+        ok: true,
+        changed: Boolean(result.changed),
+        state: result.state
       });
     });
 
