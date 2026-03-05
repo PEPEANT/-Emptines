@@ -1573,7 +1573,7 @@ export class GameRuntime {
       B: { centerX: 60, objectEnabled: true }
     };
     // Shift city buildings to the rear band between the hall and skyline to keep the plaza readable.
-    const cityBuildingRearOffsetZ = 58;
+    const cityBuildingRearOffsetZ = 96;
     const toRearCityZ = (value) => (Number(value) || 0) + cityBuildingRearOffsetZ;
 
     const zoneABorder = new THREE.Mesh(

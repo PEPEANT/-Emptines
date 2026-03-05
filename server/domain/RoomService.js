@@ -47,6 +47,11 @@ const MAX_OBJECT_POSITIONS = 4000;
 const MAX_OBJECT_COORDINATE = 2500;
 const MIN_OBJECT_SCALE = 0.25;
 const MAX_OBJECT_SCALE = 8;
+const CITY_OBJECT_REAR_MIGRATION_VERSION = "2026-03-05-city-rear-v2";
+const CITY_OBJECT_REAR_MIGRATION_DELTA_Z = 36;
+const CITY_OBJECT_REAR_MIGRATION_MIN_Z = 72;
+const CITY_OBJECT_ID_PATTERN =
+  /^city_(?:tower|mega_tower|kiosk|block|outer_block|bridge_block)_\d+$/;
 const PROMO_OWNER_KEY_PATTERN = /^[a-zA-Z0-9:_-]{8,96}$/;
 const MAX_PROMO_OBJECTS = 1200;
 const MAX_PROMO_NAME_CHARS = 48;
@@ -421,6 +426,52 @@ function normalizeObjectPositionEntry(rawValue) {
     ...(hasYaw ? { ry } : {}),
     visible
   };
+}
+
+function migrateCityObjectPositionsToRearBand(rawPositions, savedMigrationVersion) {
+  const source = rawPositions && typeof rawPositions === "object" ? rawPositions : {};
+  const normalizedSavedVersion = normalizeMapLayoutVersion(savedMigrationVersion, "");
+  if (normalizedSavedVersion === CITY_OBJECT_REAR_MIGRATION_VERSION) {
+    return { positions: source, changed: false };
+  }
+
+  let changed = false;
+  const migrated = {};
+  for (const [rawId, rawValue] of Object.entries(source)) {
+    const id = normalizeObjectPositionId(rawId);
+    if (!id) {
+      continue;
+    }
+    if (!CITY_OBJECT_ID_PATTERN.test(id)) {
+      migrated[id] = rawValue;
+      continue;
+    }
+    const entry = normalizeObjectPositionEntry(rawValue);
+    if (!entry) {
+      continue;
+    }
+    if (Number(entry.z) >= CITY_OBJECT_REAR_MIGRATION_MIN_Z) {
+      migrated[id] = rawValue;
+      continue;
+    }
+    const nextZ = Math.max(
+      -MAX_OBJECT_COORDINATE,
+      Math.min(MAX_OBJECT_COORDINATE, Number(entry.z) + CITY_OBJECT_REAR_MIGRATION_DELTA_Z)
+    );
+    if (!Number.isFinite(nextZ)) {
+      migrated[id] = rawValue;
+      continue;
+    }
+    if (Math.abs(nextZ - Number(entry.z)) > 0.0001) {
+      changed = true;
+    }
+    migrated[id] = {
+      ...rawValue,
+      z: nextZ
+    };
+  }
+
+  return { positions: migrated, changed };
 }
 
 function normalizeStateRevision(rawValue, fallback = 0) {
@@ -861,6 +912,10 @@ export class RoomService {
       parsed?.objectPositions && typeof parsed.objectPositions === "object"
         ? parsed.objectPositions
         : {};
+    const savedCityObjectRearMigrationVersion = normalizeMapLayoutVersion(
+      parsed?.cityObjectRearMigrationVersion,
+      ""
+    );
     const platformRevision = normalizeStateRevision(parsed?.platformRevision, 0);
     const ropeRevision = normalizeStateRevision(parsed?.ropeRevision, 0);
     const objectRevision = normalizeStateRevision(parsed?.objectRevision, 0);
@@ -900,13 +955,24 @@ export class RoomService {
     room.rightBillboard = rightBillboard;
     room.objectEditor = normalizeObjectEditorState(parsed?.objectEditor, room.objectEditor);
     if (shouldRestoreLayoutState) {
+      const migratedObjectPositions = migrateCityObjectPositionsToRearBand(
+        objectPositions,
+        savedCityObjectRearMigrationVersion
+      );
       room.platformRevision = platformRevision;
       room.ropeRevision = ropeRevision;
       room.objectRevision = objectRevision;
-      this.setObjectPositions(room, objectPositions, { persist: false, bumpRevision: false });
+      this.setObjectPositions(room, migratedObjectPositions.positions, {
+        persist: false,
+        bumpRevision: false
+      });
       this.setPlatforms(room, platforms, { persist: false, bumpRevision: false });
       this.setRopes(room, ropes, { persist: false, bumpRevision: false });
       this.setPromoObjects(room, promoObjects, { persist: false });
+      if (migratedObjectPositions.changed) {
+        this.scheduleSurfacePaintSave();
+        this.log?.log?.("[paint] Applied rear-band migration to city object positions.");
+      }
     } else {
       this.log?.warn?.(
         `[paint] Skip layout restore due to version mismatch (saved=${savedLayoutVersion || "none"}, runtime=${this.mapLayoutVersion})`
@@ -988,7 +1054,8 @@ export class RoomService {
       promoObjects: this.serializePromoObjects(room),
       objectPositions: this.serializeObjectPositions(room),
       objectRevision: this.getObjectRevision(room),
-      objectEditor: this.serializeObjectEditor(room)
+      objectEditor: this.serializeObjectEditor(room),
+      cityObjectRearMigrationVersion: CITY_OBJECT_REAR_MIGRATION_VERSION
     };
     const tmpPath = `${this.surfacePaintStorePath}.tmp`;
 
