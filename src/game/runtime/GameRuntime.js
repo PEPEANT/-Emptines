@@ -8853,37 +8853,26 @@ export class GameRuntime {
     this.syncPortalAnchorsFromMovableObjects();
     this.requestPortalPrewarm();
 
-    if (MAIN_PORTAL_ONLY_MODE) {
-      if (!this.portalTransitioning && this.isPlayerInHallPortalZone()) {
-        this.triggerPortalTransfer(this.buildHallPortalTransferUrl(), {
-          immediate: true,
-          transitionText: "공연장 포탈 이동 중...",
-          portalHint: "hall"
-        });
-        return;
-      }
-    } else {
-      const hallSchedule = this.getPortalScheduleComputed(Date.now());
-      const hallPortalOpenNow =
-        hallSchedule.mode === "open" || hallSchedule.mode === "open_manual";
+    const hallSchedule = this.getPortalScheduleComputed(Date.now());
+    const hallPortalOpenNow =
+      hallSchedule.mode === "open" || hallSchedule.mode === "open_manual";
 
-      // Hall portal is host-controlled. OX/FPS remain always available.
-      if (hallPortalOpenNow && !this.portalTransitioning && this.isPlayerInHallPortalZone()) {
-        this.triggerPortalTransfer(this.buildHallPortalTransferUrl(), {
-          immediate: true,
-          transitionText: "공연장 포탈 이동 중...",
-          portalHint: "hall"
-        });
-        return;
-      }
-      if (!this.portalTransitioning && this.isPlayerInAZonePortalZone()) {
-        this.triggerPortalTransfer(this.buildAZonePortalTransferUrl(), {
-          immediate: true,
-          transitionText: "FPS 포탈 이동 중...",
-          portalHint: "fps"
-        });
-        return;
-      }
+    // Hall portal is host-controlled. FPS portal remains available only when dual-portal mode is enabled.
+    if (hallPortalOpenNow && !this.portalTransitioning && this.isPlayerInHallPortalZone()) {
+      this.triggerPortalTransfer(this.buildHallPortalTransferUrl(), {
+        immediate: true,
+        transitionText: "공연장 포탈 이동 중...",
+        portalHint: "hall"
+      });
+      return;
+    }
+    if (!MAIN_PORTAL_ONLY_MODE && !this.portalTransitioning && this.isPlayerInAZonePortalZone()) {
+      this.triggerPortalTransfer(this.buildAZonePortalTransferUrl(), {
+        immediate: true,
+        transitionText: "FPS 포탈 이동 중...",
+        portalHint: "fps"
+      });
+      return;
     }
     if (!this.portalTransitioning && this.isPlayerInPortalZone()) {
       const destination = this.buildPortalTransferUrl();
@@ -9363,12 +9352,6 @@ export class GameRuntime {
 
   updateHallPortalCountdownOverlay(force = false) {
     if (!this.hallPortalCountdownEl) {
-      return;
-    }
-    if (MAIN_PORTAL_ONLY_MODE) {
-      this.hallPortalCountdownLastText = "";
-      this.hallPortalCountdownEl.classList.remove("on");
-      this.hallPortalCountdownEl.classList.add("hidden");
       return;
     }
 
@@ -10432,27 +10415,25 @@ export class GameRuntime {
     const canControlPortal = hasHostPrivilege;
     const schedule = this.getPortalScheduleComputed();
     const portalOpenNow = schedule.mode === "open" || schedule.mode === "open_manual";
-    const canSchedulePortal = !MAIN_PORTAL_ONLY_MODE && canControlPortal && !portalOpenNow;
+    const canSchedulePortal = canControlPortal && !portalOpenNow;
 
     this.hostControlsEl.classList.toggle("hidden", !visible || !this.hostControlsOpen);
     if (this.hostOpenPortalBtnEl) {
-      this.hostOpenPortalBtnEl.classList.toggle("hidden", MAIN_PORTAL_ONLY_MODE);
-      if (!MAIN_PORTAL_ONLY_MODE) {
-        const nextLabel = portalOpenNow ? "공연장 포탈 닫기" : "공연장 포탈 열기";
-        if (this.hostOpenPortalBtnEl.textContent !== nextLabel) {
-          this.hostOpenPortalBtnEl.textContent = nextLabel;
-        }
-        this.hostOpenPortalBtnEl.title = portalOpenNow
-          ? "공연장 포탈 즉시 닫기"
-          : "공연장 포탈 즉시 개방";
+      this.hostOpenPortalBtnEl.classList.remove("hidden");
+      const nextLabel = portalOpenNow ? "공연장 포탈 닫기" : "공연장 포탈 열기";
+      if (this.hostOpenPortalBtnEl.textContent !== nextLabel) {
+        this.hostOpenPortalBtnEl.textContent = nextLabel;
       }
-      this.hostOpenPortalBtnEl.disabled = controlsBusy || MAIN_PORTAL_ONLY_MODE;
+      this.hostOpenPortalBtnEl.title = portalOpenNow
+        ? "공연장 포탈 즉시 닫기"
+        : "공연장 포탈 즉시 개방";
+      this.hostOpenPortalBtnEl.disabled = controlsBusy;
     }
     const quickDelayRow = this.hostDelayButtons?.[0]?.closest?.(".host-delay-row");
-    quickDelayRow?.classList.toggle("hidden", MAIN_PORTAL_ONLY_MODE);
-    quickDelayRow?.previousElementSibling?.classList.toggle("hidden", MAIN_PORTAL_ONLY_MODE);
+    quickDelayRow?.classList.remove("hidden");
+    quickDelayRow?.previousElementSibling?.classList.remove("hidden");
     const customDelayRow = this.hostDelayMinutesInputEl?.closest?.(".host-custom-row");
-    customDelayRow?.classList.toggle("hidden", MAIN_PORTAL_ONLY_MODE);
+    customDelayRow?.classList.remove("hidden");
 
     for (const button of this.hostDelayButtons) {
       button.disabled = controlsBusy || !canSchedulePortal;
