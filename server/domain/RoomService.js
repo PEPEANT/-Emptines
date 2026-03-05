@@ -63,6 +63,11 @@ const CHAT_MESSAGE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,80}$/;
 const MAX_CHAT_MESSAGES = 5000;
 const MAX_CHAT_TEXT_CHARS = 200;
 const ROOM_ZONE_IDS = Object.freeze(["lobby", "fps", "ox"]);
+const ROOM_ZONE_PORTAL_OBJECT_ID_BY_ZONE = Object.freeze({
+  fps: "portal_fps",
+  ox: "portal_ox"
+});
+const ROOM_ZONE_PORTAL_ENTRY_DISTANCE = 6;
 const ROOM_ZONE_STATE_BY_ID = Object.freeze({
   lobby: Object.freeze({
     x: 0,
@@ -88,6 +93,15 @@ const ROOM_ZONE_STATE_BY_ID = Object.freeze({
     pitch: -0.02
   })
 });
+
+function normalizeYawAngle(rawValue, fallback = 0) {
+  const value = Number(rawValue);
+  if (!Number.isFinite(value)) {
+    const fallbackValue = Number(fallback);
+    return Number.isFinite(fallbackValue) ? fallbackValue : 0;
+  }
+  return Math.atan2(Math.sin(value), Math.cos(value));
+}
 
 function normalizeMapLayoutVersion(rawValue, fallback = "default-layout-v1") {
   const value = String(rawValue ?? "")
@@ -141,9 +155,62 @@ function normalizeRoomZone(rawValue, fallback = "lobby") {
   return "";
 }
 
-function getRoomZoneSpawnState(rawZone) {
+function getPortalAnchoredZoneSpawnState(room, zone, baseState) {
+  if (!room || typeof room !== "object") {
+    return null;
+  }
+  const portalObjectId = ROOM_ZONE_PORTAL_OBJECT_ID_BY_ZONE[zone];
+  if (!portalObjectId) {
+    return null;
+  }
+  const source =
+    room.objectPositions && typeof room.objectPositions === "object"
+      ? room.objectPositions
+      : null;
+  if (!source) {
+    return null;
+  }
+  const portalEntry = normalizeObjectPositionEntry(source[portalObjectId]);
+  if (!portalEntry) {
+    return null;
+  }
+
+  const portalX = Number(portalEntry.x);
+  const portalZ = Number(portalEntry.z);
+  if (!Number.isFinite(portalX) || !Number.isFinite(portalZ)) {
+    return null;
+  }
+
+  const lobbyBase = ROOM_ZONE_STATE_BY_ID.lobby;
+  const targetX = Number(lobbyBase?.x) || 0;
+  const targetZ = Number(lobbyBase?.z) || 0;
+  const fallbackPortalYaw = Math.atan2(targetX - portalX, targetZ - portalZ);
+  const portalYaw = normalizeYawAngle(portalEntry.ry, fallbackPortalYaw);
+  const spawnDistance = ROOM_ZONE_PORTAL_ENTRY_DISTANCE;
+  const spawnX = portalX + Math.sin(portalYaw) * spawnDistance;
+  const spawnZ = portalZ + Math.cos(portalYaw) * spawnDistance;
+  const lookYaw = Math.atan2(portalX - spawnX, portalZ - spawnZ);
+  const spawnY = Number(baseState?.y);
+  const pitch = Number(baseState?.pitch);
+
+  return sanitizePlayerState({
+    x: spawnX,
+    y: Number.isFinite(spawnY) ? spawnY : 1.72,
+    z: spawnZ,
+    yaw: normalizeYawAngle(lookYaw, 0),
+    pitch: Number.isFinite(pitch) ? pitch : -0.02
+  });
+}
+
+function getRoomZoneSpawnState(room, rawZone) {
   const zone = normalizeRoomZone(rawZone, "lobby");
   const base = ROOM_ZONE_STATE_BY_ID[zone] ?? ROOM_ZONE_STATE_BY_ID.lobby;
+  if (zone === "fps" || zone === "ox") {
+    const portalAnchoredState = getPortalAnchoredZoneSpawnState(room, zone, base);
+    if (portalAnchoredState) {
+      return portalAnchoredState;
+    }
+  }
   return sanitizePlayerState(base);
 }
 
@@ -319,6 +386,9 @@ function normalizeObjectPositionEntry(rawValue) {
   const sz = Number.isFinite(szRaw)
     ? Math.max(MIN_OBJECT_SCALE, Math.min(MAX_OBJECT_SCALE, szRaw))
     : 1;
+  const ryRaw = Number(rawValue?.ry);
+  const hasYaw = Number.isFinite(ryRaw);
+  const ry = hasYaw ? normalizeYawAngle(ryRaw, 0) : null;
   let visible = true;
   if (typeof rawValue?.visible === "boolean") {
     visible = rawValue.visible;
@@ -334,6 +404,7 @@ function normalizeObjectPositionEntry(rawValue) {
     sx,
     sy,
     sz,
+    ...(hasYaw ? { ry } : {}),
     visible
   };
 }
@@ -2141,7 +2212,7 @@ export class RoomService {
     }
 
     const previousZone = normalizeRoomZone(player?.zone ?? "lobby", "lobby");
-    const nextState = getRoomZoneSpawnState(zone);
+    const nextState = getRoomZoneSpawnState(room, zone);
     const now = Date.now();
     const previousSeq = Math.max(0, Math.trunc(Number(player?.lastInputSeq) || 0));
 

@@ -102,6 +102,13 @@ const NPC_GREETING_SESSION_KEY = "emptines_npc_greeting_seen_v1";
 const CITY_AD_BILLBOARD_BASE_PREFIX = "city_ad_board_";
 const OBJECT_EDITOR_SETTINGS_STORAGE_KEY = "objectEditorSettings_v1";
 const OBJECT_POSITIONS_STORAGE_KEY = "objPositions_v1";
+const PORTAL_MOVABLE_IDS = Object.freeze({
+  ox: "portal_ox",
+  fps: "portal_fps",
+  hall: "portal_hall"
+});
+const OBJECT_EDITOR_ROTATE_STEP_RAD = Math.PI / 36; // 5deg
+const OBJECT_EDITOR_ROTATE_SNAP_STEP_RAD = Math.PI / 12; // 15deg
 const OBJECT_EDITOR_MIN_LIMIT = 1;
 const OBJECT_EDITOR_MAX_LIMIT = 10000;
 const OBJECT_EDITOR_MIN_SCALE = 0.25;
@@ -903,6 +910,10 @@ export class GameRuntime {
     this.hallPortalCoreGlow = null;
     this.hallPortalBillboardGroup = null;
     this.hallVenueGroup = null;
+    this.portalOxAnchorEntry = null;
+    this.portalFpsAnchorEntry = null;
+    this.portalHallAnchorEntry = null;
+    this.portalAnchorSyncTemp = new THREE.Vector3();
     this.portalBillboardCanvas = null;
     this.portalBillboardContext = null;
     this.portalBillboardTexture = null;
@@ -1261,6 +1272,9 @@ export class GameRuntime {
     this.hallPortalCoreGlow = null;
     this.hallPortalBillboardGroup = null;
     this.hallVenueGroup = null;
+    this.portalOxAnchorEntry = null;
+    this.portalFpsAnchorEntry = null;
+    this.portalHallAnchorEntry = null;
     this.portalCoreGlow = null;
     this.portalReplicaCoreGlow = null;
     this.npcTemplePortalCore = null;
@@ -1306,6 +1320,9 @@ export class GameRuntime {
     this.hallPortalCoreGlow = null;
     this.hallPortalBillboardGroup = null;
     this.hallVenueGroup = null;
+    this.portalOxAnchorEntry = null;
+    this.portalFpsAnchorEntry = null;
+    this.portalHallAnchorEntry = null;
     this.npcGuideGroup = null;
     this.npcTemplePortalCore = null;
     this.npcTemplePortalGlow = null;
@@ -2970,6 +2987,53 @@ export class GameRuntime {
     registerHallVenueCollider(14.2, 0.8, 7.4, 12.4, 0, 13);
     registerHallVenueCollider(0, -8.5, 11.2, 4.6, 0.5, 7);
 
+    // Portal anchors are movable objects. Their collider slot exists only so
+    // they can reuse object-state persistence/edit flows without affecting collisions.
+    const portalAnchorColliderY = -1200;
+    const portalAnchorColliderMaxY = -1100;
+    const oxPortalAnchorColliderIndex = this.registerStaticWorldBoxCollider(
+      portalGroup.position.x,
+      portalGroup.position.z,
+      0.2,
+      0.2,
+      portalAnchorColliderY,
+      portalAnchorColliderMaxY
+    );
+    const fpsPortalAnchorColliderIndex = this.registerStaticWorldBoxCollider(
+      aZonePortalGroup.position.x,
+      aZonePortalGroup.position.z,
+      0.2,
+      0.2,
+      portalAnchorColliderY,
+      portalAnchorColliderMaxY
+    );
+    const hallPortalAnchorColliderIndex = this.registerStaticWorldBoxCollider(
+      hallPortalGroup.position.x,
+      hallPortalGroup.position.z,
+      0.2,
+      0.2,
+      portalAnchorColliderY,
+      portalAnchorColliderMaxY
+    );
+    const oxPortalAnchorEntry = this.registerMovableObject(
+      portalGroup,
+      PORTAL_MOVABLE_IDS.ox,
+      oxPortalAnchorColliderIndex,
+      { disableColliderSync: true }
+    );
+    const fpsPortalAnchorEntry = this.registerMovableObject(
+      aZonePortalGroup,
+      PORTAL_MOVABLE_IDS.fps,
+      fpsPortalAnchorColliderIndex,
+      { disableColliderSync: true }
+    );
+    const hallPortalAnchorEntry = this.registerMovableObject(
+      hallPortalGroup,
+      PORTAL_MOVABLE_IDS.hall,
+      hallPortalAnchorColliderIndex,
+      { disableColliderSync: true }
+    );
+
     this.hubFlowGroup = group;
     this.portalGroup = portalGroup;
     this.portalRing = portalRing;
@@ -2996,6 +3060,9 @@ export class GameRuntime {
     this.hallPortalCoreGlow = hallPortalCoreGlow;
     this.hallPortalBillboardGroup = hallPortalBillboard;
     this.hallVenueGroup = hallVenueGroup;
+    this.portalOxAnchorEntry = oxPortalAnchorEntry;
+    this.portalFpsAnchorEntry = fpsPortalAnchorEntry;
+    this.portalHallAnchorEntry = hallPortalAnchorEntry;
     this.npcGuideGroup = npcGuide;
     this.mirrorGateGroup = mirrorGate;
     this.mirrorGatePanel = null;
@@ -3017,6 +3084,7 @@ export class GameRuntime {
     );
     this.scene.add(group);
     this.loadSavedObjectPositions();
+    this.syncPortalAnchorsFromMovableObjects({ force: true });
     if (this.socket && this.networkConnected) {
       this.requestObjectState();
     }
@@ -7211,6 +7279,7 @@ export class GameRuntime {
       this.parseQueryFlag("skipBridge") ||
       this.parseQueryFlag("rejoin_city") ||
       this.parseQueryFlag("city_live");
+    this.syncPortalAnchorsFromMovableObjects({ force: true });
     if (allowFastCityRejoin && savedNickname.length >= 2) {
       this.pendingPlayerNameSync = true;
       this.pendingAuthoritativeStateSync = true;
@@ -8453,6 +8522,7 @@ export class GameRuntime {
     this.updateNpcTemplePortalVisual();
     this.updateBridgeBoundaryMarker(delta);
     this.updateSpawnPortalVeilVisibility();
+    this.syncPortalAnchorsFromMovableObjects();
     this.requestPortalPrewarm();
 
     const hallSchedule = this.getPortalScheduleComputed(Date.now());
@@ -8830,6 +8900,43 @@ export class GameRuntime {
     this.portalBillboardCache = { line1, line2, line3 };
   }
 
+  syncPortalAnchorsFromMovableObjects({ force = false } = {}) {
+    const syncEntryPosition = (entry, targetVector) => {
+      if (!entry?.mesh || !targetVector) {
+        return false;
+      }
+      const mesh = entry.mesh;
+      if (mesh.visible === false) {
+        return false;
+      }
+      mesh.updateMatrixWorld(true);
+      mesh.getWorldPosition(this.portalAnchorSyncTemp);
+      const nextX = Number(this.portalAnchorSyncTemp.x);
+      const nextY = Number(this.portalAnchorSyncTemp.y);
+      const nextZ = Number(this.portalAnchorSyncTemp.z);
+      if (!Number.isFinite(nextX) || !Number.isFinite(nextY) || !Number.isFinite(nextZ)) {
+        return false;
+      }
+      const changed =
+        Math.abs((Number(targetVector.x) || 0) - nextX) > 0.0005 ||
+        Math.abs((Number(targetVector.y) || 0) - nextY) > 0.0005 ||
+        Math.abs((Number(targetVector.z) || 0) - nextZ) > 0.0005;
+      if (force || changed) {
+        targetVector.set(nextX, nextY, nextZ);
+      }
+      return changed;
+    };
+
+    let changed = false;
+    changed = syncEntryPosition(this.portalOxAnchorEntry, this.portalFloorPosition) || changed;
+    changed = syncEntryPosition(this.portalFpsAnchorEntry, this.aZonePortalFloorPosition) || changed;
+    changed = syncEntryPosition(this.portalHallAnchorEntry, this.hallPortalFloorPosition) || changed;
+    if (this.portalOxAnchorEntry?.mesh) {
+      this.portalYawRadians = this.normalizeYawAngle(this.portalOxAnchorEntry.mesh.rotation.y);
+    }
+    return changed;
+  }
+
   isPlayerInPortalZone() {
     const triggerRadius = this.portalRadius * 0.78;
     const triggerRadiusSquared = triggerRadius * triggerRadius;
@@ -9098,6 +9205,7 @@ export class GameRuntime {
   }
 
   buildReturnPortalSpawnState(portalHint = "") {
+    this.syncPortalAnchorsFromMovableObjects({ force: true });
     const normalizedHint = this.normalizeReturnPortalHint(portalHint, "");
     const isOx = normalizedHint === "ox";
     const isFps = normalizedHint === "fps";
@@ -13587,6 +13695,20 @@ export class GameRuntime {
           this.adjustSelectedObjEditorHeight(-0.25);
           return;
         }
+        if (
+          event.code === "KeyR" &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.altKey
+        ) {
+          event.preventDefault();
+          const snap = Boolean(event.shiftKey);
+          const rotateStep = snap
+            ? OBJECT_EDITOR_ROTATE_SNAP_STEP_RAD
+            : OBJECT_EDITOR_ROTATE_STEP_RAD;
+          this.rotateSelectedObjEditorYaw(rotateStep, { snap });
+          return;
+        }
       }
 
       if (event.code === "KeyF" && this.canMovePlayer()) {
@@ -17985,7 +18107,7 @@ export class GameRuntime {
     }
   }
 
-  registerMovableObject(mesh, id, colliderIndex) {
+  registerMovableObject(mesh, id, colliderIndex, options = {}) {
     if (!mesh) {
       return null;
     }
@@ -18003,12 +18125,17 @@ export class GameRuntime {
       colliderIndex: normalizedColliderIndex,
       defaultPosition: mesh.position.clone(),
       defaultScale: mesh.scale.clone(),
+      defaultRotation: mesh.rotation.clone(),
       defaultVisible: mesh.visible !== false,
+      disableColliderSync: Boolean(options?.disableColliderSync),
       isHostCustomPaintBlock: false,
       _savedHighlightMaterials: null,
       _savedEmissive: null,
       _savedEmissiveIntensity: null
     };
+    if (entry.disableColliderSync) {
+      this.parkMovableObjectCollider(entry);
+    }
     this.movableObjects.push(entry);
     if (this.securityTestState?.enabled) {
       this.refreshSecurityTestObjectLabels();
@@ -18019,6 +18146,9 @@ export class GameRuntime {
   updateMovableObjectCollider(entry) {
     if (!entry?.mesh) {
       return false;
+    }
+    if (entry.disableColliderSync) {
+      return this.parkMovableObjectCollider(entry);
     }
     const colliderIndex = Math.trunc(Number(entry.colliderIndex));
     const collider = this.staticWorldColliders[colliderIndex];
@@ -18065,6 +18195,9 @@ export class GameRuntime {
     }
     const nextVisible = Boolean(visible);
     entry.mesh.visible = nextVisible;
+    if (entry.disableColliderSync) {
+      return this.parkMovableObjectCollider(entry);
+    }
     if (nextVisible) {
       return this.updateMovableObjectCollider(entry);
     }
@@ -18251,8 +18384,9 @@ export class GameRuntime {
       return;
     }
     const pos = entry.mesh.position;
+    const yawDeg = THREE.MathUtils.radToDeg(this.normalizeYawAngle(entry.mesh.rotation.y || 0));
     this.objEditorInfoEl.textContent =
-      `ID:${entry.id} (${pos.x.toFixed(2)}, ${pos.y.toFixed(2)}, ${pos.z.toFixed(2)})`;
+      `ID:${entry.id} (${pos.x.toFixed(2)}, ${pos.y.toFixed(2)}, ${pos.z.toFixed(2)}) yaw:${yawDeg.toFixed(1)}°`;
   }
 
   beginObjEditorDrag(clientX, clientY) {
@@ -18332,6 +18466,7 @@ export class GameRuntime {
     }
     this.updateMovableObjectCollider(entry);
     this.updateSecurityTestLabelForEntry(entry);
+    this.syncPortalAnchorsFromMovableObjects();
     this.updateObjEditorInfoEl(entry);
     return true;
   }
@@ -18346,10 +18481,49 @@ export class GameRuntime {
     entry.mesh.position.y = THREE.MathUtils.clamp(nextY, -10, 260);
     this.updateMovableObjectCollider(entry);
     this.updateSecurityTestLabelForEntry(entry);
+    this.syncPortalAnchorsFromMovableObjects();
     this.updateObjEditorInfoEl(entry);
     if (Math.abs(entry.mesh.position.y - previousY) > 0.0005) {
       this.markObjectStateDirty();
     }
+    this.saveObjectPositions();
+    return true;
+  }
+
+  rotateSelectedObjEditorYaw(
+    stepRadians = OBJECT_EDITOR_ROTATE_STEP_RAD,
+    { snap = false, snapStepRadians = OBJECT_EDITOR_ROTATE_SNAP_STEP_RAD } = {}
+  ) {
+    const entry = this.objEditorSelected;
+    if (!this.objEditorActive || !entry?.mesh || !this.canUseObjectEditor()) {
+      return false;
+    }
+
+    const safeStep = Number(stepRadians);
+    if (!Number.isFinite(safeStep) || Math.abs(safeStep) < 0.00001) {
+      return false;
+    }
+
+    const prevYaw = this.normalizeYawAngle(Number(entry.mesh.rotation?.y) || 0);
+    let nextYaw = prevYaw + safeStep;
+    if (snap) {
+      const safeSnapStep = Math.max(
+        Math.PI / 180,
+        Math.abs(Number(snapStepRadians) || OBJECT_EDITOR_ROTATE_SNAP_STEP_RAD)
+      );
+      nextYaw = Math.round(nextYaw / safeSnapStep) * safeSnapStep;
+    }
+    nextYaw = this.normalizeYawAngle(nextYaw);
+    if (Math.abs(nextYaw - prevYaw) < 0.00001) {
+      return false;
+    }
+
+    entry.mesh.rotation.y = nextYaw;
+    this.updateMovableObjectCollider(entry);
+    this.updateSecurityTestLabelForEntry(entry);
+    this.syncPortalAnchorsFromMovableObjects({ force: true });
+    this.updateObjEditorInfoEl(entry);
+    this.markObjectStateDirty();
     this.saveObjectPositions();
     return true;
   }
@@ -18366,6 +18540,7 @@ export class GameRuntime {
         x: Math.round((Number(pos.x) || 0) * 1000) / 1000,
         y: Math.round((Number(pos.y) || 0) * 1000) / 1000,
         z: Math.round((Number(pos.z) || 0) * 1000) / 1000,
+        ry: Math.round(this.normalizeYawAngle(Number(entry.mesh.rotation?.y) || 0) * 1000) / 1000,
         sx: Math.round((Number(scale.x) || 1) * 1000) / 1000,
         sy: Math.round((Number(scale.y) || 1) * 1000) / 1000,
         sz: Math.round((Number(scale.z) || 1) * 1000) / 1000,
@@ -18431,6 +18606,7 @@ export class GameRuntime {
       const hasServerPosition = position && typeof position === "object";
       const fallback = entry.defaultPosition ?? entry.mesh.position;
       const fallbackScale = entry.defaultScale ?? entry.mesh.scale;
+      const fallbackRotation = entry.defaultRotation ?? entry.mesh.rotation;
       const fallbackVisible = typeof entry.defaultVisible === "boolean" ? entry.defaultVisible : true;
       let x = Number.NaN;
       let y = Number.NaN;
@@ -18438,6 +18614,7 @@ export class GameRuntime {
       let sx = Number.NaN;
       let sy = Number.NaN;
       let sz = Number.NaN;
+      let ry = Number.NaN;
       let visible = null;
       if (hasServerPosition) {
         x = Number(position?.x);
@@ -18446,6 +18623,9 @@ export class GameRuntime {
         sx = Number(position?.sx);
         sy = Number(position?.sy);
         sz = Number(position?.sz);
+        if (Object.prototype.hasOwnProperty.call(position, "ry")) {
+          ry = Number(position?.ry);
+        }
         if (typeof position?.visible === "boolean") {
           visible = position.visible;
         } else if (position?.visible === 1 || position?.visible === "1") {
@@ -18463,6 +18643,7 @@ export class GameRuntime {
         sx = Number(fallbackScale?.x);
         sy = Number(fallbackScale?.y);
         sz = Number(fallbackScale?.z);
+        ry = Number(fallbackRotation?.y);
         visible = fallbackVisible;
       } else {
         // Partial updates should not snap unspecified objects back to defaults.
@@ -18479,6 +18660,9 @@ export class GameRuntime {
           THREE.MathUtils.clamp(sz, OBJECT_EDITOR_MIN_SCALE, HOST_CUSTOM_BLOCK_MAX_SIZE)
         );
       }
+      if (Number.isFinite(ry)) {
+        entry.mesh.rotation.y = this.normalizeYawAngle(ry);
+      }
       if (visible === null) {
         if (entry.mesh.visible) {
           this.updateMovableObjectCollider(entry);
@@ -18490,6 +18674,7 @@ export class GameRuntime {
       }
       this.updateSecurityTestLabelForEntry(entry);
     }
+    this.syncPortalAnchorsFromMovableObjects({ force: true });
     this.updateObjEditorInfoEl(this.objEditorSelected);
     if (!this.objectStateSaveInFlight && !this.objectStateSavePending && !this.objEditorDragging) {
       this.objectStateDirty = false;
