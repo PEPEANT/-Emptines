@@ -1535,6 +1535,9 @@ export class GameRuntime {
       A: { centerX: -60, objectEnabled: true },
       B: { centerX: 60, objectEnabled: true }
     };
+    // Shift city buildings to the rear band between the hall and skyline to keep the plaza readable.
+    const cityBuildingRearOffsetZ = 58;
+    const toRearCityZ = (value) => (Number(value) || 0) + cityBuildingRearOffsetZ;
 
     const zoneABorder = new THREE.Mesh(
       new THREE.BoxGeometry(0.32, 0.12, 28),
@@ -1758,11 +1761,12 @@ export class GameRuntime {
       if (!placed) {
         continue;
       }
-      tower.position.set(placed.x, h * 0.5, placed.z);
+      const placedTowerZ = toRearCityZ(placed.z);
+      tower.position.set(placed.x, h * 0.5, placedTowerZ);
       tower.castShadow = false;
       tower.receiveShadow = true;
       cityGroup.add(tower);
-      const towerColliderIndex = registerCityBuildingCollider(placed.x, placed.z, 4.8, 4.8, -2, h + 4);
+      const towerColliderIndex = registerCityBuildingCollider(placed.x, placedTowerZ, 4.8, 4.8, -2, h + 4);
       this.registerMovableObject(tower, `city_tower_${ti}`, towerColliderIndex);
     }
 
@@ -1987,7 +1991,7 @@ export class GameRuntime {
         continue;
       }
       const placedMegaX = placed.x;
-      const placedMegaZ = placed.z;
+      const placedMegaZ = toRearCityZ(placed.z);
 
       const wallMaterial = skylineMats[i % skylineMats.length].clone();
       const roofMaterial = skylineRoofMaterial.clone();
@@ -2154,13 +2158,14 @@ export class GameRuntime {
       if (!placed) {
         continue;
       }
-      kiosk.position.set(placed.x, height * 0.5, placed.z);
+      const placedKioskZ = toRearCityZ(placed.z);
+      kiosk.position.set(placed.x, height * 0.5, placedKioskZ);
       kiosk.castShadow = false;
       kiosk.receiveShadow = true;
       cityGroup.add(kiosk);
       const kioskColliderIndex = registerCityBuildingCollider(
         placed.x,
-        placed.z,
+        placedKioskZ,
         footprint + 0.5,
         footprint + 0.5,
         -2,
@@ -2218,13 +2223,14 @@ export class GameRuntime {
       if (!placed) {
         continue;
       }
-      block.position.set(placed.x, height * 0.5, placed.z);
+      const placedDistrictZ = toRearCityZ(placed.z);
+      block.position.set(placed.x, height * 0.5, placedDistrictZ);
       block.castShadow = false;
       block.receiveShadow = true;
       cityGroup.add(block);
       const blockColliderIndex = registerCityBuildingCollider(
         placed.x,
-        placed.z,
+        placedDistrictZ,
         footprint + 0.6,
         depth + 0.6,
         -2,
@@ -2282,13 +2288,14 @@ export class GameRuntime {
       if (!placed) {
         continue;
       }
-      block.position.set(placed.x, height * 0.5, placed.z);
+      const placedOuterDistrictZ = toRearCityZ(placed.z);
+      block.position.set(placed.x, height * 0.5, placedOuterDistrictZ);
       block.castShadow = false;
       block.receiveShadow = true;
       cityGroup.add(block);
       const outerBlockColliderIndex = registerCityBuildingCollider(
         placed.x,
-        placed.z,
+        placedOuterDistrictZ,
         width + 0.7,
         depth + 0.7,
         -2,
@@ -2340,13 +2347,14 @@ export class GameRuntime {
         bridgeDistrictPaintMat,
         `city_bridge_block_${bridgeDistrictIndex}`
       );
-      bridgeBlock.position.set(localX, height * 0.5, localZ);
+      const bridgeBlockZ = toRearCityZ(localZ);
+      bridgeBlock.position.set(localX, height * 0.5, bridgeBlockZ);
       bridgeBlock.castShadow = false;
       bridgeBlock.receiveShadow = true;
       cityGroup.add(bridgeBlock);
       const bridgeBlockColliderIndex = registerCityBuildingCollider(
         localX,
-        localZ,
+        bridgeBlockZ,
         width + 0.7,
         depth + 0.7,
         -2,
