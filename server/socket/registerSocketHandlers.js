@@ -22,6 +22,74 @@ function sanitizeOwnerKey(rawValue) {
   return text.replace(/[^a-zA-Z0-9:_-]/g, "").slice(0, 96);
 }
 
+const PAINT_SOCKET_WINDOW_MS = 15_000;
+const PAINT_SOCKET_MAX_WRITES = 64;
+const PAINT_SOCKET_MAX_SURFACES = 18;
+const PAINT_SOCKET_MIN_INTERVAL_MS = 120;
+const PAINT_ROOM_WINDOW_MS = 3_000;
+const PAINT_ROOM_MAX_WRITES = 120;
+
+function consumeSurfacePaintBudget({
+  socketState,
+  roomStateMap,
+  roomCode = "",
+  surfaceId = "",
+  isHost = false,
+  now = Date.now()
+}) {
+  if (isHost) {
+    return { ok: true };
+  }
+
+  const normalizedRoomCode = String(roomCode ?? "").trim().toUpperCase();
+  const normalizedSurfaceId = String(surfaceId ?? "").trim().toLowerCase();
+  if (!normalizedRoomCode) {
+    return { ok: true };
+  }
+
+  const localState = socketState ?? {};
+  if (Number(localState.lastAt) > 0 && now - Number(localState.lastAt) < PAINT_SOCKET_MIN_INTERVAL_MS) {
+    return { ok: false, error: "paint rate limited" };
+  }
+  const localWindowStart = Number(localState.windowStart) || 0;
+  if (localWindowStart <= 0 || now - localWindowStart > PAINT_SOCKET_WINDOW_MS) {
+    localState.windowStart = now;
+    localState.count = 0;
+    localState.surfaces = new Set();
+  }
+  localState.lastAt = now;
+  localState.count = Math.max(0, Math.trunc(Number(localState.count) || 0)) + 1;
+  if (localState.count > PAINT_SOCKET_MAX_WRITES) {
+    return { ok: false, error: "paint rate limited" };
+  }
+  if (normalizedSurfaceId) {
+    if (!(localState.surfaces instanceof Set)) {
+      localState.surfaces = new Set();
+    }
+    localState.surfaces.add(normalizedSurfaceId);
+    if (localState.surfaces.size > PAINT_SOCKET_MAX_SURFACES) {
+      return { ok: false, error: "paint too many surfaces" };
+    }
+  }
+
+  let roomState = roomStateMap.get(normalizedRoomCode);
+  if (!roomState) {
+    roomState = { windowStart: now, count: 0 };
+    roomStateMap.set(normalizedRoomCode, roomState);
+  }
+  const roomWindowStart = Number(roomState.windowStart) || 0;
+  if (roomWindowStart <= 0 || now - roomWindowStart > PAINT_ROOM_WINDOW_MS) {
+    roomState.windowStart = now;
+    roomState.count = 0;
+  }
+  roomState.count = Math.max(0, Math.trunc(Number(roomState.count) || 0)) + 1;
+  if (roomState.count > PAINT_ROOM_MAX_WRITES) {
+    return { ok: false, error: "paint room flood detected" };
+  }
+
+  return { ok: true };
+}
+
 export function registerSocketHandlers({
   io,
   roomService,
@@ -30,7 +98,16 @@ export function registerSocketHandlers({
   config = {},
   log = console
 }) {
+  const roomPaintRateState = new Map();
+
   io.on("connection", (socket) => {
+    const socketPaintRateState = {
+      windowStart: 0,
+      count: 0,
+      lastAt: 0,
+      surfaces: new Set()
+    };
+
     const emitSurfacePaintState = () => {
       const room = roomService.getRoomBySocket(socket);
       if (!room) {
@@ -303,6 +380,17 @@ export function registerSocketHandlers({
       }
       if (!room.players?.has?.(socket.id)) {
         ack(ackFn, { ok: false, error: "player not in room" });
+        return;
+      }
+      const paintGuard = consumeSurfacePaintBudget({
+        socketState: socketPaintRateState,
+        roomStateMap: roomPaintRateState,
+        roomCode: room.code,
+        surfaceId: payload?.surfaceId ?? "",
+        isHost: roomService.isHost(room, socket.id)
+      });
+      if (!paintGuard.ok) {
+        ack(ackFn, paintGuard);
         return;
       }
 

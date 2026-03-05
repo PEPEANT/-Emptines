@@ -572,7 +572,7 @@ function normalizePromoMediaDataUrl(rawValue) {
   if (!value || value.length > MAX_PROMO_MEDIA_DATA_URL_CHARS) {
     return "";
   }
-  if (!/^data:image\/png;base64,/i.test(value)) {
+  if (!/^data:image\/webp;base64,/i.test(value)) {
     return "";
   }
   return value;

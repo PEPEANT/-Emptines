@@ -10564,7 +10564,7 @@ export class GameRuntime {
       return null;
     }
     const mediaDataUrl = String(rawValue.mediaDataUrl ?? "").trim();
-    const hasMediaData = /^data:image\/png;base64,/i.test(mediaDataUrl);
+    const hasMediaData = /^data:image\/webp;base64,/i.test(mediaDataUrl);
     const mediaKind = hasMediaData ? "image" : "none";
     return {
       ownerKey,
@@ -10888,17 +10888,17 @@ export class GameRuntime {
     }
     let dataUrl = "";
     try {
-      dataUrl = this.promoDrawCanvasEl.toDataURL("image/png");
+      dataUrl = this.promoDrawCanvasEl.toDataURL("image/webp", 0.86);
     } catch {
       dataUrl = "";
     }
-    if (!dataUrl || !dataUrl.startsWith("data:image/png;base64,")) {
+    if (!dataUrl || !dataUrl.startsWith("data:image/webp;base64,")) {
       return;
     }
     this.promoPendingMedia = {
       dataUrl,
       kind: "image",
-      name: "promo-canvas.png"
+      name: "promo-canvas.webp"
     };
     this.promoMediaRemoved = false;
     if (announce) {
@@ -11150,9 +11150,9 @@ export class GameRuntime {
     }
     const type = String(file.type ?? "").toLowerCase();
     const fileName = String(file.name ?? "").toLowerCase();
-    const isPng = type === "image/png" || fileName.endsWith(".png");
-    if (!isPng) {
-      this.appendChatLine("", "PNG 파일만 지원합니다.", "system");
+    const isWebp = type === "image/webp" || fileName.endsWith(".webp");
+    if (!isWebp) {
+      this.appendChatLine("", "WEBP 파일만 지원합니다.", "system");
       return;
     }
     if (Number(file.size) > PROMO_MAX_MEDIA_BYTES) {
@@ -11167,7 +11167,7 @@ export class GameRuntime {
       reader.readAsDataURL(file);
     }).catch(() => "");
 
-    if (!dataUrl || !/^data:image\/png;base64,/i.test(dataUrl)) {
+    if (!dataUrl || !/^data:image\/webp;base64,/i.test(dataUrl)) {
       this.appendChatLine("", "미디어 파일을 읽지 못했습니다.", "system");
       return;
     }
@@ -14441,7 +14441,7 @@ export class GameRuntime {
         const target = files.find((file) => {
           const type = String(file?.type ?? "").toLowerCase();
           const name = String(file?.name ?? "").toLowerCase();
-          return type === "image/png" || name.endsWith(".png");
+          return type === "image/webp" || name.endsWith(".webp");
         }) ?? null;
         void this.loadPromoMediaFromFile(target);
         this.promoMediaFolderInputEl.value = "";
