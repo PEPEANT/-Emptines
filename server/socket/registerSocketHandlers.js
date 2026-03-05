@@ -22,6 +22,23 @@ function sanitizeOwnerKey(rawValue) {
   return text.replace(/[^a-zA-Z0-9:_-]/g, "").slice(0, 96);
 }
 
+function sanitizeChatHistoryRequestPayload(payload = {}) {
+  const modeRaw = String(payload?.mode ?? "").trim().toLowerCase();
+  const mode = modeRaw === "before-today" ? "before-today" : "all";
+  const beforeCreatedAtMsRaw = Math.trunc(Number(payload?.beforeCreatedAtMs) || 0);
+  const nowMs = Date.now();
+  const maxFutureAllowanceMs = 24 * 60 * 60 * 1000;
+  const beforeCreatedAtMs = Math.min(
+    nowMs + maxFutureAllowanceMs,
+    Math.max(0, beforeCreatedAtMsRaw)
+  );
+  return {
+    mode,
+    beforeCreatedAtMs,
+    replace: Boolean(payload?.replace)
+  };
+}
+
 function findDuplicateSessionSocketId(io, room, ownerKey, exceptSocketId = "") {
   const normalizedKey = sanitizeOwnerKey(ownerKey);
   if (!normalizedKey || !room?.players || typeof room.players.keys !== "function") {
@@ -59,6 +76,11 @@ const DEFAULT_ANTI_ABUSE = Object.freeze({
   promoMaxOpsPerSocketWindow: 14,
   promoMaxOpsPerIpWindow: 40
 });
+const CHAT_SOCKET_WINDOW_MS = 10_000;
+const CHAT_SOCKET_MAX_MESSAGES_PER_WINDOW = 8;
+const CHAT_SOCKET_MIN_INTERVAL_MS = 700;
+const CHAT_SOCKET_MAX_SAME_TEXT_STREAK = 2;
+const CHAT_BLOCK_NOTICE_COOLDOWN_MS = 1_800;
 
 function normalizeClientIp(rawValue) {
   const text = String(rawValue ?? "").trim();
@@ -209,6 +231,46 @@ function consumePromoOperationBudget({
   return { ok: true };
 }
 
+function normalizeChatRateText(rawValue) {
+  return String(rawValue ?? "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, " ")
+    .slice(0, 120);
+}
+
+function consumeChatSendBudget({ socketState, text = "", now = Date.now() }) {
+  const state = socketState ?? {};
+  const lastAt = Math.max(0, Math.trunc(Number(state.lastAt) || 0));
+  if (lastAt > 0 && now - lastAt < CHAT_SOCKET_MIN_INTERVAL_MS) {
+    return { ok: false, error: "chat too fast" };
+  }
+
+  const windowStart = Math.max(0, Math.trunc(Number(state.windowStart) || 0));
+  if (windowStart <= 0 || now - windowStart > CHAT_SOCKET_WINDOW_MS) {
+    state.windowStart = now;
+    state.count = 0;
+  }
+  state.lastAt = now;
+  state.count = Math.max(0, Math.trunc(Number(state.count) || 0)) + 1;
+  if (state.count > CHAT_SOCKET_MAX_MESSAGES_PER_WINDOW) {
+    return { ok: false, error: "chat rate limited" };
+  }
+
+  const normalizedText = normalizeChatRateText(text);
+  if (normalizedText && normalizedText === String(state.lastText ?? "")) {
+    state.sameTextStreak = Math.max(0, Math.trunc(Number(state.sameTextStreak) || 0)) + 1;
+  } else {
+    state.lastText = normalizedText;
+    state.sameTextStreak = 1;
+  }
+  if (state.sameTextStreak > CHAT_SOCKET_MAX_SAME_TEXT_STREAK) {
+    return { ok: false, error: "chat duplicate blocked" };
+  }
+
+  return { ok: true };
+}
+
 function consumeSurfacePaintBudget({
   socketState,
   roomStateMap,
@@ -354,6 +416,14 @@ export function registerSocketHandlers({
       windowStart: 0,
       count: 0
     };
+    const socketChatRateState = {
+      windowStart: 0,
+      count: 0,
+      lastAt: 0,
+      lastText: "",
+      sameTextStreak: 0,
+      lastBlockedNoticeAt: 0
+    };
 
     const emitSurfacePaintState = () => {
       const room = roomService.getRoomBySocket(socket);
@@ -424,13 +494,27 @@ export function registerSocketHandlers({
       socket.emit("promo:state", { objects: roomService.serializePromoObjects(room) });
     };
 
-    const emitChatHistoryState = () => {
+    const emitChatHistoryState = (requestPayload = {}) => {
       const room = roomService.getRoomBySocket(socket);
       if (!room) {
         return;
       }
+      const request = sanitizeChatHistoryRequestPayload(requestPayload);
+      let messages = roomService.serializeChatHistory(room);
+      if (request.mode === "before-today" && request.beforeCreatedAtMs > 0) {
+        messages = messages.filter((entry) => {
+          const createdAt = Math.trunc(Number(entry?.createdAt) || 0);
+          if (createdAt <= 0) {
+            return true;
+          }
+          return createdAt < request.beforeCreatedAtMs;
+        });
+      }
       socket.emit("chat:history", {
-        messages: roomService.serializeChatHistory(room)
+        messages,
+        mode: request.mode,
+        beforeCreatedAtMs: request.beforeCreatedAtMs,
+        replace: request.replace
       });
     };
 
@@ -524,6 +608,22 @@ export function registerSocketHandlers({
       if (!safeText) {
         return;
       }
+      const chatBudget = consumeChatSendBudget({
+        socketState: socketChatRateState,
+        text: safeText
+      });
+      if (!chatBudget.ok) {
+        const nowMs = Date.now();
+        const lastNoticeAt = Math.max(
+          0,
+          Math.trunc(Number(socketChatRateState.lastBlockedNoticeAt) || 0)
+        );
+        if (nowMs - lastNoticeAt >= CHAT_BLOCK_NOTICE_COOLDOWN_MS) {
+          socket.emit("chat:blocked", { reason: chatBudget.error });
+          socketChatRateState.lastBlockedNoticeAt = nowMs;
+        }
+        return;
+      }
       const safeMessageId = sanitizeChatMessageId(
         payload?.clientMessageId ?? payload?.messageId ?? ""
       );
@@ -573,8 +673,8 @@ export function registerSocketHandlers({
       roomService.emitRoomUpdate(room);
     });
 
-    socket.on("chat:history:request", () => {
-      emitChatHistoryState();
+    socket.on("chat:history:request", (payload = {}) => {
+      emitChatHistoryState(payload);
     });
 
     socket.on("input:cmd", (payload = {}) => {

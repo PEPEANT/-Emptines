@@ -1918,6 +1918,12 @@ body:not(.is-mobile-ui) #promo-place-btn {
   gap: 8px;
 }
 
+#chat-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 #chat-title {
   color: #cfe7fb;
   font: 700 0.62rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
@@ -1925,6 +1931,7 @@ body:not(.is-mobile-ui) #promo-place-btn {
   text-transform: uppercase;
 }
 
+#chat-expand,
 #chat-toggle {
   min-width: 62px;
   height: 26px;
@@ -1935,6 +1942,15 @@ body:not(.is-mobile-ui) #promo-place-btn {
   font: 700 0.58rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
   letter-spacing: 0.05em;
   cursor: pointer;
+}
+
+#chat-ui.history-expanded {
+  width: min(92vw, 860px);
+  max-height: min(86vh, 880px);
+}
+
+#chat-ui.history-expanded #chat-log {
+  min-height: min(56vh, 560px);
 }
 
 #promo-hotkey-hint {
@@ -2173,6 +2189,14 @@ body.is-mobile-ui #chat-ui.mobile-fullscreen #chat-header {
 }
 
 body.is-mobile-ui #chat-ui.mobile-fullscreen #chat-toggle {
+  min-width: 72px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+body.is-mobile-ui #chat-ui.mobile-fullscreen #chat-expand {
   min-width: 72px;
   height: 32px;
   display: inline-flex;
@@ -2559,6 +2583,7 @@ body.is-mobile-ui #mobile-move-stick {
     font-size: 0.56rem;
   }
 
+  #chat-expand,
   #chat-toggle {
     min-width: 54px;
     height: 20px;
@@ -2601,6 +2626,7 @@ body.is-mobile-ui #mobile-move-stick {
     font-size: 0.76rem;
   }
 
+  #chat-ui.mobile-fullscreen #chat-expand,
   #chat-ui.mobile-fullscreen #chat-toggle {
     min-width: 68px;
     height: 30px;

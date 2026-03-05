@@ -620,6 +620,7 @@ export class GameRuntime {
     this.chatLiveLogEl = document.getElementById("chat-live-log");
     this.chatControlsEl = document.getElementById("chat-controls");
     this.chatToggleBtnEl = document.getElementById("chat-toggle");
+    this.chatExpandBtnEl = document.getElementById("chat-expand");
     this.hostChatToggleBtnEl = document.getElementById("host-chat-toggle");
     this.hostControlsToggleBtnEl = document.getElementById("host-controls-toggle");
     this.chatInputEl = document.getElementById("chat-input");
@@ -701,11 +702,21 @@ export class GameRuntime {
     this.chatLiveMaxEntries = Math.max(6, Math.min(18, this.chatLogMaxEntries));
     this.chatMessageSeq = 0;
     this.lastChatSendAt = 0;
-    this.chatSendMinIntervalMs = 140;
+    this.chatSendMinIntervalMs = 700;
+    this.chatSendWindowMs = 10_000;
+    this.chatSendMaxPerWindow = 8;
+    this.chatSendWindowStartAt = 0;
+    this.chatSendWindowCount = 0;
+    this.chatSameTextStreakMax = 2;
+    this.chatLastNormalizedText = "";
+    this.chatSameTextStreak = 0;
+    this.chatRateLimitNoticeCooldownMs = 1_800;
+    this.lastChatRateLimitNoticeAt = 0;
     this.chatSeenMessageIds = new Map();
     this.chatSeenMessageIdTtlMs = 2 * 60 * 1000;
     this.chatHistoryRequestMinIntervalMs = 600;
     this.lastChatHistoryRequestAt = 0;
+    this.chatHistoryExpanded = false;
     this.toolUiEl = document.getElementById("tool-ui");
     this.chatUiEl = document.getElementById("chat-ui");
     this.hubFlowUiEl = document.getElementById("hub-flow-ui");
@@ -14513,6 +14524,14 @@ export class GameRuntime {
         }
       });
     }
+    if (this.chatExpandBtnEl) {
+      this.chatExpandBtnEl.addEventListener("click", () => {
+        if (!this.canUseChatControls() || !this.chatOpen) {
+          return;
+        }
+        this.setChatHistoryExpanded(!this.chatHistoryExpanded, { requestHistory: true });
+      });
+    }
     if (this.chatSendBtnEl) {
       this.chatSendBtnEl.addEventListener("pointerdown", (event) => {
         // Keep focus on chat input so desktop send-click does not collapse chat before send.
@@ -15430,6 +15449,9 @@ export class GameRuntime {
     if (!this.chatToggleBtnEl) {
       this.chatToggleBtnEl = document.getElementById("chat-toggle");
     }
+    if (!this.chatExpandBtnEl) {
+      this.chatExpandBtnEl = document.getElementById("chat-expand");
+    }
     if (!this.hostChatToggleBtnEl) {
       this.hostChatToggleBtnEl = document.getElementById("host-chat-toggle");
     }
@@ -15862,12 +15884,60 @@ export class GameRuntime {
     }
   }
 
+  getLocalDayStartMs(nowMs = Date.now()) {
+    const now = new Date(nowMs);
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  }
+
+  syncChatHistoryExpandedUi() {
+    this.resolveUiElements();
+    if (this.chatUiEl) {
+      this.chatUiEl.classList.toggle("history-expanded", this.chatOpen && this.chatHistoryExpanded);
+    }
+    if (!this.chatExpandBtnEl) {
+      return;
+    }
+    const visible = this.chatOpen;
+    const label = this.chatHistoryExpanded ? "접기" : "펼치기";
+    this.chatExpandBtnEl.classList.toggle("hidden", !visible);
+    this.chatExpandBtnEl.setAttribute("aria-pressed", this.chatHistoryExpanded ? "true" : "false");
+    if (this.chatExpandBtnEl.textContent !== label) {
+      this.chatExpandBtnEl.textContent = label;
+    }
+  }
+
+  setChatHistoryExpanded(expanded, { requestHistory = false } = {}) {
+    const nextExpanded = Boolean(expanded);
+    this.chatHistoryExpanded = nextExpanded;
+    this.syncChatHistoryExpandedUi();
+    if (!requestHistory || !this.chatOpen) {
+      return;
+    }
+    if (nextExpanded) {
+      this.requestChatHistory({
+        force: true,
+        mode: "before-today",
+        beforeCreatedAtMs: this.getLocalDayStartMs(),
+        replace: true
+      });
+      return;
+    }
+    this.requestChatHistory({
+      force: true,
+      mode: "all",
+      replace: true
+    });
+  }
+
   setChatOpen(open) {
     if (open && !this.canUseChatControls()) {
       return;
     }
 
     this.chatOpen = Boolean(open);
+    if (!this.chatOpen) {
+      this.chatHistoryExpanded = false;
+    }
     if (this.chatUiEl) {
       const collapsed = !this.chatOpen;
       this.chatUiEl.classList.toggle("collapsed", collapsed);
@@ -15905,10 +15975,20 @@ export class GameRuntime {
         this.mobileChatBtnEl.textContent = mobileLabel;
       }
     }
+    this.syncChatHistoryExpandedUi();
     if (this.chatOpen) {
       this.chalkDrawingActive = false;
       this.chalkLastStamp = null;
-      this.requestChatHistory();
+      if (this.chatHistoryExpanded) {
+        this.requestChatHistory({
+          force: true,
+          mode: "before-today",
+          beforeCreatedAtMs: this.getLocalDayStartMs(),
+          replace: true
+        });
+      } else {
+        this.requestChatHistory();
+      }
     }
     this.syncMobileUiState();
     this.syncChatLiveUi();
@@ -16237,7 +16317,7 @@ export class GameRuntime {
       this.clientRttMs = 0;
       this.clientRttSmoothedMs = 0;
       this.clearChatLogs({ clearSeenIds: true });
-      this.lastChatSendAt = 0;
+      this.resetLocalChatSendLimiter();
       this.lastChatHistoryRequestAt = 0;
       this.pendingAuthoritativeStateSync = true;
       this.authoritativeSyncGraceUntil = performance.now() + 2200;
@@ -16331,7 +16411,7 @@ export class GameRuntime {
       this.netPingPending.clear();
       this.clientRttMs = 0;
       this.clientRttSmoothedMs = 0;
-      this.lastChatSendAt = 0;
+      this.resetLocalChatSendLimiter();
       this.stopNetworkPing();
       this.authoritativeSyncGraceUntil = 0;
       this.clearRemotePlayers();
@@ -16399,7 +16479,7 @@ export class GameRuntime {
       this.clientRttMs = 0;
       this.clientRttSmoothedMs = 0;
       this.authoritativeSyncGraceUntil = 0;
-      this.lastChatSendAt = 0;
+      this.resetLocalChatSendLimiter();
       this.clearRemotePlayers();
       this.clearPromoObjectVisuals();
       this.promoObjects.clear();
@@ -16519,6 +16599,19 @@ export class GameRuntime {
 
     socket.on("chat:history", (payload = {}) => {
       this.handleChatHistory(payload);
+    });
+
+    socket.on("chat:blocked", (payload = {}) => {
+      const reason = String(payload?.reason ?? "").trim().toLowerCase();
+      let message = "채팅 전송이 제한되었습니다. 잠시 후 다시 시도하세요.";
+      if (reason === "chat duplicate blocked") {
+        message = "같은 메시지는 연속으로 도배할 수 없습니다.";
+      } else if (reason === "chat rate limited") {
+        message = "짧은 시간에 보낼 수 있는 채팅 수를 초과했습니다.";
+      } else if (reason === "chat too fast") {
+        message = "채팅 전송 간격이 너무 빠릅니다.";
+      }
+      this.showChatRateLimitNotice(message);
     });
 
     socket.on("promo:state", (payload = {}) => {
@@ -17632,7 +17725,7 @@ export class GameRuntime {
     }
   }
 
-  requestChatHistory({ force = false } = {}) {
+  requestChatHistory({ force = false, mode = "", beforeCreatedAtMs = 0, replace = false } = {}) {
     if (!this.socket || !this.networkConnected) {
       return false;
     }
@@ -17645,21 +17738,60 @@ export class GameRuntime {
       return false;
     }
     this.lastChatHistoryRequestAt = nowMs;
-    this.socket.emit("chat:history:request");
+    const payload = {};
+    const normalizedMode = String(mode ?? "").trim().toLowerCase();
+    if (normalizedMode) {
+      payload.mode = normalizedMode;
+    }
+    const beforeMs = Math.max(0, Math.trunc(Number(beforeCreatedAtMs) || 0));
+    if (beforeMs > 0) {
+      payload.beforeCreatedAtMs = beforeMs;
+    }
+    if (replace) {
+      payload.replace = true;
+    }
+    if (Object.keys(payload).length > 0) {
+      this.socket.emit("chat:history:request", payload);
+    } else {
+      this.socket.emit("chat:history:request");
+    }
     return true;
   }
 
   handleChatHistory(payload) {
+    const replaceExisting = Boolean(payload?.replace);
     const messages = Array.isArray(payload?.messages)
       ? payload.messages
       : Array.isArray(payload)
         ? payload
         : [];
+    if (replaceExisting) {
+      this.clearChatLogs({ clearSeenIds: true });
+    }
     if (!messages.length) {
+      if (replaceExisting && this.chatHistoryExpanded) {
+        this.appendChatLine("", "어제까지 불러올 채팅 기록이 없습니다.", "system");
+        if (this.chatLogEl) {
+          this.chatLogEl.scrollTop = 0;
+        }
+      }
       return;
     }
 
-    for (const entry of messages) {
+    const sortedMessages = messages
+      .map((entry, index) => {
+        const createdAt = Math.max(0, Math.trunc(Number(entry?.createdAt) || 0));
+        return { entry, index, createdAt };
+      })
+      .sort((left, right) => {
+        if (left.createdAt === right.createdAt) {
+          return left.index - right.index;
+        }
+        return left.createdAt - right.createdAt;
+      })
+      .map((item) => item.entry);
+
+    for (const entry of sortedMessages) {
       const text = String(entry?.text ?? "").trim().slice(0, 120);
       if (!text) {
         continue;
@@ -17682,6 +17814,9 @@ export class GameRuntime {
       const lineType =
         senderId && this.localPlayerId && senderId === this.localPlayerId ? "self" : "remote";
       this.appendChatLine(senderName, text, lineType);
+    }
+    if (replaceExisting && this.chatHistoryExpanded && this.chatLogEl) {
+      this.chatLogEl.scrollTop = 0;
     }
   }
 
@@ -17819,6 +17954,70 @@ export class GameRuntime {
     return appended;
   }
 
+  resetLocalChatSendLimiter() {
+    this.lastChatSendAt = 0;
+    this.chatSendWindowStartAt = 0;
+    this.chatSendWindowCount = 0;
+    this.chatLastNormalizedText = "";
+    this.chatSameTextStreak = 0;
+    this.lastChatRateLimitNoticeAt = 0;
+  }
+
+  normalizeChatRateLimitText(text) {
+    return String(text ?? "")
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, " ")
+      .slice(0, 120);
+  }
+
+  showChatRateLimitNotice(message) {
+    const nowMs = Date.now();
+    const cooldownMs = Math.max(300, Math.trunc(Number(this.chatRateLimitNoticeCooldownMs) || 0));
+    if (nowMs - this.lastChatRateLimitNoticeAt < cooldownMs) {
+      return;
+    }
+    this.lastChatRateLimitNoticeAt = nowMs;
+    this.appendChatLine("", message, "system");
+  }
+
+  consumeLocalChatSendBudget(text) {
+    const nowMs = Date.now();
+    const minIntervalMs = Math.max(120, Math.trunc(Number(this.chatSendMinIntervalMs) || 0));
+    if (this.lastChatSendAt > 0 && nowMs - this.lastChatSendAt < minIntervalMs) {
+      this.showChatRateLimitNotice("채팅 전송 간격이 너무 빠릅니다.");
+      return false;
+    }
+
+    const windowMs = Math.max(1_000, Math.trunc(Number(this.chatSendWindowMs) || 0));
+    if (this.chatSendWindowStartAt <= 0 || nowMs - this.chatSendWindowStartAt > windowMs) {
+      this.chatSendWindowStartAt = nowMs;
+      this.chatSendWindowCount = 0;
+    }
+    const maxPerWindow = Math.max(1, Math.trunc(Number(this.chatSendMaxPerWindow) || 0));
+    if (this.chatSendWindowCount >= maxPerWindow) {
+      this.showChatRateLimitNotice("짧은 시간에 보낼 수 있는 채팅 수를 초과했습니다.");
+      return false;
+    }
+
+    const normalizedText = this.normalizeChatRateLimitText(text);
+    if (normalizedText && normalizedText === this.chatLastNormalizedText) {
+      const maxStreak = Math.max(1, Math.trunc(Number(this.chatSameTextStreakMax) || 0));
+      if (this.chatSameTextStreak >= maxStreak) {
+        this.showChatRateLimitNotice("같은 메시지는 연속으로 도배할 수 없습니다.");
+        return false;
+      }
+      this.chatSameTextStreak += 1;
+    } else {
+      this.chatLastNormalizedText = normalizedText;
+      this.chatSameTextStreak = 1;
+    }
+
+    this.chatSendWindowCount += 1;
+    this.lastChatSendAt = nowMs;
+    return true;
+  }
+
   sendChatMessage() {
     this.resolveUiElements();
     if (!this.chatInputEl) {
@@ -17842,11 +18041,9 @@ export class GameRuntime {
     }
 
     const text = rawInput.slice(0, 120);
-    const sendNow = performance.now();
-    if (sendNow - this.lastChatSendAt < this.chatSendMinIntervalMs) {
+    if (!this.consumeLocalChatSendBudget(text)) {
       return;
     }
-    this.lastChatSendAt = sendNow;
     const messageId = this.createClientChatMessageId();
 
     const senderName = this.formatPlayerName(this.localPlayerName);

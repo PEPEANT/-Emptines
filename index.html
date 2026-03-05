@@ -35,7 +35,7 @@
       </div>
       <div class="sp-row">
         <span class="sp-label">Version</span>
-        <span id="sp-version" class="sp-value">1.1</span>
+        <span id="sp-version" class="sp-value">1.2</span>
       </div>
       <div class="sp-row">
         <button id="sp-fullscreen-btn" type="button">전체화면 전환</button>
@@ -394,7 +394,10 @@
     <div id="chat-ui" class="hidden" aria-label="채팅">
       <div id="chat-header">
         <strong id="chat-title">채팅</strong>
-        <button id="chat-toggle" type="button">채팅 열기</button>
+        <div id="chat-header-actions">
+          <button id="chat-expand" class="hidden" type="button" aria-pressed="false">Expand</button>
+          <button id="chat-toggle" type="button">채팅 열기</button>
+        </div>
       </div>
       <div id="chat-log" role="log" aria-live="polite" aria-relevant="additions text"></div>
       <div id="chat-controls" class="hidden">
