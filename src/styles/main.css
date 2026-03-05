@@ -2874,16 +2874,24 @@ body.is-mobile-ui #surface-painter-actions button {
 
 /* Save button: most prominent */
 body.is-mobile-ui #surface-painter-save {
-  grid-column: span 2;
+  grid-column: auto;
   background: rgba(14, 42, 66, 0.95);
   border-color: rgba(100, 184, 255, 0.7);
   color: #c4e4ff;
   font-size: 0.68rem;
 }
 
-/* Cancel: slightly wider than others */
+/* Keep end-actions together on the same row: clear -> close -> save */
+body.is-mobile-ui #surface-painter-clear {
+  order: 97;
+}
+
 body.is-mobile-ui #surface-painter-cancel {
-  grid-column: span 1;
+  order: 98;
+}
+
+body.is-mobile-ui #surface-painter-save {
+  order: 99;
 }
 
 body.mobile-portrait-lock #tool-ui,
@@ -2978,6 +2986,20 @@ body.mobile-portrait-lock #host-chat-toggle {
     min-width: 0;
     height: 42px;
     font-size: 0.72rem;
+  }
+
+  /* Prevent trailing blank cell + hidden save row on fallback mobile layout */
+  #surface-painter-clear {
+    order: 97;
+  }
+
+  #surface-painter-cancel {
+    order: 98;
+  }
+
+  #surface-painter-save {
+    order: 99;
+    grid-column: auto;
   }
 
   #surface-painter-panel.actions-collapsed {
