@@ -127,10 +127,10 @@ const PROMO_LINK_INTERACT_RADIUS = 4.2;
 const PROMO_BLOCK_WIDTH = 2.8;
 const PROMO_BLOCK_HEIGHT = 2.2;
 const PROMO_BLOCK_DEPTH = 1.8;
-const PLAYER_PLACEABLE_BLOCK_BASE_COLOR = 0x6f7782;
-const PLAYER_PLACEABLE_BLOCK_EDGE_COLOR = 0xcfd6df;
-const PLAYER_PLACEABLE_BLOCK_EMISSIVE_COLOR = 0x151b22;
-const PLAYER_PLACEABLE_BLOCK_EMISSIVE_INTENSITY = 0.06;
+const PLAYER_PLACEABLE_BLOCK_BASE_COLOR = 0xf2f3f5;
+const PLAYER_PLACEABLE_BLOCK_EDGE_COLOR = 0xffffff;
+const PLAYER_PLACEABLE_BLOCK_EMISSIVE_COLOR = 0x20242a;
+const PLAYER_PLACEABLE_BLOCK_EMISSIVE_INTENSITY = 0.02;
 const PLAYER_PLACEABLE_BLOCKED_MESSAGE =
   "포탈존 , 스폰지점 , 다리 , 중앙 에서는 설치가 불가능합니다";
 const PROMO_BLOCKED_CENTER_RADIUS = 11.5;
@@ -8777,8 +8777,8 @@ export class GameRuntime {
       this.portalPhase = "cooldown";
       this.portalPhaseClock = Math.max(0, Number(schedule.remainingSec) || 0);
       if (this.portalPhaseClock >= 60) {
-        const remainingMinutes = Math.max(1, Math.ceil(this.portalPhaseClock / 60));
-        this.setFlowHeadline("공연장 시작 대기", `${remainingMinutes}분 후 개방`);
+        const remainingLabel = this.formatPortalDelayLabel(this.portalPhaseClock);
+        this.setFlowHeadline("공연장 시작 대기", `${remainingLabel} 후 개방`);
       } else {
         this.setFlowHeadline("공연장 시작 대기", `${Math.ceil(this.portalPhaseClock)}초 후 개방`);
       }
@@ -8874,6 +8874,47 @@ export class GameRuntime {
     this.portalReplicaGroup?.scale.set(oxScale, oxScale, oxScale);
   }
 
+  formatPortalClockTimeText(rawValue = Date.now()) {
+    const directMs = Number(rawValue);
+    const ms = Number.isFinite(directMs)
+      ? directMs
+      : rawValue instanceof Date
+        ? rawValue.getTime()
+        : Date.now();
+    const date = new Date(ms);
+    const hours = String(date.getHours()).padStart(2, "0");
+    const minutes = String(date.getMinutes()).padStart(2, "0");
+    return `${hours}:${minutes}`;
+  }
+
+  formatPortalDelayLabel(delaySeconds = 0) {
+    const safeSeconds = Math.max(0, Math.trunc(Number(delaySeconds) || 0));
+    if (safeSeconds < 60) {
+      return `${safeSeconds}초`;
+    }
+    const totalMinutes = Math.max(1, Math.ceil(safeSeconds / 60));
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    if (hours > 0 && minutes > 0) {
+      return `${hours}시간 ${minutes}분`;
+    }
+    if (hours > 0) {
+      return `${hours}시간`;
+    }
+    return `${totalMinutes}분`;
+  }
+
+  formatPortalStartLabelFromRemaining(remainingSeconds = 0) {
+    const safeSeconds = Math.max(0, Math.trunc(Number(remainingSeconds) || 0));
+    if (safeSeconds <= 0) {
+      return "곧 시작";
+    }
+    if (safeSeconds < 60) {
+      return `${safeSeconds}초후 시작`;
+    }
+    return `${this.formatPortalDelayLabel(safeSeconds)}후 시작`;
+  }
+
   updatePortalTimeBillboard(delta = 0, force = false) {
     if (!this.portalBillboardContext || !this.portalBillboardTexture || !this.portalBillboardCanvas) {
       return;
@@ -8886,30 +8927,35 @@ export class GameRuntime {
     }
     this.portalBillboardUpdateClock = 0;
 
-    const now = new Date();
-    const hours = String(now.getHours()).padStart(2, "0");
-    const minutes = String(now.getMinutes()).padStart(2, "0");
-    const seconds = String(now.getSeconds()).padStart(2, "0");
-    const localTime = `${hours}:${minutes}:${seconds}`;
-    const schedule = this.getPortalScheduleComputed(now.getTime());
-    let startLabel = "( 대 기 중 )";
+    const nowMs = Date.now();
+    const schedule = this.getPortalScheduleComputed(nowMs);
+    const remainingSec = Math.max(0, Math.trunc(Number(schedule.remainingSec) || 0));
+    const currentTime = this.formatPortalClockTimeText(nowMs);
+
+    let startLeadText = "( 대 기 중 )";
     if (schedule.mode === "open_manual") {
-      startLabel = "입장 가능 (수동 종료)";
+      startLeadText = "입장 가능 (수동 종료)";
     } else if (schedule.mode === "open") {
-      startLabel = "입장 가능";
-    } else if (schedule.mode === "final_countdown") {
-      startLabel = `${Math.max(0, Math.trunc(Number(schedule.remainingSec) || 0))}초`;
-    } else if (schedule.mode === "waiting") {
-      const remainingSec = Math.max(0, Math.trunc(Number(schedule.remainingSec) || 0));
-      if (remainingSec >= 60) {
-        startLabel = `${Math.max(1, Math.ceil(remainingSec / 60))}분 후 시작`;
-      } else {
-        startLabel = `${remainingSec}초 후 시작`;
-      }
+      startLeadText = "입장 가능";
+    } else if (schedule.mode === "waiting" || schedule.mode === "final_countdown") {
+      startLeadText = this.formatPortalStartLabelFromRemaining(remainingSec);
     }
-    const line1 = `시작시간 : ${startLabel}`;
-    const line2 = `현재 시간 : ${localTime}`;
-    const line3 = "";
+
+    let startTimeText = "( 대 기 중 )";
+    if (
+      schedule.mode === "waiting" ||
+      schedule.mode === "final_countdown" ||
+      schedule.mode === "open" ||
+      schedule.mode === "open_manual"
+    ) {
+      const rawStartAtMs = Math.trunc(Number(schedule.startAtMs) || 0);
+      const computedStartAtMs = rawStartAtMs > 0 ? rawStartAtMs : nowMs + remainingSec * 1000;
+      startTimeText = this.formatPortalClockTimeText(computedStartAtMs);
+    }
+
+    const line1 = startLeadText;
+    const line2 = `시작시간 : ${startTimeText}`;
+    const line3 = `현재시간 : ${currentTime}`;
 
     if (
       !force &&
@@ -11296,7 +11342,7 @@ export class GameRuntime {
     const bodyMaterial = new THREE.MeshStandardMaterial({
       color: PLAYER_PLACEABLE_BLOCK_BASE_COLOR,
       emissive: PLAYER_PLACEABLE_BLOCK_EMISSIVE_COLOR,
-      emissiveIntensity: 0.22,
+      emissiveIntensity: 0.08,
       transparent: true,
       opacity: 0.3,
       depthWrite: false,
@@ -12248,13 +12294,8 @@ export class GameRuntime {
         },
         { announce: false }
       );
-      const delayLabel =
-        delay >= 3600
-          ? `${Math.ceil(delay / 3600)}시간`
-          : delay >= 60
-            ? `${Math.ceil(delay / 60)}분`
-            : `${delay}초`;
-      this.appendChatLine("", `${delayLabel} 후 시작 예약 완료`, "system");
+      const delayLabel = this.formatPortalDelayLabel(delay);
+      this.appendChatLine("", `${delayLabel}후 시작 예약 완료`, "system");
       return;
     }
     if (!this.isRoomHost) {
@@ -12283,13 +12324,8 @@ export class GameRuntime {
       }
 
       this.applyPortalScheduleUpdate(response?.schedule ?? {}, { announce: false });
-      const delayLabel =
-        delay >= 3600
-          ? `${Math.ceil(delay / 3600)}시간`
-          : delay >= 60
-            ? `${Math.ceil(delay / 60)}분`
-            : `${delay}초`;
-      this.appendChatLine("", `${delayLabel} 후 시작 예약 완료`, "system");
+      const delayLabel = this.formatPortalDelayLabel(delay);
+      this.appendChatLine("", `${delayLabel}후 시작 예약 완료`, "system");
     });
   }
 
@@ -19514,7 +19550,7 @@ export class GameRuntime {
     const mat = new THREE.MeshStandardMaterial({
       color: PLAYER_PLACEABLE_BLOCK_BASE_COLOR,
       emissive: PLAYER_PLACEABLE_BLOCK_EMISSIVE_COLOR,
-      emissiveIntensity: 0.1,
+      emissiveIntensity: PLAYER_PLACEABLE_BLOCK_EMISSIVE_INTENSITY,
       roughness: 0.64,
       metalness: 0.06,
     });
