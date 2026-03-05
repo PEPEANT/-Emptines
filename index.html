@@ -460,8 +460,6 @@
         <div id="surface-painter-actions">
           <button id="surface-painter-promo-share-toggle" class="hidden" type="button">다른사람 수정: 비허용</button>
           <button id="surface-painter-export" type="button">PNG 내보내기</button>
-          <button id="surface-painter-import" type="button">PNG 불러오기</button>
-          <input id="surface-painter-import-file" class="hidden" type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg" />
           <button id="surface-painter-clear" type="button">삭제</button>
           <button id="surface-painter-cancel" type="button">닫기</button>
           <button id="surface-painter-save" type="button">저장</button>
@@ -479,6 +477,22 @@
         var fsBtn = document.getElementById('sp-fullscreen-btn');
         var volSlider = document.getElementById('sp-volume');
         if (!btn || !panel) return;
+
+        var versionEl = document.getElementById('sp-version');
+        if (!versionEl) {
+          var versionRow = document.createElement('div');
+          versionRow.className = 'sp-row';
+          var versionLabel = document.createElement('span');
+          versionLabel.className = 'sp-label';
+          versionLabel.textContent = '\uBC84\uC804';
+          versionEl = document.createElement('span');
+          versionEl.id = 'sp-version';
+          versionEl.className = 'sp-value';
+          versionRow.appendChild(versionLabel);
+          versionRow.appendChild(versionEl);
+          panel.appendChild(versionRow);
+        }
+        versionEl.textContent = '0.1';
 
         function openPanel() {
           panel.classList.remove('hidden');

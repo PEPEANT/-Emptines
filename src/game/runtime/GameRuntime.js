@@ -6134,56 +6134,18 @@ export class GameRuntime {
   }
 
   triggerSurfacePainterPngImport() {
-    this.resolveUiElements();
-    if (!this.surfacePainterOpen || !this.surfacePainterImportInputEl) {
-      return;
-    }
-    this.surfacePainterImportInputEl.value = "";
-    this.surfacePainterImportInputEl.click();
+    this.appendChatLine("", "캔버스 이미지 불러오기는 비활성화되었습니다.", "system");
   }
 
   handleSurfacePainterImportInputChange(event) {
-    if (!this.surfacePainterOpen) {
-      return;
-    }
     const input = event?.target;
-    const file = input?.files?.[0];
     if (input) {
       input.value = "";
     }
-    if (!file) {
+    if (!this.surfacePainterOpen) {
       return;
     }
-
-    const filename = String(file.name ?? "").trim();
-    const fileType = String(file.type ?? "").trim().toLowerCase();
-    const lowerName = filename.toLowerCase();
-    const isSupportedImageFile =
-      fileType === "image/png" ||
-      fileType === "image/jpeg" ||
-      fileType === "image/jpg" ||
-      lowerName.endsWith(".png") ||
-      lowerName.endsWith(".jpg") ||
-      lowerName.endsWith(".jpeg");
-    if (!isSupportedImageFile) {
-      this.appendChatLine("", "PNG/JPG 파일만 불러올 수 있습니다.", "system");
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = String(reader.result ?? "").trim();
-      if (!dataUrl.startsWith("data:image/")) {
-        this.appendChatLine("", "이미지 파일을 읽지 못했습니다.", "system");
-        return;
-      }
-      this.clearSurfacePainterCanvas(dataUrl);
-      this.appendChatLine("", `이미지 불러오기 완료: ${filename || "image"}`, "system");
-    };
-    reader.onerror = () => {
-      this.appendChatLine("", "이미지 파일을 읽지 못했습니다.", "system");
-    };
-    reader.readAsDataURL(file);
+    this.appendChatLine("", "캔버스 PNG/JPG 불러오기는 사용할 수 없습니다.", "system");
   }
 
   openSurfacePainter(surfaceId) {
@@ -6472,7 +6434,7 @@ export class GameRuntime {
   applySurfacePaintUpdate(payload = {}) {
     const surfaceId = String(payload?.surfaceId ?? "").trim();
     const imageDataUrl = String(payload?.imageDataUrl ?? payload?.dataUrl ?? "").trim();
-    if (!surfaceId || !imageDataUrl || !imageDataUrl.startsWith("data:image/")) {
+    if (!surfaceId || !/^data:image\/webp;base64,/i.test(imageDataUrl)) {
       return false;
     }
     const updatedAt = Math.max(0, Math.trunc(Number(payload?.updatedAt) || Date.now()));
@@ -6498,7 +6460,7 @@ export class GameRuntime {
     for (const item of surfaces) {
       const surfaceId = String(item?.surfaceId ?? "").trim();
       const imageDataUrl = String(item?.imageDataUrl ?? item?.dataUrl ?? "").trim();
-      if (!surfaceId || !imageDataUrl || !imageDataUrl.startsWith("data:image/")) {
+      if (!surfaceId || !/^data:image\/webp;base64,/i.test(imageDataUrl)) {
         continue;
       }
       const updatedAt = Math.max(0, Math.trunc(Number(item?.updatedAt) || Date.now()));
@@ -6781,7 +6743,7 @@ export class GameRuntime {
   enqueueSurfacePaintRetry(surfaceId, imageDataUrl, reason = "") {
     const normalizedId = String(surfaceId ?? "").trim();
     const normalizedImage = String(imageDataUrl ?? "").trim();
-    if (!normalizedId || !normalizedImage.startsWith("data:image/")) {
+    if (!normalizedId || !/^data:image\/webp;base64,/i.test(normalizedImage)) {
       return;
     }
     const previous = this.surfacePaintRetryQueue.get(normalizedId) ?? {};
@@ -6909,11 +6871,11 @@ export class GameRuntime {
     for (const quality of qualities) {
       let dataUrl = "";
       try {
-        dataUrl = String(canvas.toDataURL("image/jpeg", quality) ?? "");
+        dataUrl = String(canvas.toDataURL("image/webp", quality) ?? "");
       } catch {
         dataUrl = "";
       }
-      if (!dataUrl.startsWith("data:image/")) {
+      if (!/^data:image\/webp;base64,/i.test(dataUrl)) {
         continue;
       }
       if (!bestEffort || dataUrl.length < bestEffort.length) {
@@ -6953,7 +6915,7 @@ export class GameRuntime {
 
     const imageDataUrl = this.getSurfacePainterSaveImageDataUrl();
     if (!imageDataUrl) {
-      this.appendChatLine("", "그림 데이터 인코딩에 실패했습니다.", "system");
+      this.appendChatLine("", "그림 데이터(WebP) 인코딩에 실패했습니다.", "system");
       return;
     }
     this.surfacePainterSaveInFlight = true;

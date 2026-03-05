@@ -334,7 +334,7 @@ function normalizeSurfaceImageDataUrl(rawValue) {
   if (!value || value.length > MAX_SURFACE_IMAGE_CHARS) {
     return "";
   }
-  if (!value.startsWith("data:image/")) {
+  if (!/^data:image\/webp;base64,/i.test(value)) {
     return "";
   }
   return value;

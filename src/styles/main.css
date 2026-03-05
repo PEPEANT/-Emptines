@@ -158,6 +158,12 @@ canvas {
   text-transform: uppercase;
 }
 
+.sp-value {
+  color: #e6f5ff;
+  font: 700 0.72rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.06em;
+}
+
 .sp-quality-btns {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
