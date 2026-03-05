@@ -51,6 +51,11 @@ const MAX_PROMO_OBJECTS = 1200;
 const MAX_PROMO_NAME_CHARS = 48;
 const MAX_PROMO_URL_CHARS = 2048;
 const MAX_PROMO_MEDIA_DATA_URL_CHARS = 9_000_000;
+const PROMO_MIN_SCALE = 0.35;
+const PROMO_MAX_SCALE = 4.5;
+const PROMO_BLOCK_WIDTH = 2.8;
+const PROMO_BLOCK_DEPTH = 1.8;
+const PROMO_BLOCK_BASE_RADIUS = Math.hypot(PROMO_BLOCK_WIDTH * 0.5, PROMO_BLOCK_DEPTH * 0.5);
 const PROMO_BLOCKED_SPAWN_X = 0;
 const PROMO_BLOCKED_SPAWN_Z = -98;
 const PROMO_BLOCKED_SPAWN_RADIUS = 14;
@@ -581,7 +586,12 @@ function normalizePromoMediaDataUrl(rawValue) {
 function normalizePromoScale(rawValue, fallback = 1) {
   const parsed = Number(rawValue);
   const safe = Number.isFinite(parsed) ? parsed : Number(fallback) || 1;
-  return Math.max(0.35, Math.min(8, safe));
+  return Math.max(PROMO_MIN_SCALE, Math.min(PROMO_MAX_SCALE, safe));
+}
+
+function getPromoFootprintRadius(rawScale = 1) {
+  const scale = normalizePromoScale(rawScale, 1);
+  return Math.max(0.7, PROMO_BLOCK_BASE_RADIUS * scale);
 }
 
 function normalizePromoYaw(rawValue, fallback = 0) {
@@ -609,16 +619,18 @@ function normalizePromoKind(rawValue) {
   return "block";
 }
 
-function getPromoPlacementBlockReason(x, z) {
+function getPromoPlacementBlockReason(x, z, scale = 1) {
   const safeX = Number(x);
   const safeZ = Number(z);
   if (!Number.isFinite(safeX) || !Number.isFinite(safeZ)) {
     return "";
   }
+  const footprintRadius = getPromoFootprintRadius(scale);
 
   const spawnDx = safeX - PROMO_BLOCKED_SPAWN_X;
   const spawnDz = safeZ - PROMO_BLOCKED_SPAWN_Z;
-  if (spawnDx * spawnDx + spawnDz * spawnDz <= PROMO_BLOCKED_SPAWN_RADIUS * PROMO_BLOCKED_SPAWN_RADIUS) {
+  const spawnBlockedRadius = PROMO_BLOCKED_SPAWN_RADIUS + footprintRadius;
+  if (spawnDx * spawnDx + spawnDz * spawnDz <= spawnBlockedRadius * spawnBlockedRadius) {
     return "spawn";
   }
 
@@ -629,16 +641,17 @@ function getPromoPlacementBlockReason(x, z) {
     const apx = safeX - PROMO_BLOCKED_BRIDGE_A_X;
     const apz = safeZ - PROMO_BLOCKED_BRIDGE_A_Z;
     const rawT = (apx * abx + apz * abz) / abLenSq;
-    const edgeMargin = 0.08;
+    const edgeMargin = Math.max(0.08, footprintRadius / Math.sqrt(abLenSq));
     if (rawT >= -edgeMargin && rawT <= 1 + edgeMargin) {
       const t = Math.max(0, Math.min(1, rawT));
       const nearX = PROMO_BLOCKED_BRIDGE_A_X + abx * t;
       const nearZ = PROMO_BLOCKED_BRIDGE_A_Z + abz * t;
       const lateralDx = safeX - nearX;
       const lateralDz = safeZ - nearZ;
+      const bridgeHalfWidth = PROMO_BLOCKED_BRIDGE_HALF_WIDTH + footprintRadius;
       if (
         lateralDx * lateralDx + lateralDz * lateralDz <=
-        PROMO_BLOCKED_BRIDGE_HALF_WIDTH * PROMO_BLOCKED_BRIDGE_HALF_WIDTH
+        bridgeHalfWidth * bridgeHalfWidth
       ) {
         return "bridge";
       }
@@ -648,7 +661,7 @@ function getPromoPlacementBlockReason(x, z) {
   for (const zone of PROMO_BLOCKED_PORTAL_ZONES) {
     const dx = safeX - (Number(zone?.x) || 0);
     const dz = safeZ - (Number(zone?.z) || 0);
-    const radius = Math.max(1.8, Number(zone?.radius) || 0);
+    const radius = Math.max(1.8, Number(zone?.radius) || 0) + footprintRadius;
     if (dx * dx + dz * dz <= radius * radius) {
       return "portal";
     }
@@ -656,7 +669,8 @@ function getPromoPlacementBlockReason(x, z) {
 
   const centerDx = safeX - PROMO_BLOCKED_CENTER_X;
   const centerDz = safeZ - PROMO_BLOCKED_CENTER_Z;
-  if (centerDx * centerDx + centerDz * centerDz <= PROMO_BLOCKED_CENTER_RADIUS * PROMO_BLOCKED_CENTER_RADIUS) {
+  const centerBlockedRadius = PROMO_BLOCKED_CENTER_RADIUS + footprintRadius;
+  if (centerDx * centerDx + centerDz * centerDz <= centerBlockedRadius * centerBlockedRadius) {
     return "center";
   }
 
@@ -1245,6 +1259,9 @@ export class RoomService {
       if (!normalized) {
         continue;
       }
+      if (getPromoPlacementBlockReason(normalized.x, normalized.z, normalized.scale)) {
+        continue;
+      }
       map.set(normalized.ownerKey, normalized);
       if (map.size >= MAX_PROMO_OBJECTS) {
         break;
@@ -1304,8 +1321,10 @@ export class RoomService {
       !previous ||
       Math.abs(Number(normalized.x) - Number(previous.x)) > 0.001 ||
       Math.abs(Number(normalized.z) - Number(previous.z)) > 0.001;
-    if (hasPositionChange) {
-      const blockReason = getPromoPlacementBlockReason(normalized.x, normalized.z);
+    const hasScaleChange =
+      !previous || Math.abs(Number(normalized.scale) - Number(previous.scale)) > 0.001;
+    if (hasPositionChange || hasScaleChange) {
+      const blockReason = getPromoPlacementBlockReason(normalized.x, normalized.z, normalized.scale);
       if (blockReason === "spawn") {
         return { ok: false, error: "placement blocked at spawn" };
       }

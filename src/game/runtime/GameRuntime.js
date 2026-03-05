@@ -121,13 +121,14 @@ const HOST_CUSTOM_BLOCK_MAX_SIZE = 18;
 const HOST_CUSTOM_BLOCK_DEFAULT_SIZE = 2.5;
 const PROMO_OWNER_KEY_STORAGE_KEY = "promoOwnerKey_v1";
 const PROMO_MIN_SCALE = 0.35;
-const PROMO_MAX_SCALE = 8;
+const PROMO_MAX_SCALE = 4.5;
 const PROMO_DEFAULT_SCALE = 2.2;
 const PROMO_MAX_MEDIA_BYTES = 6 * 1024 * 1024;
 const PROMO_LINK_INTERACT_RADIUS = 4.2;
 const PROMO_BLOCK_WIDTH = 2.8;
 const PROMO_BLOCK_HEIGHT = 2.2;
 const PROMO_BLOCK_DEPTH = 1.8;
+const PROMO_BLOCK_BASE_RADIUS = Math.hypot(PROMO_BLOCK_WIDTH * 0.5, PROMO_BLOCK_DEPTH * 0.5);
 const PLAYER_PLACEABLE_BLOCK_BASE_COLOR = 0xf2f3f5;
 const PLAYER_PLACEABLE_BLOCK_EDGE_COLOR = 0xffffff;
 const PLAYER_PLACEABLE_BLOCK_EMISSIVE_COLOR = 0x20242a;
@@ -11224,16 +11225,23 @@ export class GameRuntime {
     };
   }
 
-  getPromoPlacementBlockReason(position) {
+  getPromoPlacementBlockReason(position, scaleOverride = null) {
     const x = Number(position?.x);
     const z = Number(position?.z);
     if (!Number.isFinite(x) || !Number.isFinite(z)) {
       return "";
     }
+    const resolvedScale = THREE.MathUtils.clamp(
+      Number(scaleOverride ?? position?.scale ?? this.promoPlacementPreviewCurrentScale ?? this.promoScaleInputEl?.value) ||
+        PROMO_DEFAULT_SCALE,
+      PROMO_MIN_SCALE,
+      PROMO_MAX_SCALE
+    );
+    const footprintRadius = Math.max(0.7, PROMO_BLOCK_BASE_RADIUS * resolvedScale);
 
     const spawnCenterX = Number(this.bridgeApproachSpawn?.x) || 0;
     const spawnCenterZ = Number(this.bridgeApproachSpawn?.z) || -98;
-    const spawnRadius = Math.max(10, Number(this.bridgeWidth) * 0.95 + 4);
+    const spawnRadius = Math.max(10, Number(this.bridgeWidth) * 0.95 + 4) + footprintRadius;
     const spawnDx = x - spawnCenterX;
     const spawnDz = z - spawnCenterZ;
     if (spawnDx * spawnDx + spawnDz * spawnDz <= spawnRadius * spawnRadius) {
@@ -11251,14 +11259,14 @@ export class GameRuntime {
       const apx = x - ax;
       const apz = z - az;
       const rawT = (apx * abx + apz * abz) / abLenSq;
-      const bridgeEdgeMargin = 0.08;
+      const bridgeEdgeMargin = Math.max(0.08, footprintRadius / Math.sqrt(abLenSq));
       if (rawT >= -bridgeEdgeMargin && rawT <= 1 + bridgeEdgeMargin) {
         const t = THREE.MathUtils.clamp(rawT, 0, 1);
         const nearestX = ax + abx * t;
         const nearestZ = az + abz * t;
         const lateralDx = x - nearestX;
         const lateralDz = z - nearestZ;
-        const bridgeHalfWidth = Math.max(4.8, Number(this.bridgeWidth) * 0.6 + 1.5);
+        const bridgeHalfWidth = Math.max(4.8, Number(this.bridgeWidth) * 0.6 + 1.5) + footprintRadius;
         if (lateralDx * lateralDx + lateralDz * lateralDz <= bridgeHalfWidth * bridgeHalfWidth) {
           return "bridge";
         }
@@ -11287,7 +11295,7 @@ export class GameRuntime {
       }
       const dx = x - portalX;
       const dz = z - portalZ;
-      const radius = Math.max(1.8, Number(zone.radius) || 0);
+      const radius = Math.max(1.8, Number(zone.radius) || 0) + footprintRadius;
       if (dx * dx + dz * dz <= radius * radius) {
         return "portal";
       }
@@ -11297,7 +11305,8 @@ export class GameRuntime {
     const centerZ = (Number(this.citySpawn?.z) || -8) + 8;
     const centerDx = x - centerX;
     const centerDz = z - centerZ;
-    if (centerDx * centerDx + centerDz * centerDz <= PROMO_BLOCKED_CENTER_RADIUS * PROMO_BLOCKED_CENTER_RADIUS) {
+    const centerRadius = PROMO_BLOCKED_CENTER_RADIUS + footprintRadius;
+    if (centerDx * centerDx + centerDz * centerDz <= centerRadius * centerRadius) {
       return "center";
     }
 
@@ -11433,7 +11442,7 @@ export class GameRuntime {
       PROMO_MIN_SCALE,
       PROMO_MAX_SCALE
     );
-    const blockReason = this.getPromoPlacementBlockReason(transform);
+    const blockReason = this.getPromoPlacementBlockReason(transform, scale);
     this.promoPlacementPreviewCurrentScale = scale;
     this.promoPlacementPreviewBlockReason = blockReason;
     this.promoPlacementPreviewTransform = transform;
@@ -11633,20 +11642,25 @@ export class GameRuntime {
         yaw: this.normalizePromoYaw(own.yaw, 0)
       };
     }
-    const blockReason = this.getPromoPlacementBlockReason(transform);
+    const scaleOverrideValue = Number(scaleOverride);
+    const hasScaleOverride = Number.isFinite(scaleOverrideValue);
+    const previewScaleRaw = hasScaleOverride
+      ? scaleOverrideValue
+      : Number(this.promoScaleInputEl?.value) || Number(own?.scale) || PROMO_DEFAULT_SCALE;
+    const previewScale = THREE.MathUtils.clamp(previewScaleRaw, PROMO_MIN_SCALE, PROMO_MAX_SCALE);
+    const blockReason = this.getPromoPlacementBlockReason(transform, previewScale);
     const hasPositionChange =
       !own ||
       Math.abs(Number(transform.x) - Number(own.x)) > 0.001 ||
       Math.abs(Number(transform.z) - Number(own.z)) > 0.001;
-    if (blockReason && hasPositionChange) {
+    const hasScaleChange = !own || Math.abs(previewScale - (Number(own?.scale) || PROMO_DEFAULT_SCALE)) > 0.001;
+    if (blockReason && (hasPositionChange || hasScaleChange)) {
       const reasonMessage =
         this.getPromoPlacementBlockReasonMessage(blockReason) || PLAYER_PLACEABLE_BLOCKED_MESSAGE;
       this.appendChatLine("", reasonMessage, "system");
       return;
     }
     const usePanelValues = !(preserveExistingStyle && own);
-    const scaleOverrideValue = Number(scaleOverride);
-    const hasScaleOverride = Number.isFinite(scaleOverrideValue);
     const scaleRaw = hasScaleOverride
       ? scaleOverrideValue
       : usePanelValues
