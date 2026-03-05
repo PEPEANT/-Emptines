@@ -103,12 +103,14 @@ canvas {
   background: rgba(19, 45, 69, 0.92);
 }
 
-/* Settings gear button — hidden on desktop, shown on mobile */
+/* Settings gear button — available on both desktop and mobile */
 #settings-btn {
-  display: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   position: fixed;
   top: 14px;
-  right: 14px;
+  right: 108px;
   z-index: 74;
   width: 36px;
   height: 36px;
@@ -129,7 +131,7 @@ canvas {
 #settings-panel {
   position: fixed;
   top: 58px;
-  right: 14px;
+  right: 108px;
   z-index: 74;
   width: 190px;
   padding: 10px;
@@ -2254,9 +2256,11 @@ body.is-mobile-ui #promo-link-prompt {
 
 /* Mobile: show settings gear, hide fullscreen + graphics buttons */
 body.is-mobile-ui #settings-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  right: 14px;
+}
+
+body.is-mobile-ui #settings-panel {
+  right: 14px;
 }
 
 body.is-mobile-ui #fullscreen-toggle {
