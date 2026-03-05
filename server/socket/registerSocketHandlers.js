@@ -406,7 +406,8 @@ export function registerSocketHandlers({
       const result = roomService.switchPlayerZone(
         room,
         socket.id,
-        payload?.zone ?? payload?.target ?? payload?.id ?? ""
+        payload?.zone ?? payload?.target ?? payload?.id ?? "",
+        payload?.portalHint ?? payload?.returnPortal ?? payload?.from ?? ""
       );
       if (!result.ok) {
         ack(ackFn, result);

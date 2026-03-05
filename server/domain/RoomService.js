@@ -84,7 +84,8 @@ const MAX_CHAT_TEXT_CHARS = 200;
 const ROOM_ZONE_IDS = Object.freeze(["lobby", "fps", "ox"]);
 const ROOM_ZONE_PORTAL_OBJECT_ID_BY_ZONE = Object.freeze({
   fps: "portal_fps",
-  ox: "portal_ox"
+  ox: "portal_ox",
+  hall: "portal_hall"
 });
 const ROOM_ZONE_PORTAL_ENTRY_DISTANCE = 6;
 const ROOM_ZONE_STATE_BY_ID = Object.freeze({
@@ -169,6 +170,36 @@ function normalizeRoomZone(rawValue, fallback = "lobby") {
     .trim()
     .toLowerCase();
   if (ROOM_ZONE_IDS.includes(fallbackValue)) {
+    return fallbackValue;
+  }
+  return "";
+}
+
+function normalizeReturnPortalHint(rawValue, fallback = "") {
+  const value = String(rawValue ?? "")
+    .trim()
+    .toLowerCase();
+  if (value === "fps" || value === "ox" || value === "hall") {
+    return value;
+  }
+  if (value.includes("fps") || value.includes("reclaim-fps") || value.includes("a-zone")) {
+    return "fps";
+  }
+  if (value.includes("ox") || value.includes("singularity-ox") || value.includes("quiz")) {
+    return "ox";
+  }
+  if (
+    value.includes("hall") ||
+    value.includes("performance") ||
+    value.includes("concert") ||
+    value.includes("show")
+  ) {
+    return "hall";
+  }
+  const fallbackValue = String(fallback ?? "")
+    .trim()
+    .toLowerCase();
+  if (fallbackValue === "fps" || fallbackValue === "ox" || fallbackValue === "hall") {
     return fallbackValue;
   }
   return "";
@@ -2416,7 +2447,7 @@ export class RoomService {
     return changed;
   }
 
-  switchPlayerZone(room, socketId, rawZone) {
+  switchPlayerZone(room, socketId, rawZone, rawPortalHint = "") {
     if (!room || !socketId) {
       return { ok: false, error: "room not found" };
     }
@@ -2433,7 +2464,20 @@ export class RoomService {
     }
 
     const previousZone = normalizeRoomZone(player?.zone ?? "lobby", "lobby");
-    const nextState = getRoomZoneSpawnState(room, zone);
+    let nextState = getRoomZoneSpawnState(room, zone);
+    if (zone === "lobby") {
+      const portalHint = normalizeReturnPortalHint(rawPortalHint, "");
+      if (portalHint === "fps" || portalHint === "ox" || portalHint === "hall") {
+        const portalAnchoredState = getPortalAnchoredZoneSpawnState(
+          room,
+          portalHint,
+          ROOM_ZONE_STATE_BY_ID.lobby
+        );
+        if (portalAnchoredState) {
+          nextState = portalAnchoredState;
+        }
+      }
+    }
     const now = Date.now();
     const previousSeq = Math.max(0, Math.trunc(Number(player?.lastInputSeq) || 0));
 

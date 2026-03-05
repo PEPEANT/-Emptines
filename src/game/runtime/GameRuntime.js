@@ -10039,7 +10039,23 @@ export class GameRuntime {
       return;
     }
     const zone = this.normalizeRoomZone(this.requestedEntryZone, "");
-    if (!zone || zone === "lobby") {
+    const returnPortalHint = this.normalizeReturnPortalHint(this.returnEntryPortal, "");
+    if (!zone) {
+      return;
+    }
+    if (zone === "lobby") {
+      if (returnPortalHint !== "ox" && returnPortalHint !== "fps" && returnPortalHint !== "hall") {
+        return;
+      }
+      this.entryZoneSwitchRequested = true;
+      this.triggerPortalTransfer("lobby", {
+        immediate: true,
+        skipCooldown: true,
+        force: true,
+        transitionText: "대기방 복귀 위치 동기화 중...",
+        silent: true,
+        portalHint: returnPortalHint
+      });
       return;
     }
     this.entryZoneSwitchRequested = true;
@@ -10197,6 +10213,10 @@ export class GameRuntime {
     };
 
     const requestTimeoutMs = Math.max(1200, Math.trunc(Number(options?.timeoutMs) || 3200));
+    const switchPortalHint = this.normalizeReturnPortalHint(
+      options?.portalHint ?? options?.returnPortal,
+      ""
+    );
     let resolved = false;
     const trySwitchZone = () => {
       const timeoutId = window.setTimeout(() => {
@@ -10207,7 +10227,11 @@ export class GameRuntime {
         recoverFromFailedTransfer("존 전환 응답이 지연되었습니다. 다시 시도하세요.");
       }, requestTimeoutMs);
 
-      this.socket.emit("room:zone:switch", { zone: targetZone }, (response = {}) => {
+      const switchPayload = {
+        zone: targetZone,
+        ...(switchPortalHint ? { portalHint: switchPortalHint } : {})
+      };
+      this.socket.emit("room:zone:switch", switchPayload, (response = {}) => {
         if (resolved) {
           return;
         }
