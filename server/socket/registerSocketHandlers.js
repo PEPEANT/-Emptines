@@ -305,6 +305,10 @@ export function registerSocketHandlers({
         ack(ackFn, { ok: false, error: "player not in room" });
         return;
       }
+      if (!roomService.isHost(room, socket.id)) {
+        ack(ackFn, { ok: false, error: "host only" });
+        return;
+      }
 
       const result = roomService.setSurfacePaint(
         room,
