@@ -102,6 +102,7 @@ const NPC_GREETING_SESSION_KEY = "emptines_npc_greeting_seen_v1";
 const CITY_AD_BILLBOARD_BASE_PREFIX = "city_ad_board_";
 const OBJECT_EDITOR_SETTINGS_STORAGE_KEY = "objectEditorSettings_v1";
 const OBJECT_POSITIONS_STORAGE_KEY = "objPositions_v1";
+const HOST_LINK_FIXED_NAME = "HOST";
 const PORTAL_MOVABLE_IDS = Object.freeze({
   ox: "portal_ox",
   fps: "portal_fps",
@@ -507,6 +508,12 @@ export class GameRuntime {
       .toLowerCase();
     const hostFlagEnabled =
       hostQueryValue === "1" || hostQueryValue === "true" || hostQueryValue === "yes";
+    this.isHostEntryLink = hostFlagEnabled || Boolean(this.hostClaimKey);
+    this.hostEntryFixedName = HOST_LINK_FIXED_NAME;
+    if (this.isHostEntryLink) {
+      this.localPlayerName = this.hostEntryFixedName;
+      this.socketLinkGateMode = "host";
+    }
     // Auto-claim only for explicit host links (or when hostKey is present).
     this.autoHostClaimEnabled = hostFlagEnabled || Boolean(this.hostClaimKey);
     this.requestedEntryZone = this.normalizeRoomZone(
@@ -7248,6 +7255,24 @@ export class GameRuntime {
       return;
     }
 
+    if (this.isHostEntryLink) {
+      this.localPlayerName = this.hostEntryFixedName;
+      this.pendingPlayerNameSync = true;
+      this.pendingAuthoritativeStateSync = true;
+      this.flowStage = "city_live";
+      this.bridgeNpcPlayApproved = true;
+      this.playerPosition.copy(this.citySpawn);
+      this.yaw = this.getLookYaw(this.citySpawn, this.portalFloorPosition);
+      this.pitch = -0.02;
+      this.hubFlowUiEl?.classList.add("hidden");
+      this.hideNicknameGate();
+      this.hideNpcChoiceGate();
+      this.setMirrorGateVisible(false);
+      this.lastSafePosition.copy(this.playerPosition);
+      this.ensureEntryMusicPlayback();
+      return;
+    }
+
     // Keep bridge entry as default. Fast city rejoin is opt-in via query.
     let savedNickname = "";
     try { savedNickname = String(localStorage.getItem("emptines_nickname") ?? "").trim(); } catch (_) {}
@@ -9871,7 +9896,8 @@ export class GameRuntime {
   }
 
   syncPlayerNameIfConnected(options = null) {
-    const nextName = this.formatPlayerName(this.localPlayerName);
+    const preferredName = this.isHostEntryLink ? this.hostEntryFixedName : this.localPlayerName;
+    const nextName = this.formatPlayerName(preferredName);
     this.localPlayerName = nextName;
     if (!this.socket || !this.networkConnected) {
       this.pendingPlayerNameSync = true;
@@ -16057,7 +16083,7 @@ export class GameRuntime {
 
     this.socketEndpointValidationError = "";
     this.socketEndpointLinkRequired = false;
-    this.socketLinkGateMode = "player";
+    this.socketLinkGateMode = this.isHostEntryLink ? "host" : "player";
     const pushEndpointError = (message, linkRequired = false) => {
       this.socketEndpointValidationError = String(message ?? "").trim();
       this.socketEndpointLinkRequired = Boolean(linkRequired);
