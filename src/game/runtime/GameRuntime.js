@@ -12378,48 +12378,8 @@ export class GameRuntime {
   }
 
   rebuildPromoCollisionBoxes() {
-    const nextBoxes = [];
-    for (const entry of this.promoObjects.values()) {
-      const kind = this.normalizePromoKind(entry?.kind ?? "block", "block");
-      if (kind !== "block") {
-        continue;
-      }
-      const scale = THREE.MathUtils.clamp(Number(entry?.scale) || 1, PROMO_MIN_SCALE, PROMO_MAX_SCALE);
-      const width = PROMO_BLOCK_WIDTH * scale;
-      const height = PROMO_BLOCK_HEIGHT * scale;
-      const depth = PROMO_BLOCK_DEPTH * scale;
-      const centerX = Number(entry?.x);
-      const baseY = Number(entry?.y);
-      const centerZ = Number(entry?.z);
-      if (!Number.isFinite(centerX) || !Number.isFinite(baseY) || !Number.isFinite(centerZ)) {
-        continue;
-      }
-      const yaw = this.normalizePromoYaw(entry?.yaw, 0);
-      const halfW = width * 0.5;
-      const halfD = depth * 0.5;
-      const absCos = Math.abs(Math.cos(yaw));
-      const absSin = Math.abs(Math.sin(yaw));
-      const aabbHalfX = halfW * absCos + halfD * absSin;
-      const aabbHalfZ = halfW * absSin + halfD * absCos;
-      const platform = {
-        x: centerX,
-        y: baseY + height * 0.5,
-        z: centerZ,
-        w: aabbHalfX * 2,
-        h: height,
-        d: aabbHalfZ * 2
-      };
-      nextBoxes.push({
-        minX: centerX - aabbHalfX,
-        maxX: centerX + aabbHalfX,
-        minZ: centerZ - aabbHalfZ,
-        maxZ: centerZ + aabbHalfZ,
-        minY: baseY,
-        maxY: baseY + height,
-        platform
-      });
-    }
-    this.promoCollisionBoxes = nextBoxes;
+    // v1.1 hardening: promo objects stay visual-only to prevent griefing via collision traps.
+    this.promoCollisionBoxes = [];
   }
 
   openNearestPromoLink() {

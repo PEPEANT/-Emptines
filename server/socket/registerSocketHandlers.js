@@ -51,6 +51,163 @@ const PAINT_SOCKET_MAX_SURFACES = 18;
 const PAINT_SOCKET_MIN_INTERVAL_MS = 120;
 const PAINT_ROOM_WINDOW_MS = 3_000;
 const PAINT_ROOM_MAX_WRITES = 120;
+const DEFAULT_ANTI_ABUSE = Object.freeze({
+  maxConnectionsPerIp: 6,
+  connectionWindowMs: 60_000,
+  maxConnectionsPerWindowPerIp: 24,
+  promoWindowMs: 15_000,
+  promoMaxOpsPerSocketWindow: 14,
+  promoMaxOpsPerIpWindow: 40
+});
+
+function normalizeClientIp(rawValue) {
+  const text = String(rawValue ?? "").trim();
+  if (!text) {
+    return "unknown";
+  }
+  const first = text.split(",")[0]?.trim() ?? "";
+  if (!first) {
+    return "unknown";
+  }
+  if (first.startsWith("::ffff:")) {
+    return first.slice(7);
+  }
+  return first;
+}
+
+function getSocketClientIp(socket) {
+  const forwardedFor = socket?.handshake?.headers?.["x-forwarded-for"];
+  if (Array.isArray(forwardedFor) && forwardedFor.length > 0) {
+    return normalizeClientIp(forwardedFor[0]);
+  }
+  if (typeof forwardedFor === "string" && forwardedFor.trim()) {
+    return normalizeClientIp(forwardedFor);
+  }
+  return normalizeClientIp(socket?.handshake?.address ?? "");
+}
+
+function pruneRecent(now, recent = [], windowMs = 60_000) {
+  const lowerBound = now - Math.max(1_000, Math.trunc(Number(windowMs) || 60_000));
+  let start = 0;
+  for (; start < recent.length; start += 1) {
+    if (Number(recent[start]) >= lowerBound) {
+      break;
+    }
+  }
+  if (start > 0) {
+    recent.splice(0, start);
+  }
+}
+
+function reserveConnectionSlotByIp({
+  map,
+  clientIp,
+  socketId,
+  now = Date.now(),
+  antiAbuse = DEFAULT_ANTI_ABUSE
+}) {
+  const ipKey = normalizeClientIp(clientIp);
+  const state = map.get(ipKey) ?? { active: new Set(), recent: [] };
+  const maxConnectionsPerIp = Math.max(
+    1,
+    Math.trunc(Number(antiAbuse?.maxConnectionsPerIp) || DEFAULT_ANTI_ABUSE.maxConnectionsPerIp)
+  );
+  const connectionWindowMs = Math.max(
+    1_000,
+    Math.trunc(Number(antiAbuse?.connectionWindowMs) || DEFAULT_ANTI_ABUSE.connectionWindowMs)
+  );
+  const maxConnectionsPerWindowPerIp = Math.max(
+    2,
+    Math.trunc(
+      Number(antiAbuse?.maxConnectionsPerWindowPerIp) ||
+        DEFAULT_ANTI_ABUSE.maxConnectionsPerWindowPerIp
+    )
+  );
+
+  pruneRecent(now, state.recent, connectionWindowMs);
+  state.recent.push(now);
+  if (state.recent.length > maxConnectionsPerWindowPerIp) {
+    map.set(ipKey, state);
+    return { ok: false, error: "ip connect rate limited", ip: ipKey };
+  }
+  if (state.active.size >= maxConnectionsPerIp) {
+    map.set(ipKey, state);
+    return { ok: false, error: "ip concurrent limit reached", ip: ipKey };
+  }
+
+  state.active.add(String(socketId ?? "").trim());
+  map.set(ipKey, state);
+  return { ok: true, ip: ipKey };
+}
+
+function releaseConnectionSlotByIp(map, clientIp, socketId) {
+  const ipKey = normalizeClientIp(clientIp);
+  const state = map.get(ipKey);
+  if (!state) {
+    return;
+  }
+  state.active?.delete?.(String(socketId ?? "").trim());
+  pruneRecent(Date.now(), state.recent, DEFAULT_ANTI_ABUSE.connectionWindowMs);
+  if ((state.active?.size ?? 0) <= 0 && (!Array.isArray(state.recent) || state.recent.length <= 0)) {
+    map.delete(ipKey);
+    return;
+  }
+  map.set(ipKey, state);
+}
+
+function consumePromoOperationBudget({
+  socketState,
+  ipStateMap,
+  clientIp = "",
+  isHost = false,
+  antiAbuse = DEFAULT_ANTI_ABUSE,
+  now = Date.now()
+}) {
+  if (isHost) {
+    return { ok: true };
+  }
+  const promoWindowMs = Math.max(
+    1_000,
+    Math.trunc(Number(antiAbuse?.promoWindowMs) || DEFAULT_ANTI_ABUSE.promoWindowMs)
+  );
+  const promoMaxOpsPerSocketWindow = Math.max(
+    1,
+    Math.trunc(
+      Number(antiAbuse?.promoMaxOpsPerSocketWindow) ||
+        DEFAULT_ANTI_ABUSE.promoMaxOpsPerSocketWindow
+    )
+  );
+  const promoMaxOpsPerIpWindow = Math.max(
+    1,
+    Math.trunc(Number(antiAbuse?.promoMaxOpsPerIpWindow) || DEFAULT_ANTI_ABUSE.promoMaxOpsPerIpWindow)
+  );
+
+  const local = socketState ?? {};
+  const localWindowStart = Number(local.windowStart) || 0;
+  if (localWindowStart <= 0 || now - localWindowStart > promoWindowMs) {
+    local.windowStart = now;
+    local.count = 0;
+  }
+  local.count = Math.max(0, Math.trunc(Number(local.count) || 0)) + 1;
+  if (local.count > promoMaxOpsPerSocketWindow) {
+    return { ok: false, error: "promo rate limited" };
+  }
+
+  const ipKey = normalizeClientIp(clientIp);
+  const ipState = ipStateMap.get(ipKey) ?? { windowStart: now, count: 0 };
+  const ipWindowStart = Number(ipState.windowStart) || 0;
+  if (ipWindowStart <= 0 || now - ipWindowStart > promoWindowMs) {
+    ipState.windowStart = now;
+    ipState.count = 0;
+  }
+  ipState.count = Math.max(0, Math.trunc(Number(ipState.count) || 0)) + 1;
+  ipStateMap.set(ipKey, ipState);
+  if (ipState.count > promoMaxOpsPerIpWindow) {
+    return { ok: false, error: "promo ip flood detected" };
+  }
+
+  return { ok: true };
+}
 
 function consumeSurfacePaintBudget({
   socketState,
@@ -122,13 +279,80 @@ export function registerSocketHandlers({
   log = console
 }) {
   const roomPaintRateState = new Map();
+  const connectionStateByIp = new Map();
+  const promoOpRateStateByIp = new Map();
+  const antiAbuse = {
+    maxConnectionsPerIp: Math.max(
+      1,
+      Math.trunc(
+        Number(config?.antiAbuse?.maxConnectionsPerIp) || DEFAULT_ANTI_ABUSE.maxConnectionsPerIp
+      )
+    ),
+    connectionWindowMs: Math.max(
+      1_000,
+      Math.trunc(
+        Number(config?.antiAbuse?.connectionWindowMs) || DEFAULT_ANTI_ABUSE.connectionWindowMs
+      )
+    ),
+    maxConnectionsPerWindowPerIp: Math.max(
+      2,
+      Math.trunc(
+        Number(config?.antiAbuse?.maxConnectionsPerWindowPerIp) ||
+          DEFAULT_ANTI_ABUSE.maxConnectionsPerWindowPerIp
+      )
+    ),
+    promoWindowMs: Math.max(
+      1_000,
+      Math.trunc(Number(config?.antiAbuse?.promoWindowMs) || DEFAULT_ANTI_ABUSE.promoWindowMs)
+    ),
+    promoMaxOpsPerSocketWindow: Math.max(
+      1,
+      Math.trunc(
+        Number(config?.antiAbuse?.promoMaxOpsPerSocketWindow) ||
+          DEFAULT_ANTI_ABUSE.promoMaxOpsPerSocketWindow
+      )
+    ),
+    promoMaxOpsPerIpWindow: Math.max(
+      1,
+      Math.trunc(
+        Number(config?.antiAbuse?.promoMaxOpsPerIpWindow) || DEFAULT_ANTI_ABUSE.promoMaxOpsPerIpWindow
+      )
+    )
+  };
 
   io.on("connection", (socket) => {
+    const connectedAt = Date.now();
+    const clientIp = getSocketClientIp(socket);
+    const connectionSlotResult = reserveConnectionSlotByIp({
+      map: connectionStateByIp,
+      clientIp,
+      socketId: socket.id,
+      now: connectedAt,
+      antiAbuse
+    });
+    if (!connectionSlotResult.ok) {
+      const reason = String(connectionSlotResult.error ?? "connection blocked").trim();
+      log?.warn?.(
+        `[guard] connection denied ip=${clientIp} socket=${socket.id} reason=${reason}`
+      );
+      socket.emit("session:blocked", { reason });
+      try {
+        socket.disconnect(true);
+      } catch {
+        // ignore disconnect errors
+      }
+      return;
+    }
+
     const socketPaintRateState = {
       windowStart: 0,
       count: 0,
       lastAt: 0,
       surfaces: new Set()
+    };
+    const socketPromoRateState = {
+      windowStart: 0,
+      count: 0
     };
 
     const emitSurfacePaintState = () => {
@@ -248,6 +472,7 @@ export function registerSocketHandlers({
     socket.data.playerName = randomDefaultName();
     socket.data.roomCode = null;
     socket.data.playerKey = "";
+    socket.data.clientIp = clientIp;
     worldRuntime?.onPlayerConnected(socket);
 
     log.log(`[+] player connected (${online}) ${socket.id}`);
@@ -1083,6 +1308,17 @@ export function registerSocketHandlers({
         ack(ackFn, { ok: false, error: "player not in room" });
         return;
       }
+      const promoGuard = consumePromoOperationBudget({
+        socketState: socketPromoRateState,
+        ipStateMap: promoOpRateStateByIp,
+        clientIp: socket.data.clientIp ?? clientIp,
+        isHost: roomService.isHost(room, socket.id),
+        antiAbuse
+      });
+      if (!promoGuard.ok) {
+        ack(ackFn, promoGuard);
+        return;
+      }
       const ownerKey = sanitizeOwnerKey(socket.data.playerKey ?? "");
       if (!ownerKey || ownerKey.length < 8) {
         ack(ackFn, { ok: false, error: "owner key required" });
@@ -1119,6 +1355,17 @@ export function registerSocketHandlers({
       }
       if (!room.players?.has?.(socket.id)) {
         ack(ackFn, { ok: false, error: "player not in room" });
+        return;
+      }
+      const promoGuard = consumePromoOperationBudget({
+        socketState: socketPromoRateState,
+        ipStateMap: promoOpRateStateByIp,
+        clientIp: socket.data.clientIp ?? clientIp,
+        isHost: roomService.isHost(room, socket.id),
+        antiAbuse
+      });
+      if (!promoGuard.ok) {
+        ack(ackFn, promoGuard);
         return;
       }
       const ownerKey = sanitizeOwnerKey(socket.data.playerKey ?? "");
@@ -1176,10 +1423,12 @@ export function registerSocketHandlers({
     });
 
     socket.on("disconnecting", () => {
+      releaseConnectionSlotByIp(connectionStateByIp, socket.data.clientIp ?? clientIp, socket.id);
       roomService.leaveCurrentRoom(socket);
     });
 
     socket.on("disconnect", () => {
+      releaseConnectionSlotByIp(connectionStateByIp, socket.data.clientIp ?? clientIp, socket.id);
       const remaining = playerCounter.decrement();
       worldRuntime?.onPlayerDisconnected(socket);
       log.log(`[-] player disconnected (${remaining}) ${socket.id}`);

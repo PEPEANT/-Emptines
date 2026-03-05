@@ -10,6 +10,14 @@ export const DEFAULT_SURFACE_PAINT_SAVE_DEBOUNCE_MS = 300;
 export const DEFAULT_MAX_SOCKET_PAYLOAD_BYTES = 35_000_000;
 export const DEFAULT_STATIC_CLIENT_DIR = "dist";
 export const DEFAULT_MAP_LAYOUT_VERSION = "2026-03-04-layout-v1";
+export const DEFAULT_ANTI_ABUSE_CONFIG = Object.freeze({
+  maxConnectionsPerIp: 6,
+  connectionWindowMs: 60_000,
+  maxConnectionsPerWindowPerIp: 24,
+  promoWindowMs: 15_000,
+  promoMaxOpsPerSocketWindow: 14,
+  promoMaxOpsPerIpWindow: 40
+});
 
 const DEFAULT_MAX_ROOM_PLAYERS = 120;
 const MIN_ROOM_PLAYERS = 16;
@@ -300,6 +308,56 @@ export function loadRuntimeConfig(env = process.env) {
         DEFAULT_SNAPSHOT_CONFIG.minPitchDelta,
         0.0001,
         0.4
+      )
+    },
+    antiAbuse: {
+      maxConnectionsPerIp: Math.trunc(
+        parseBoundedNumber(
+          env.ABUSE_MAX_CONNECTIONS_PER_IP,
+          DEFAULT_ANTI_ABUSE_CONFIG.maxConnectionsPerIp,
+          1,
+          64
+        )
+      ),
+      connectionWindowMs: Math.trunc(
+        parseBoundedNumber(
+          env.ABUSE_CONNECTION_WINDOW_MS,
+          DEFAULT_ANTI_ABUSE_CONFIG.connectionWindowMs,
+          1_000,
+          10 * 60 * 1000
+        )
+      ),
+      maxConnectionsPerWindowPerIp: Math.trunc(
+        parseBoundedNumber(
+          env.ABUSE_MAX_CONNECTIONS_PER_WINDOW_PER_IP,
+          DEFAULT_ANTI_ABUSE_CONFIG.maxConnectionsPerWindowPerIp,
+          2,
+          500
+        )
+      ),
+      promoWindowMs: Math.trunc(
+        parseBoundedNumber(
+          env.ABUSE_PROMO_WINDOW_MS,
+          DEFAULT_ANTI_ABUSE_CONFIG.promoWindowMs,
+          1_000,
+          2 * 60 * 1000
+        )
+      ),
+      promoMaxOpsPerSocketWindow: Math.trunc(
+        parseBoundedNumber(
+          env.ABUSE_PROMO_MAX_OPS_PER_SOCKET_WINDOW,
+          DEFAULT_ANTI_ABUSE_CONFIG.promoMaxOpsPerSocketWindow,
+          1,
+          500
+        )
+      ),
+      promoMaxOpsPerIpWindow: Math.trunc(
+        parseBoundedNumber(
+          env.ABUSE_PROMO_MAX_OPS_PER_IP_WINDOW,
+          DEFAULT_ANTI_ABUSE_CONFIG.promoMaxOpsPerIpWindow,
+          1,
+          2_000
+        )
       )
     },
     port,

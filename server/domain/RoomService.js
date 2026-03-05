@@ -53,12 +53,14 @@ const CITY_OBJECT_REAR_MIGRATION_MIN_Z = 72;
 const CITY_OBJECT_ID_PATTERN =
   /^city_(?:tower|mega_tower|kiosk|block|outer_block|bridge_block)_\d+$/;
 const PROMO_OWNER_KEY_PATTERN = /^[a-zA-Z0-9:_-]{8,96}$/;
-const MAX_PROMO_OBJECTS = 1200;
+const MAX_PROMO_OBJECTS = 300;
 const MAX_PROMO_NAME_CHARS = 48;
 const MAX_PROMO_URL_CHARS = 2048;
 const MAX_PROMO_MEDIA_DATA_URL_CHARS = 9_000_000;
 const PROMO_MIN_SCALE = 0.35;
 const PROMO_MAX_SCALE = 2.85;
+const PROMO_MIN_Y = -1.5;
+const PROMO_MAX_Y = 6.5;
 const PROMO_BLOCK_WIDTH = 2.8;
 const PROMO_BLOCK_DEPTH = 1.8;
 const PROMO_BLOCK_BASE_RADIUS = Math.hypot(PROMO_BLOCK_WIDTH * 0.5, PROMO_BLOCK_DEPTH * 0.5);
@@ -1332,7 +1334,7 @@ export class RoomService {
       ownerName: normalizePromoName(source.ownerName ?? fallback?.ownerName ?? "PLAYER"),
       kind: normalizePromoKind(source.kind ?? fallback?.kind ?? "block"),
       x: normalizePromoAxis(source.x, fallback?.x ?? 0),
-      y: normalizePromoAxis(source.y, fallback?.y ?? 0, -100, 400),
+      y: normalizePromoAxis(source.y, fallback?.y ?? 0, PROMO_MIN_Y, PROMO_MAX_Y),
       z: normalizePromoAxis(source.z, fallback?.z ?? 0),
       yaw: normalizePromoYaw(source.yaw, fallback?.yaw ?? 0),
       scale: normalizePromoScale(source.scale, fallback?.scale ?? 1),
