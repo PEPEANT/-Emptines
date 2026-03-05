@@ -614,6 +614,7 @@ export class GameRuntime {
     this.chalkColorButtons = [];
     this.toolButtons = [];
     this.mobileUiEl = document.getElementById("mobile-ui");
+    this.mobileActionsEl = document.getElementById("mobile-actions");
     this.mobileMovePadEl = document.getElementById("mobile-move-pad");
     this.mobileMoveStickEl = document.getElementById("mobile-move-stick");
     this.mobilePromoPlaceBtnEl = document.getElementById("mobile-promo-place");
@@ -621,6 +622,9 @@ export class GameRuntime {
     this.mobileSprintBtnEl = document.getElementById("mobile-sprint");
     this.mobileChatBtnEl = document.getElementById("mobile-chat");
     this.mobilePaintBtnEl = document.getElementById("mobile-paint");
+    this.mobilePromoScaleWrapEl = document.getElementById("mobile-promo-scale-wrap");
+    this.mobilePromoScaleInputEl = document.getElementById("mobile-promo-scale");
+    this.mobilePromoScaleValueEl = document.getElementById("mobile-promo-scale-value");
     this.mobileRotateOverlayEl = document.getElementById("mobile-rotate-overlay");
     this.fullscreenToggleBtnEl = document.getElementById("fullscreen-toggle");
     this.graphicsToggleBtnEl = document.getElementById("graphics-toggle");
@@ -6582,7 +6586,7 @@ export class GameRuntime {
     this.requestPromoUpsert({ placeInFront: true, preserveExistingStyle: true });
   }
 
-  requestPromoRemoveFromSurfacePainter({ startPlacementPreview = true } = {}) {
+  requestPromoRemoveFromSurfacePainter({ startPlacementPreview = false } = {}) {
     const blockedReason = this.getSurfacePainterPromoBlockedReason();
     if (blockedReason) {
       this.appendChatLine("", blockedReason, "system");
@@ -6642,7 +6646,8 @@ export class GameRuntime {
   handleSurfacePainterDeleteAction() {
     const promoOwnerKey = this.getSurfacePainterPromoOwnerKey();
     if (promoOwnerKey) {
-      this.requestPromoRemoveFromSurfacePainter({ startPlacementPreview: true });
+      // Mobile flow: deleting from the painter should not reopen the legacy promo panel.
+      this.requestPromoRemoveFromSurfacePainter({ startPlacementPreview: false });
       return;
     }
     this.clearSurfacePainterCanvas();
@@ -6715,7 +6720,11 @@ export class GameRuntime {
 
     if (this.surfacePainterPromoShareToggleBtnEl) {
       const promoTarget = this.getSurfacePainterPromoTarget();
-      const nextAllow = Boolean(promoTarget?.allowOthersDraw);
+      const isOwnPromoSurface = promoOwnerKey === String(this.promoOwnerKey ?? "");
+      const nextAllow =
+        isOwnPromoSurface && typeof this.promoAllowOthersDrawDraft === "boolean"
+          ? this.promoAllowOthersDrawDraft
+          : Boolean(promoTarget?.allowOthersDraw);
       const showShareToggle = showPromoButtons;
       this.surfacePainterPromoShareToggleBtnEl.classList.toggle("hidden", !showShareToggle);
       this.surfacePainterPromoShareToggleBtnEl.textContent = nextAllow
@@ -7820,6 +7829,18 @@ export class GameRuntime {
     }
     if (this.mobilePromoPlaceBtnEl) {
       this.mobilePromoPlaceBtnEl.disabled = !visible;
+    }
+    const previewScaleVisible = visible && this.promoPlacementPreviewActive && !this.getOwnPromoObject();
+    if (this.mobilePromoScaleWrapEl) {
+      this.mobilePromoScaleWrapEl.classList.toggle("hidden", !previewScaleVisible);
+    }
+    if (this.mobilePromoScaleInputEl) {
+      const scaleControlDisabled =
+        !previewScaleVisible ||
+        !(this.socket && this.networkConnected) ||
+        this.promoSetInFlight ||
+        this.promoRemoveInFlight;
+      this.mobilePromoScaleInputEl.disabled = scaleControlDisabled;
     }
     if (!visible) {
       this.resetMobileControlInputState();
@@ -11047,6 +11068,14 @@ export class GameRuntime {
       const safeScale = Number.isFinite(currentScale) ? currentScale : scaleValue;
       this.promoScaleValueEl.textContent = `${safeScale.toFixed(2)}x`;
     }
+    if (this.mobilePromoScaleInputEl && document.activeElement !== this.mobilePromoScaleInputEl) {
+      this.mobilePromoScaleInputEl.value = String(scaleValue.toFixed(2));
+    }
+    if (this.mobilePromoScaleValueEl) {
+      const currentMobileScale = Number(this.mobilePromoScaleInputEl?.value);
+      const safeMobileScale = Number.isFinite(currentMobileScale) ? currentMobileScale : scaleValue;
+      this.mobilePromoScaleValueEl.textContent = `${safeMobileScale.toFixed(2)}x`;
+    }
     if (this.promoLinkInputEl && document.activeElement !== this.promoLinkInputEl) {
       this.promoLinkInputEl.value = linkValue;
     }
@@ -11414,6 +11443,9 @@ export class GameRuntime {
     }
     if (syncUi) {
       this.syncPromoPanelUi();
+      if (this.mobileEnabled) {
+        this.syncMobileUiState();
+      }
     }
   }
 
@@ -11466,13 +11498,13 @@ export class GameRuntime {
     this.promoPlacementPreviewActive = true;
     this.promoPlacementPreviewBlockReason = "";
     this.promoPlacementPreviewTransform = null;
-    if (this.mobileEnabled && !this.promoPanelMobileOpen) {
-      this.setPromoPanelMobileOpen(true, { syncMobileUi: true });
-    }
     this.ensurePromoPlacementPreviewMesh();
     this.updatePromoPlacementPreview();
     if (syncUi) {
       this.syncPromoPanelUi();
+      if (this.mobileEnabled) {
+        this.syncMobileUiState();
+      }
     }
     if (announce) {
       this.appendChatLine(
@@ -14368,9 +14400,6 @@ export class GameRuntime {
         if (!this.mobileEnabled || !this.canMovePlayer()) {
           return;
         }
-        if (!this.promoPanelMobileOpen) {
-          this.setPromoPanelMobileOpen(true, { syncMobileUi: true });
-        }
         this.requestPromoUpsert({ placeInFront: true, preserveExistingStyle: true });
       });
     }
@@ -14380,7 +14409,42 @@ export class GameRuntime {
         if (this.promoScaleValueEl && Number.isFinite(value)) {
           this.promoScaleValueEl.textContent = `${value.toFixed(2)}x`;
         }
+        if (
+          this.mobilePromoScaleInputEl &&
+          Number.isFinite(value) &&
+          document.activeElement !== this.mobilePromoScaleInputEl
+        ) {
+          this.mobilePromoScaleInputEl.value = value.toFixed(2);
+        }
+        if (this.mobilePromoScaleValueEl && Number.isFinite(value)) {
+          this.mobilePromoScaleValueEl.textContent = `${value.toFixed(2)}x`;
+        }
         if (this.promoPlacementPreviewActive) {
+          this.promoPlacementPreviewCurrentScale = Number.isFinite(value)
+            ? value
+            : this.promoPlacementPreviewCurrentScale;
+          this.updatePromoPlacementPreview();
+          this.syncPromoPanelUi();
+        }
+      });
+    }
+    if (this.mobilePromoScaleInputEl) {
+      this.mobilePromoScaleInputEl.addEventListener("input", () => {
+        const value = Number(this.mobilePromoScaleInputEl?.value);
+        if (!Number.isFinite(value)) {
+          return;
+        }
+        if (this.promoScaleInputEl && document.activeElement !== this.promoScaleInputEl) {
+          this.promoScaleInputEl.value = value.toFixed(2);
+        }
+        if (this.promoScaleValueEl) {
+          this.promoScaleValueEl.textContent = `${value.toFixed(2)}x`;
+        }
+        if (this.mobilePromoScaleValueEl) {
+          this.mobilePromoScaleValueEl.textContent = `${value.toFixed(2)}x`;
+        }
+        if (this.promoPlacementPreviewActive) {
+          this.promoPlacementPreviewCurrentScale = value;
           this.updatePromoPlacementPreview();
           this.syncPromoPanelUi();
         }
@@ -15111,6 +15175,9 @@ export class GameRuntime {
     if (!this.mobileUiEl) {
       this.mobileUiEl = document.getElementById("mobile-ui");
     }
+    if (!this.mobileActionsEl) {
+      this.mobileActionsEl = document.getElementById("mobile-actions");
+    }
     if (!this.mobileMovePadEl) {
       this.mobileMovePadEl = document.getElementById("mobile-move-pad");
     }
@@ -15131,6 +15198,15 @@ export class GameRuntime {
     }
     if (!this.mobilePaintBtnEl) {
       this.mobilePaintBtnEl = document.getElementById("mobile-paint");
+    }
+    if (!this.mobilePromoScaleWrapEl) {
+      this.mobilePromoScaleWrapEl = document.getElementById("mobile-promo-scale-wrap");
+    }
+    if (!this.mobilePromoScaleInputEl) {
+      this.mobilePromoScaleInputEl = document.getElementById("mobile-promo-scale");
+    }
+    if (!this.mobilePromoScaleValueEl) {
+      this.mobilePromoScaleValueEl = document.getElementById("mobile-promo-scale-value");
     }
     if (!this.mobileRotateOverlayEl) {
       this.mobileRotateOverlayEl = document.getElementById("mobile-rotate-overlay");

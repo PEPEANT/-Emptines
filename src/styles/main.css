@@ -1521,6 +1521,37 @@ canvas {
   pointer-events: auto;
 }
 
+#mobile-promo-scale-wrap {
+  position: fixed;
+  left: 50%;
+  top: auto;
+  bottom: max(56px, calc(env(safe-area-inset-bottom, 0px) + 52px));
+  transform: translateX(-50%);
+  min-width: min(90vw, 320px);
+  padding: 7px 11px;
+  border: 1px solid rgba(172, 204, 233, 0.66);
+  border-radius: 999px;
+  background: rgba(10, 24, 39, 0.9);
+  display: grid;
+  grid-template-columns: auto minmax(110px, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  z-index: 67;
+  pointer-events: auto;
+}
+
+#mobile-promo-scale-wrap label,
+#mobile-promo-scale-value {
+  color: #e1f1ff;
+  font: 700 0.58rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+#mobile-promo-scale {
+  width: 100%;
+}
+
 .mobile-action-btn {
   min-width: 88px;
   height: 38px;
@@ -2633,6 +2664,19 @@ body.is-mobile-ui #mobile-move-stick {
     height: 28px;
     font-size: 0.58rem;
     letter-spacing: 0.03em;
+  }
+
+  #mobile-promo-scale-wrap {
+    min-width: min(92vw, 300px);
+    padding: 6px 9px;
+    gap: 6px;
+    bottom: max(52px, calc(env(safe-area-inset-bottom, 0px) + 48px));
+  }
+
+  #mobile-promo-scale-wrap label,
+  #mobile-promo-scale-value {
+    font-size: 0.54rem;
+    letter-spacing: 0.04em;
   }
 
   #settings-panel {
