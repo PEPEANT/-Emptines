@@ -9291,48 +9291,20 @@ export class GameRuntime {
   buildReturnPortalSpawnState(portalHint = "") {
     this.syncPortalAnchorsFromMovableObjects({ force: true });
     const normalizedHint = this.normalizeReturnPortalHint(portalHint, "");
-    const isOx = normalizedHint === "ox";
-    const isFps = normalizedHint === "fps";
-    const isHall = normalizedHint === "hall";
-    if (!isOx && !isFps && !isHall) {
+    if (normalizedHint !== "ox" && normalizedHint !== "fps" && normalizedHint !== "hall") {
       return null;
     }
 
-    const portalPosition = isFps
-      ? this.aZonePortalFloorPosition
-      : isHall
-        ? this.hallPortalFloorPosition
-        : this.portalFloorPosition;
-    const rawPortalRadius = Number(
-      isFps ? this.aZonePortalRadius : isHall ? this.hallPortalRadius : this.portalRadius
-    );
-    const portalRadius = Number.isFinite(rawPortalRadius) ? rawPortalRadius : 4.4;
-    if (!portalPosition || !Number.isFinite(portalPosition.x) || !Number.isFinite(portalPosition.z)) {
-      return null;
-    }
-
-    const directionToCity = new THREE.Vector3(
-      this.citySpawn.x - portalPosition.x,
-      0,
-      this.citySpawn.z - portalPosition.z
-    );
-    if (directionToCity.lengthSq() < 0.0001) {
-      directionToCity.set(0, 0, 1);
-    } else {
-      directionToCity.normalize();
-    }
-
-    const spawnDistance = Math.max(5.2, portalRadius + 1.8);
+    // Unify all external return links to one central lobby spawn point.
     const spawnPosition = new THREE.Vector3(
-      portalPosition.x + directionToCity.x * spawnDistance,
+      Number(this.citySpawn?.x) || 0,
       GAME_CONSTANTS.PLAYER_HEIGHT,
-      portalPosition.z + directionToCity.z * spawnDistance
+      Number(this.citySpawn?.z) || -8
     );
-
     const lookTarget = new THREE.Vector3(
-      portalPosition.x,
+      Number(this.portalFloorPosition?.x) || 0,
       GAME_CONSTANTS.PLAYER_HEIGHT,
-      portalPosition.z
+      Number(this.portalFloorPosition?.z) || 22
     );
     const yaw = this.getLookYaw(spawnPosition, lookTarget);
 
