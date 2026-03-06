@@ -3002,7 +3002,7 @@ export class GameRuntime {
       portalGroup.rotation.y = this.portalYawRadians;
     } else {
       portalFacingDirection.normalize();
-      portalGroup.rotation.y = Math.atan2(portalFacingDirection.x, portalFacingDirection.z);
+      portalGroup.rotation.y = Math.atan2(portalFacingDirection.x, portalFacingDirection.z) + Math.PI;
       this.portalYawRadians = portalGroup.rotation.y;
     }
 
@@ -3105,7 +3105,8 @@ export class GameRuntime {
     } else {
       aZoneFacingDirection.normalize();
     }
-    aZonePortalGroup.rotation.y = Math.atan2(aZoneFacingDirection.x, aZoneFacingDirection.z);
+    aZonePortalGroup.rotation.y =
+      Math.atan2(aZoneFacingDirection.x, aZoneFacingDirection.z) + Math.PI;
 
     const aZonePortalBase = new THREE.Mesh(
       new THREE.TorusGeometry(aZonePortalRadius * 0.9, 0.22, 18, this.mobileEnabled ? 26 : 52),
@@ -3201,7 +3202,7 @@ export class GameRuntime {
     } else {
       hallFacingDirection.normalize();
     }
-    hallPortalGroup.rotation.y = Math.atan2(hallFacingDirection.x, hallFacingDirection.z);
+    hallPortalGroup.rotation.y = Math.atan2(hallFacingDirection.x, hallFacingDirection.z) + Math.PI;
 
     const hallPortalBase = new THREE.Mesh(
       new THREE.TorusGeometry(hallPortalRadius * 0.9, 0.22, 18, this.mobileEnabled ? 26 : 52),
@@ -19096,7 +19097,7 @@ export class GameRuntime {
 
   getDevicePixelRatioCap() {
     if (!this.mobileEnabled) {
-      return 1.25;
+      return 1.1;
     }
     return this.isLowSpecMobile ? 1.25 : 1.5;
   }
@@ -19124,10 +19125,10 @@ export class GameRuntime {
         : GAME_CONSTANTS.DYNAMIC_RESOLUTION.mobileMinRatio;
       this.dynamicResolution.enabled = true;
     } else {
-      const remoteHardCap = Math.min(this.baseRemoteHardCap, 28);
-      const meshDistance = Math.min(Math.sqrt(this.baseRemoteMeshDistanceSq), 84);
-      const labelDistance = Math.min(Math.sqrt(this.baseRemoteLabelDistanceSq), 26);
-      const farDistance = Math.min(Math.sqrt(this.baseRemoteFarDistanceSq), 46);
+      const remoteHardCap = Math.min(this.baseRemoteHardCap, 24);
+      const meshDistance = Math.min(Math.sqrt(this.baseRemoteMeshDistanceSq), 72);
+      const labelDistance = Math.min(Math.sqrt(this.baseRemoteLabelDistanceSq), 22);
+      const farDistance = Math.min(Math.sqrt(this.baseRemoteFarDistanceSq), 40);
       this.remoteHardCap = remoteHardCap;
       this.remoteMeshDistanceSq = Math.pow(meshDistance, 2);
       this.remoteLabelDistanceSq = Math.pow(labelDistance, 2);

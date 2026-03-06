@@ -49,7 +49,7 @@ export const BASE_VOID_PACK = {
         intensity: 0.86,
         position: [70, 130, 44],
         shadowMobileSize: 1024,
-        shadowDesktopSize: 1024,
+        shadowDesktopSize: 768,
         shadowBounds: 300,
         shadowNear: 1,
         shadowFar: 500,
