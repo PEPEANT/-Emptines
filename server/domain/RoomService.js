@@ -81,6 +81,7 @@ const PROMO_BLOCKED_PORTAL_ZONES = Object.freeze([
   Object.freeze({ x: -60, z: 0, radius: 6.4 }),
   Object.freeze({ x: 0, z: 22, radius: 6.2 })
 ]);
+const HOST_CONTROLLED_SURFACE_ID = "bridge_panel_12:nz";
 const CHAT_MESSAGE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,80}$/;
 const MAX_CHAT_MESSAGES = 5000;
 const MAX_CHAT_TEXT_CHARS = 200;
@@ -385,6 +386,10 @@ function normalizeSurfaceImageDataUrl(rawValue) {
   return value;
 }
 
+function isHostControlledSurfaceId(surfaceId = "") {
+  return String(surfaceId ?? "").trim().toLowerCase() === HOST_CONTROLLED_SURFACE_ID;
+}
+
 function normalizeSurfacePaintEntry(rawValue, fallbackUpdatedAt = Date.now()) {
   if (typeof rawValue === "string") {
     const imageDataUrl = normalizeSurfaceImageDataUrl(rawValue);
@@ -618,6 +623,26 @@ function createObjectEditorState() {
   };
 }
 
+function createSurfacePoliciesState(rawValue = null) {
+  const source = rawValue && typeof rawValue === "object" ? rawValue : {};
+  const bridgePanel12NzSource =
+    source.bridgePanel12Nz && typeof source.bridgePanel12Nz === "object"
+      ? source.bridgePanel12Nz
+      : source.bridge_panel_12_nz && typeof source.bridge_panel_12_nz === "object"
+        ? source.bridge_panel_12_nz
+        : {};
+  return {
+    bridgePanel12Nz: {
+      surfaceId: HOST_CONTROLLED_SURFACE_ID,
+      allowOthersDraw: normalizeBooleanFlag(bridgePanel12NzSource.allowOthersDraw, false),
+      updatedAt: Math.max(
+        0,
+        Math.trunc(Number(bridgePanel12NzSource.updatedAt) || Date.now())
+      )
+    }
+  };
+}
+
 function normalizeObjectEditorState(rawValue, fallback = null) {
   const source = rawValue && typeof rawValue === "object" ? rawValue : {};
   const base = fallback && typeof fallback === "object" ? fallback : createObjectEditorState();
@@ -837,6 +862,7 @@ function createPersistentRoom(code, defaultPortalTargetUrl, defaultAZonePortalTa
     rightBillboard: createRightBillboardState(),
     sharedMusic: createSharedMusicState(),
     securityTest: createSecurityTestState(),
+    surfacePolicies: createSurfacePoliciesState(),
     surfacePaint: new Map(),
     chatHistory: [],
     promoObjects: new Map(),
@@ -994,6 +1020,7 @@ export class RoomService {
     room.mainPortalAd = mainPortalAd;
     room.leftBillboard = leftBillboard;
     room.rightBillboard = rightBillboard;
+    room.surfacePolicies = createSurfacePoliciesState(parsed?.surfacePolicies ?? room.surfacePolicies);
     room.objectEditor = normalizeObjectEditorState(parsed?.objectEditor, room.objectEditor);
     if (shouldRestoreLayoutState) {
       const migratedObjectPositions = migrateCityObjectPositionsToRearBand(
@@ -1101,6 +1128,7 @@ export class RoomService {
       ropes: this.serializeRopes(room),
       ropeRevision: this.getRopeRevision(room),
       promoObjects: this.serializePromoObjects(room),
+      surfacePolicies: this.serializeSurfacePolicies(room),
       objectPositions: this.serializeObjectPositions(room),
       objectRevision: this.getObjectRevision(room),
       objectEditor: this.serializeObjectEditor(room),
@@ -1187,6 +1215,7 @@ export class RoomService {
       securityTest: this.serializeSecurityTest(room),
       objectEditor: this.serializeObjectEditor(room),
       promoObjects: this.serializePromoObjects(room),
+      surfacePolicies: this.serializeSurfacePolicies(room),
       players: Array.from(room.players.values()).map((player) => ({
         id: player.id,
         name: player.name,
@@ -1284,6 +1313,74 @@ export class RoomService {
     }
     room.objectEditor = normalizeObjectEditorState(room.objectEditor, room.objectEditor);
     return room.objectEditor;
+  }
+
+  getSurfacePolicies(room) {
+    if (!room || typeof room !== "object") {
+      return createSurfacePoliciesState();
+    }
+    room.surfacePolicies = createSurfacePoliciesState(room.surfacePolicies);
+    return room.surfacePolicies;
+  }
+
+  serializeSurfacePolicies(room) {
+    const policies = this.getSurfacePolicies(room);
+    return {
+      bridgePanel12Nz: {
+        surfaceId: HOST_CONTROLLED_SURFACE_ID,
+        allowOthersDraw: normalizeBooleanFlag(policies?.bridgePanel12Nz?.allowOthersDraw, false),
+        updatedAt: Math.max(
+          0,
+          Math.trunc(Number(policies?.bridgePanel12Nz?.updatedAt) || Date.now())
+        )
+      }
+    };
+  }
+
+  setSurfacePaintPolicy(room, rawSurfaceId, rawAllowOthersDraw) {
+    if (!room) {
+      return { ok: false, error: "room not found" };
+    }
+    const surfaceId = normalizeSurfaceId(rawSurfaceId);
+    if (!surfaceId) {
+      return { ok: false, error: "invalid surface id" };
+    }
+    if (!isHostControlledSurfaceId(surfaceId)) {
+      return { ok: false, error: "unsupported surface policy" };
+    }
+
+    const policies = this.getSurfacePolicies(room);
+    const previous = {
+      allowOthersDraw: normalizeBooleanFlag(policies?.bridgePanel12Nz?.allowOthersDraw, false),
+      updatedAt: Math.max(0, Math.trunc(Number(policies?.bridgePanel12Nz?.updatedAt) || 0))
+    };
+    const allowOthersDraw = normalizeBooleanFlag(rawAllowOthersDraw, previous.allowOthersDraw);
+    if (allowOthersDraw === previous.allowOthersDraw) {
+      return {
+        ok: true,
+        changed: false,
+        surfaceId: HOST_CONTROLLED_SURFACE_ID,
+        allowOthersDraw: previous.allowOthersDraw,
+        updatedAt: previous.updatedAt,
+        surfacePolicies: this.serializeSurfacePolicies(room)
+      };
+    }
+
+    const updatedAt = Date.now();
+    policies.bridgePanel12Nz = {
+      surfaceId: HOST_CONTROLLED_SURFACE_ID,
+      allowOthersDraw,
+      updatedAt
+    };
+    this.scheduleSurfacePaintSave();
+    return {
+      ok: true,
+      changed: true,
+      surfaceId: HOST_CONTROLLED_SURFACE_ID,
+      allowOthersDraw,
+      updatedAt,
+      surfacePolicies: this.serializeSurfacePolicies(room)
+    };
   }
 
   setObjectEditor(room, rawSettings, { persist = true } = {}) {
@@ -2154,7 +2251,7 @@ export class RoomService {
     return list;
   }
 
-  setSurfacePaint(room, rawSurfaceId, rawImageDataUrl, actorOwnerKey = "") {
+  setSurfacePaint(room, rawSurfaceId, rawImageDataUrl, actorOwnerKey = "", actorIsHost = false) {
     if (!room) {
       return { ok: false, error: "room not found" };
     }
@@ -2180,6 +2277,13 @@ export class RoomService {
       const allowOthersDraw = normalizeBooleanFlag(promoEntry?.allowOthersDraw, false);
       if (actorKey !== promoOwnerKey && !allowOthersDraw) {
         return { ok: false, error: "owner denied edits" };
+      }
+    }
+    if (isHostControlledSurfaceId(surfaceId) && !actorIsHost) {
+      const policies = this.getSurfacePolicies(room);
+      const allowOthersDraw = normalizeBooleanFlag(policies?.bridgePanel12Nz?.allowOthersDraw, false);
+      if (!allowOthersDraw) {
+        return { ok: false, error: "host locked surface" };
       }
     }
 

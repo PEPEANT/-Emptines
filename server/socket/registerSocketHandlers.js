@@ -1009,7 +1009,8 @@ export function registerSocketHandlers({
         room,
         payload?.surfaceId,
         payload?.imageDataUrl ?? payload?.dataUrl ?? "",
-        socket.data.playerKey ?? ""
+        socket.data.playerKey ?? "",
+        isHost
       );
       if (!result.ok) {
         ack(ackFn, result);
@@ -1034,6 +1035,65 @@ export function registerSocketHandlers({
         surfaceId: result.surfaceId,
         imageDataUrl: result.imageDataUrl,
         updatedAt: result.updatedAt
+      });
+    });
+
+    socket.on("paint:surface:policy:set", async (payload = {}, ackFn) => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        ack(ackFn, { ok: false, error: "room not found" });
+        return;
+      }
+      if (!room.players?.has?.(socket.id)) {
+        ack(ackFn, { ok: false, error: "player not in room" });
+        return;
+      }
+      const isHost = roomService.isHost(room, socket.id);
+      if (!isHost) {
+        ack(ackFn, { ok: false, error: "host only" });
+        return;
+      }
+
+      const persistenceError = getPersistentStateBlockReason(config, "surface paint");
+      if (persistenceError) {
+        ack(ackFn, { ok: false, error: persistenceError });
+        return;
+      }
+      const paintModeError = getFeatureModeBlockReason(
+        config?.surfacePaintMode,
+        "surface paint",
+        isHost
+      );
+      if (paintModeError) {
+        ack(ackFn, { ok: false, error: paintModeError });
+        return;
+      }
+
+      const result = roomService.setSurfacePaintPolicy(
+        room,
+        payload?.surfaceId ?? "",
+        payload?.allowOthersDraw
+      );
+      if (!result.ok) {
+        ack(ackFn, result);
+        return;
+      }
+
+      if (result.changed) {
+        roomService.emitRoomUpdate(room);
+      }
+
+      if (!(await flushPersistentStateIfRequested(payload, ackFn, "surface paint policy"))) {
+        return;
+      }
+
+      ack(ackFn, {
+        ok: true,
+        changed: Boolean(result.changed),
+        surfaceId: result.surfaceId,
+        allowOthersDraw: Boolean(result.allowOthersDraw),
+        updatedAt: result.updatedAt,
+        surfacePolicies: result.surfacePolicies ?? null
       });
     });
 

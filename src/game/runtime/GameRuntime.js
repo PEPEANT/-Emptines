@@ -99,6 +99,7 @@ const ROOM_ZONE_LABELS = Object.freeze({
 const A_ZONE_FIXED_PORTAL_IMAGE_URL = new URL("../../../png/REC_FPS.png", import.meta.url).href;
 const HALL_FIXED_PORTAL_IMAGE_URL = new URL("../../../png/PER.png", import.meta.url).href;
 const BOX_FACE_KEYS = ["px", "nx", "py", "ny", "pz", "nz"];
+const HOST_CONTROLLED_BRIDGE_SURFACE_ID = "bridge_panel_12:nz";
 const NPC_GREETING_SESSION_KEY = "emptines_npc_greeting_seen_v1";
 const CITY_AD_BILLBOARD_BASE_PREFIX = "city_ad_board_";
 const OBJECT_EDITOR_SETTINGS_STORAGE_KEY = "objectEditorSettings_v1";
@@ -384,6 +385,14 @@ export class GameRuntime {
       persistentStateAvailable: null,
       persistentStateReason: ""
     };
+    this.surfacePaintPolicyState = {
+      bridgePanel12Nz: {
+        surfaceId: HOST_CONTROLLED_BRIDGE_SURFACE_ID,
+        allowOthersDraw: false,
+        updatedAt: 0
+      }
+    };
+    this.surfacePaintPolicySetInFlight = false;
     this.hostCustomBlockPlacementPreviewActive = false;
     this.hostCustomBlockPlacementPreviewMesh = null;
     this.hostCustomBlockPlacementPreviewTargetId = "";
@@ -6384,6 +6393,9 @@ export class GameRuntime {
       if (!surfaceId || !this.paintableSurfaceMap.has(surfaceId)) {
         continue;
       }
+      if (!this.canCurrentPlayerEditSurfacePaint(surfaceId)) {
+        continue;
+      }
       raycastTarget = {
         surfaceId,
         distance: intersection.distance
@@ -6392,6 +6404,9 @@ export class GameRuntime {
     }
     const adBoardTarget = this.getCityAdBillboardProximityTarget(this.mobileEnabled ? 20 : 12.5);
     if (adBoardTarget) {
+      if (!this.canCurrentPlayerEditSurfacePaint(adBoardTarget.surfaceId)) {
+        return raycastTarget;
+      }
       if (raycastTarget) {
         const rayIsBillboard = this.isCityMainAdBillboardSurface(raycastTarget.surfaceId);
         if (rayIsBillboard) {
@@ -6484,6 +6499,9 @@ export class GameRuntime {
       }
       const surfaceId = `${baseId}:${faceKey}`;
       if (!this.paintableSurfaceMap.has(surfaceId)) {
+        continue;
+      }
+      if (!this.canCurrentPlayerEditSurfacePaint(surfaceId)) {
         continue;
       }
 
@@ -6643,6 +6661,11 @@ export class GameRuntime {
       this.getSurfacePaintTarget(this.mobileEnabled ? 14 : 6.2);
     const surfaceId = String(target?.surfaceId ?? "").trim();
     if (!surfaceId) {
+      return false;
+    }
+    const policyBlockedReason = this.getSurfacePaintPolicyBlockedReason(surfaceId);
+    if (policyBlockedReason) {
+      this.appendChatLine("", policyBlockedReason, "system");
       return false;
     }
 
@@ -6848,18 +6871,108 @@ export class GameRuntime {
   }
 
   triggerSurfacePainterPngImport() {
-    this.appendChatLine("", "캔버스 이미지 불러오기는 비활성화되었습니다.", "system");
+    this.resolveUiElements();
+    if (!this.surfacePainterOpen) {
+      return;
+    }
+    if (!this.hasHostPrivilege()) {
+      this.appendChatLine("", "PNG/JPG 불러오기는 호스트만 가능합니다.", "system");
+      return;
+    }
+    if (!this.surfacePainterImportInputEl) {
+      this.appendChatLine("", "이미지 불러오기 입력이 준비되지 않았습니다.", "system");
+      return;
+    }
+    this.surfacePainterImportInputEl.click();
   }
 
   handleSurfacePainterImportInputChange(event) {
     const input = event?.target;
+    const file = input?.files?.[0] ?? null;
     if (input) {
       input.value = "";
     }
     if (!this.surfacePainterOpen) {
       return;
     }
-    this.appendChatLine("", "캔버스 PNG/JPG 불러오기는 사용할 수 없습니다.", "system");
+    if (!file) {
+      return;
+    }
+    if (!this.hasHostPrivilege()) {
+      this.appendChatLine("", "PNG/JPG 불러오기는 호스트만 가능합니다.", "system");
+      return;
+    }
+    const fileType = String(file.type ?? "").trim().toLowerCase();
+    const fileName = String(file.name ?? "").trim().toLowerCase();
+    const isPng = fileType === "image/png" || fileName.endsWith(".png");
+    const isJpeg =
+      fileType === "image/jpeg" ||
+      fileType === "image/jpg" ||
+      fileName.endsWith(".jpg") ||
+      fileName.endsWith(".jpeg");
+    if (!isPng && !isJpeg) {
+      this.appendChatLine("", "PNG 또는 JPG 파일만 불러올 수 있습니다.", "system");
+      return;
+    }
+    if (Number(file.size) > 10 * 1024 * 1024) {
+      this.appendChatLine("", "이미지 파일이 너무 큽니다. 10MB 이하로 선택하세요.", "system");
+      return;
+    }
+    const reader = new FileReader();
+    const loadNonce = ++this.surfacePainterCanvasLoadNonce;
+    reader.onload = () => {
+      const dataUrl = String(reader.result ?? "").trim();
+      if (!/^data:image\/(png|jpe?g);base64,/i.test(dataUrl)) {
+        this.appendChatLine("", "이미지 데이터를 읽지 못했습니다.", "system");
+        return;
+      }
+      const image = new Image();
+      image.onload = () => {
+        if (loadNonce !== this.surfacePainterCanvasLoadNonce) {
+          return;
+        }
+        if (!this.surfacePainterCanvasEl) {
+          return;
+        }
+        if (!this.surfacePainterContext) {
+          this.surfacePainterContext = this.surfacePainterCanvasEl.getContext("2d");
+        }
+        const context = this.surfacePainterContext;
+        if (!context) {
+          return;
+        }
+        const canvas = this.surfacePainterCanvasEl;
+        const bgColor = this.normalizeSurfacePainterColor(
+          this.surfacePainterBgColorInputEl?.value,
+          this.surfacePainterCanvasBgColor || "#ffffff"
+        );
+        this.surfacePainterCanvasBgColor = bgColor;
+        context.save();
+        context.globalCompositeOperation = "source-over";
+        context.globalAlpha = 1;
+        context.fillStyle = bgColor;
+        context.fillRect(0, 0, canvas.width, canvas.height);
+
+        const sourceWidth = Math.max(1, Number(image.width) || 1);
+        const sourceHeight = Math.max(1, Number(image.height) || 1);
+        const scale = Math.min(canvas.width / sourceWidth, canvas.height / sourceHeight);
+        const drawWidth = Math.max(1, Math.round(sourceWidth * scale));
+        const drawHeight = Math.max(1, Math.round(sourceHeight * scale));
+        const offsetX = Math.round((canvas.width - drawWidth) * 0.5);
+        const offsetY = Math.round((canvas.height - drawHeight) * 0.5);
+        context.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
+        context.restore();
+        this.appendChatLine("", `이미지 불러오기 완료: ${String(file.name ?? "").trim()}`, "system");
+      };
+      image.onerror = () => {
+        this.appendChatLine("", "이미지를 캔버스로 불러오지 못했습니다.", "system");
+      };
+      image.src = dataUrl;
+    };
+    reader.onerror = () => {
+      this.appendChatLine("", "이미지 파일 읽기에 실패했습니다.", "system");
+    };
+    reader.readAsDataURL(file);
   }
 
   openSurfacePainter(surfaceId) {
@@ -7199,6 +7312,69 @@ export class GameRuntime {
     }
   }
 
+  normalizeSurfacePaintPolicyState(rawPolicies = null) {
+    const source = rawPolicies && typeof rawPolicies === "object" ? rawPolicies : {};
+    const bridgePanel12NzSource =
+      source.bridgePanel12Nz && typeof source.bridgePanel12Nz === "object"
+        ? source.bridgePanel12Nz
+        : source.bridge_panel_12_nz && typeof source.bridge_panel_12_nz === "object"
+          ? source.bridge_panel_12_nz
+          : {};
+    const fallback = this.surfacePaintPolicyState?.bridgePanel12Nz ?? {};
+    return {
+      bridgePanel12Nz: {
+        surfaceId: HOST_CONTROLLED_BRIDGE_SURFACE_ID,
+        allowOthersDraw: Boolean(
+          bridgePanel12NzSource.allowOthersDraw ??
+            bridgePanel12NzSource.allow_others_draw ??
+            fallback.allowOthersDraw
+        ),
+        updatedAt: Math.max(
+          0,
+          Math.trunc(
+            Number(bridgePanel12NzSource.updatedAt) ||
+              Number(bridgePanel12NzSource.updated_at) ||
+              Number(fallback.updatedAt) ||
+              Date.now()
+          )
+        )
+      }
+    };
+  }
+
+  applySurfacePaintPolicyState(rawPolicies = null) {
+    this.surfacePaintPolicyState = this.normalizeSurfacePaintPolicyState(rawPolicies);
+    this.updateSurfacePainterSaveAvailability();
+  }
+
+  isHostControlledSurfaceId(surfaceId = "") {
+    return String(surfaceId ?? "").trim().toLowerCase() === HOST_CONTROLLED_BRIDGE_SURFACE_ID;
+  }
+
+  getHostControlledSurfaceAllowOthersDraw(surfaceId = "") {
+    if (!this.isHostControlledSurfaceId(surfaceId)) {
+      return true;
+    }
+    return Boolean(this.surfacePaintPolicyState?.bridgePanel12Nz?.allowOthersDraw);
+  }
+
+  getSurfacePaintPolicyBlockedReason(surfaceId = "") {
+    const normalizedId = String(surfaceId ?? "").trim().toLowerCase();
+    if (!this.isHostControlledSurfaceId(normalizedId)) {
+      return "";
+    }
+    if (this.hasHostPrivilege()) {
+      return "";
+    }
+    return this.getHostControlledSurfaceAllowOthersDraw(normalizedId)
+      ? ""
+      : "이 표면은 호스트만 수정할 수 있습니다.";
+  }
+
+  canCurrentPlayerEditSurfacePaint(surfaceId = "") {
+    return !this.getSurfacePaintPolicyBlockedReason(surfaceId);
+  }
+
   isSurfacePaintOnlineReady() {
     return Boolean(this.socket && this.networkConnected && this.socketEndpoint);
   }
@@ -7339,6 +7515,64 @@ export class GameRuntime {
     });
   }
 
+  requestHostSurfacePaintPolicyUpdate(surfaceId, allowOthersDraw) {
+    const normalizedId = String(surfaceId ?? "").trim().toLowerCase();
+    if (!this.isHostControlledSurfaceId(normalizedId)) {
+      return;
+    }
+    if (!this.socket || !this.networkConnected) {
+      this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
+      return;
+    }
+    if (!this.isRoomHost) {
+      this.appendChatLine("", "이 표면 권한 변경은 방장만 가능합니다.", "system");
+      return;
+    }
+    if (this.surfacePaintPolicySetInFlight) {
+      return;
+    }
+
+    this.surfacePaintPolicySetInFlight = true;
+    this.updateSurfacePainterSaveAvailability();
+    this.socket.emit(
+      "paint:surface:policy:set",
+      { surfaceId: normalizedId, allowOthersDraw: Boolean(allowOthersDraw) },
+      (response = {}) => {
+        this.surfacePaintPolicySetInFlight = false;
+        this.updateSurfacePainterSaveAvailability();
+        if (!response?.ok) {
+          const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
+          this.appendChatLine("", `표면 권한 변경 실패: ${reason}`, "system");
+          return;
+        }
+        if (response?.surfacePolicies && typeof response.surfacePolicies === "object") {
+          this.applySurfacePaintPolicyState(response.surfacePolicies);
+        }
+        const enabled = Boolean(response?.allowOthersDraw);
+        this.appendChatLine(
+          "",
+          enabled
+            ? "다른사람 수정 허용으로 변경했습니다."
+            : "다른사람 수정 금지로 변경했습니다.",
+          "system"
+        );
+      }
+    );
+  }
+
+  toggleHostControlledSurfaceAllowOthersDraw() {
+    const targetSurfaceId = String(this.surfacePainterTargetId ?? "").trim().toLowerCase();
+    if (!this.isHostControlledSurfaceId(targetSurfaceId)) {
+      return;
+    }
+    if (!this.isRoomHost) {
+      this.appendChatLine("", "이 표면 권한 변경은 방장만 가능합니다.", "system");
+      return;
+    }
+    const nextAllow = !this.getHostControlledSurfaceAllowOthersDraw(targetSurfaceId);
+    this.requestHostSurfacePaintPolicyUpdate(targetSurfaceId, nextAllow);
+  }
+
   handleSurfacePainterDeleteAction() {
     const promoOwnerKey = this.getSurfacePainterPromoOwnerKey();
     if (promoOwnerKey) {
@@ -7352,6 +7586,10 @@ export class GameRuntime {
   getSurfacePaintSaveBlockedReason() {
     if (this.surfacePainterSaveInFlight) {
       return "그림 저장 중입니다.";
+    }
+    const policyBlockedReason = this.getSurfacePaintPolicyBlockedReason(this.surfacePainterTargetId);
+    if (policyBlockedReason) {
+      return policyBlockedReason;
     }
     const promoOwnerKey = this.getSurfacePainterPromoOwnerKey();
     if (promoOwnerKey && !this.canCurrentPlayerEditPromoSurface(promoOwnerKey)) {
@@ -7388,6 +7626,13 @@ export class GameRuntime {
     } else {
       this.surfacePainterSaveBtnEl.removeAttribute("title");
     }
+    if (this.surfacePainterImportBtnEl) {
+      const canImport = this.surfacePainterOpen && this.hasHostPrivilege();
+      this.surfacePainterImportBtnEl.disabled = !canImport;
+      this.surfacePainterImportBtnEl.title = canImport
+        ? "PNG/JPG 파일을 캔버스로 불러옵니다."
+        : "PNG/JPG 불러오기는 호스트만 가능합니다.";
+    }
 
     const promoButtons = [
       this.surfacePainterPromoRepositionBtnEl,
@@ -7415,28 +7660,48 @@ export class GameRuntime {
     }
 
     if (this.surfacePainterPromoShareToggleBtnEl) {
-      const promoTarget = this.getSurfacePainterPromoTarget();
-      const isOwnPromoSurface = promoOwnerKey === String(this.promoOwnerKey ?? "");
-      const nextAllow =
-        isOwnPromoSurface && typeof this.promoAllowOthersDrawDraft === "boolean"
-          ? this.promoAllowOthersDrawDraft
-          : Boolean(promoTarget?.allowOthersDraw);
-      const lockEnabled = this.isPromoEditLockEnabled(nextAllow);
-      const showShareToggle = showPromoButtons && this.isHostEntryLink;
-      this.surfacePainterPromoShareToggleBtnEl.classList.toggle("hidden", !showShareToggle);
-      this.surfacePainterPromoShareToggleBtnEl.classList.toggle("active", lockEnabled);
-      this.surfacePainterPromoShareToggleBtnEl.setAttribute(
-        "aria-pressed",
-        lockEnabled ? "true" : "false"
-      );
-      this.surfacePainterPromoShareToggleBtnEl.textContent = lockEnabled
-        ? "다른사람 수정금지: 켜짐"
-        : "다른사람 수정금지: 꺼짐";
-      this.surfacePainterPromoShareToggleBtnEl.disabled = Boolean(promoBlockedReason);
-      if (promoBlockedReason) {
-        this.surfacePainterPromoShareToggleBtnEl.title = promoBlockedReason;
+      const currentSurfaceId = String(this.surfacePainterTargetId ?? "").trim().toLowerCase();
+      if (this.isHostControlledSurfaceId(currentSurfaceId)) {
+        const showShareToggle = this.surfacePainterOpen && this.isRoomHost;
+        const allowOthersDraw = this.getHostControlledSurfaceAllowOthersDraw(currentSurfaceId);
+        const lockEnabled = this.isPromoEditLockEnabled(allowOthersDraw);
+        this.surfacePainterPromoShareToggleBtnEl.classList.toggle("hidden", !showShareToggle);
+        this.surfacePainterPromoShareToggleBtnEl.classList.toggle("active", lockEnabled);
+        this.surfacePainterPromoShareToggleBtnEl.setAttribute(
+          "aria-pressed",
+          lockEnabled ? "true" : "false"
+        );
+        this.surfacePainterPromoShareToggleBtnEl.textContent = lockEnabled
+          ? "다른사람 수정금지: 켜짐"
+          : "다른사람 수정금지: 꺼짐";
+        this.surfacePainterPromoShareToggleBtnEl.disabled = this.surfacePaintPolicySetInFlight;
+        this.surfacePainterPromoShareToggleBtnEl.title = lockEnabled
+          ? "현재 상태: 다른 사람은 이 표면을 수정할 수 없습니다."
+          : "현재 상태: 다른 사람도 이 표면을 수정할 수 있습니다.";
       } else {
-        this.surfacePainterPromoShareToggleBtnEl.title = this.getPromoEditLockStatusText(nextAllow);
+        const promoTarget = this.getSurfacePainterPromoTarget();
+        const isOwnPromoSurface = promoOwnerKey === String(this.promoOwnerKey ?? "");
+        const nextAllow =
+          isOwnPromoSurface && typeof this.promoAllowOthersDrawDraft === "boolean"
+            ? this.promoAllowOthersDrawDraft
+            : Boolean(promoTarget?.allowOthersDraw);
+        const lockEnabled = this.isPromoEditLockEnabled(nextAllow);
+        const showShareToggle = showPromoButtons && this.isHostEntryLink;
+        this.surfacePainterPromoShareToggleBtnEl.classList.toggle("hidden", !showShareToggle);
+        this.surfacePainterPromoShareToggleBtnEl.classList.toggle("active", lockEnabled);
+        this.surfacePainterPromoShareToggleBtnEl.setAttribute(
+          "aria-pressed",
+          lockEnabled ? "true" : "false"
+        );
+        this.surfacePainterPromoShareToggleBtnEl.textContent = lockEnabled
+          ? "다른사람 수정금지: 켜짐"
+          : "다른사람 수정금지: 꺼짐";
+        this.surfacePainterPromoShareToggleBtnEl.disabled = Boolean(promoBlockedReason);
+        if (promoBlockedReason) {
+          this.surfacePainterPromoShareToggleBtnEl.title = promoBlockedReason;
+        } else {
+          this.surfacePainterPromoShareToggleBtnEl.title = this.getPromoEditLockStatusText(nextAllow);
+        }
       }
     }
   }
@@ -15771,6 +16036,10 @@ export class GameRuntime {
       this.requestPromoScaleFromSurfacePainter(0.5);
     });
     this.surfacePainterPromoShareToggleBtnEl?.addEventListener("click", () => {
+      if (this.isHostControlledSurfaceId(this.surfacePainterTargetId)) {
+        this.toggleHostControlledSurfaceAllowOthersDraw();
+        return;
+      }
       this.toggleSurfacePainterPromoAllowOthersDraw();
     });
     this.surfacePainterFillBtnEl?.addEventListener("click", () => {
@@ -17475,6 +17744,9 @@ export class GameRuntime {
         syncUi: true
       });
     }
+    if (room?.surfacePolicies && typeof room.surfacePolicies === "object") {
+      this.applySurfacePaintPolicyState(room.surfacePolicies);
+    }
     if (Array.isArray(room?.promoObjects)) {
       this.applyPromoState(room.promoObjects);
     }
@@ -17536,6 +17808,7 @@ export class GameRuntime {
     }
     if (previousHostState !== this.isRoomHost) {
       this.hud.setStatus(this.getStatusText());
+      this.updateSurfacePainterSaveAvailability();
     }
     this.syncHostControls();
 

@@ -461,6 +461,12 @@
       <div id="surface-painter-panel">
         <p id="surface-painter-title">표면 그리기</p>
         <canvas id="surface-painter-canvas" width="512" height="512"></canvas>
+        <input
+          id="surface-painter-import-file"
+          class="hidden"
+          type="file"
+          accept=".png,.jpg,.jpeg,image/png,image/jpeg"
+        />
         <div id="surface-painter-toolbar">
           <label for="surface-painter-color">색상</label>
           <input id="surface-painter-color" type="color" value="#111111" />
@@ -475,6 +481,7 @@
         <div id="surface-painter-actions">
           <button id="surface-painter-promo-share-toggle" class="hidden" type="button">다른사람 수정: 비허용</button>
           <button id="surface-painter-export" type="button">PNG 내보내기</button>
+          <button id="surface-painter-import" type="button">PNG/JPG 불러오기</button>
           <button id="surface-painter-clear" type="button">삭제</button>
           <button id="surface-painter-cancel" type="button">닫기</button>
           <button id="surface-painter-save" type="button">저장</button>
