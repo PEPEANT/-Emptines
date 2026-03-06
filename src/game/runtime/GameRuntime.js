@@ -580,10 +580,10 @@ export class GameRuntime {
     this.netPingPending = new Map();
     this.clientRttMs = 0;
     this.clientRttSmoothedMs = 0;
-    this.movementSubstepMaxMobile = 1 / 55;
-    this.movementSubstepMaxDesktop = 1 / 45;
-    this.movementSubstepMaxCountMobile = 6;
-    this.movementSubstepMaxCountDesktop = 4;
+    this.movementSubstepMaxMobile = 1 / 72;
+    this.movementSubstepMaxDesktop = 1 / 90;
+    this.movementSubstepMaxCountMobile = 10;
+    this.movementSubstepMaxCountDesktop = 8;
     this.authoritativeCorrectionStepCapMobile = 0.22;
     this.authoritativeCorrectionStepCapDesktop = 0.36;
     this.remoteLabelDistanceSq =
@@ -16409,10 +16409,10 @@ export class GameRuntime {
       minRatio = this.mobileEnabled ? 0.5 : 0.62;
       maxRatioCap = this.mobileEnabled ? 0.95 : 1.0;
     } else if (quality === "medium") {
-      dynamicEnabled = this.mobileEnabled;
+      dynamicEnabled = true;
       minRatio = this.mobileEnabled
         ? Math.max(minRatio, this.isLowSpecMobile ? 0.52 : 0.68)
-        : GAME_CONSTANTS.DYNAMIC_RESOLUTION.desktopMinRatio;
+        : Math.max(0.72, GAME_CONSTANTS.DYNAMIC_RESOLUTION.desktopMinRatio);
       maxRatioCap = this.getDevicePixelRatioCap();
     } else {
       dynamicEnabled = false;
@@ -17435,17 +17435,34 @@ export class GameRuntime {
     // - Always allow upward correction (client below server).
     // - Allow downward correction only while descending/grounded to avoid canceling jump ascent.
     const ascendingFast = !this.onGround && this.verticalVelocity > 1.2;
-    const canCorrectDownward = !ascendingFast;
-    if (dy > 0.2 || (canCorrectDownward && dy < -0.35)) {
-      const yAlpha = dy > 0 ? 0.14 : 0.1;
-      const yStepCap = dy > 0 ? 0.42 : 0.28;
+    const descendingAirborne = !this.onGround && this.verticalVelocity < -0.8;
+    const allowDownwardAirCorrection = !ascendingFast && !descendingAirborne;
+    const shouldCorrectUpward = dy > (this.onGround ? 0.18 : 0.26);
+    const shouldCorrectDownward =
+      (this.onGround && dy < -0.24) ||
+      (!this.onGround && allowDownwardAirCorrection && dy < -0.85);
+    if (shouldCorrectUpward || shouldCorrectDownward) {
+      const yAlpha = dy > 0
+        ? this.onGround
+          ? 0.14
+          : 0.09
+        : this.onGround
+          ? 0.08
+          : 0.045;
+      const yStepCap = dy > 0
+        ? this.onGround
+          ? 0.42
+          : 0.18
+        : this.onGround
+          ? 0.18
+          : 0.08;
       const correctionY = THREE.MathUtils.clamp(dy * yAlpha, -yStepCap, yStepCap);
       this.playerPosition.y += correctionY;
       if (Math.abs(correctionY) > 0.04) {
         // Dampen velocity so correction doesn't immediately bounce back and jitter.
         this.verticalVelocity *= 0.7;
       }
-      if (Math.abs(dy) > 1.1) {
+      if (Math.abs(dy) > 1.8) {
         this.verticalVelocity = 0;
         this.onGround = targetY <= GAME_CONSTANTS.PLAYER_HEIGHT + 0.001;
       }
@@ -18756,9 +18773,13 @@ export class GameRuntime {
 
     this.emitInputCommand(delta);
     const airborne = this.playerPosition.y > GAME_CONSTANTS.PLAYER_HEIGHT + 0.08;
-    if (this.flyModeActive || this.climbingRope || airborne) {
+    if (this.flyModeActive || this.climbingRope) {
       this.requestAuthoritativeStateSync({
         minIntervalMs: this.flyModeActive ? 120 : 180
+      });
+    } else if (airborne && this.pendingAuthoritativeStateSync) {
+      this.requestAuthoritativeStateSync({
+        minIntervalMs: 260
       });
     }
   }
@@ -18934,8 +18955,8 @@ export class GameRuntime {
   }
 
   loop() {
-    // Keep a tighter cap on mobile to reduce one-frame movement jumps on frame drops.
-    const delta = Math.min(this.clock.getDelta(), this.mobileEnabled ? 0.12 : 0.15);
+    // Keep a tighter cap to avoid one-frame movement jumps during frame drops.
+    const delta = Math.min(this.clock.getDelta(), this.mobileEnabled ? 0.09 : 0.1);
     this.tick(delta);
     if (this.composer) {
       this.composer.render();

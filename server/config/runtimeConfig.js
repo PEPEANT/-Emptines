@@ -28,7 +28,7 @@ const MIN_ROOM_PLAYERS = 16;
 const MAX_ROOM_PLAYERS_LIMIT = 256;
 
 export const DEFAULT_SERVER_SIM_CONFIG = {
-  tickRateHz: 20,
+  tickRateHz: 30,
   playerHeight: 1.72,
   playerSpeed: 8.8,
   playerSprint: 13.2,
