@@ -715,6 +715,8 @@ export class GameRuntime {
     this.lastLocalChatEchoAt = 0;
     this.chatLiveOpen = true;
     this.chatLiveMaxEntries = Math.max(6, Math.min(18, this.chatLogMaxEntries));
+    this.chatLiveLineLifetimeMs = 15_000;
+    this.chatLiveLineFadeMs = 650;
     this.chatMessageSeq = 0;
     this.lastChatSendAt = 0;
     this.chatSendMinIntervalMs = 700;
@@ -18941,12 +18943,17 @@ export class GameRuntime {
       }
       this.chatLiveLogEl.scrollTop = this.chatLiveLogEl.scrollHeight;
       appended = true;
-      // Auto-fade-remove live feed line after 7 s
+      const liveLineLifetimeMs = Math.max(
+        4_000,
+        Math.trunc(Number(this.chatLiveLineLifetimeMs) || 0)
+      );
+      const liveLineFadeMs = Math.max(220, Math.trunc(Number(this.chatLiveLineFadeMs) || 0));
+      // Auto-fade-remove live feed line after configured lifetime
       setTimeout(() => {
-        liveLine.style.transition = "opacity 0.55s ease";
+        liveLine.style.transition = `opacity ${Math.max(0.22, liveLineFadeMs / 1000).toFixed(2)}s ease`;
         liveLine.style.opacity = "0";
-        setTimeout(() => liveLine.remove(), 560);
-      }, 7000);
+        setTimeout(() => liveLine.remove(), liveLineFadeMs + 40);
+      }, liveLineLifetimeMs);
     }
 
     return appended;

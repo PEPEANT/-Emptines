@@ -1919,8 +1919,8 @@ body:not(.is-mobile-ui) #promo-place-btn {
   gap: 8px;
   align-items: stretch;
   padding: 8px;
-  width: min(66vw, 400px);
-  max-height: min(52vh, 420px);
+  width: min(72vw, 520px);
+  max-height: min(60vh, 520px);
   overflow: hidden;
   border: 1px solid rgba(179, 208, 236, 0.62);
   border-radius: 10px;
@@ -2026,9 +2026,9 @@ body:not(.is-mobile-ui) #promo-place-btn {
 }
 
 #chat-log {
-  height: min(24vh, 208px);
-  min-height: 110px;
-  max-height: min(24vh, 208px);
+  height: min(32vh, 320px);
+  min-height: 160px;
+  max-height: min(32vh, 320px);
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
@@ -2110,8 +2110,8 @@ body:not(.is-mobile-ui) #promo-place-btn {
   left: 14px;
   bottom: 148px;
   z-index: 32;
-  width: min(52vw, 360px);
-  max-height: min(24vh, 190px);
+  width: min(58vw, 440px);
+  max-height: min(30vh, 260px);
   padding: 0;
   border: none;
   border-radius: 0;
