@@ -12814,7 +12814,19 @@ export class GameRuntime {
       return;
     }
 
-    const own = this.getOwnPromoObject();
+    let own = this.getOwnPromoObject();
+    if (!own && preserveExistingStyle) {
+      const surfaceTarget = this.getSurfacePainterPromoTarget();
+      const targetOwnerKey = String(surfaceTarget?.ownerKey ?? "").trim();
+      if (targetOwnerKey && targetOwnerKey === String(this.promoOwnerKey ?? "")) {
+        own = surfaceTarget;
+      }
+    }
+    if (!own && preserveExistingStyle) {
+      this.appendChatLine("", "오브젝트 동기화 중입니다. 잠시 후 다시 시도하세요.", "system");
+      this.requestPromoState();
+      return;
+    }
     if (!own && placeInFront && !placeAtCenter && !skipPlacementPreview) {
       if (!this.promoPlacementPreviewActive) {
         this.beginPromoPlacementPreview();
