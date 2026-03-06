@@ -6165,6 +6165,15 @@ export class GameRuntime {
     if (!this.isSurfacePaintFeatureEnabled()) {
       return new THREE.Mesh(geometry, baseMaterial.clone());
     }
+    const normalizedBaseId = String(surfaceBaseId ?? "").trim().toLowerCase();
+    const isAllowedPaintSurface =
+      normalizedBaseId.startsWith("bridge_panel_") ||
+      normalizedBaseId.startsWith("po_") ||
+      normalizedBaseId.startsWith(CITY_AD_BILLBOARD_BASE_PREFIX) ||
+      normalizedBaseId.startsWith("host_custom_block_");
+    if (!isAllowedPaintSurface) {
+      return new THREE.Mesh(geometry, baseMaterial.clone());
+    }
     const materials = [];
     for (let index = 0; index < 6; index += 1) {
       materials.push(baseMaterial.clone());
