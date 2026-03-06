@@ -8290,8 +8290,12 @@ export class GameRuntime {
       return;
     }
 
+    const requestedZone = this.normalizeRoomZone(this.requestedEntryZone, "");
+    const explicitLobbyEntry = requestedZone === "lobby";
     const forceBridgeIntro =
-      this.parseQueryFlag("bridge_intro") || this.parseQueryFlag("bridgeIntro");
+      explicitLobbyEntry ||
+      this.parseQueryFlag("bridge_intro") ||
+      this.parseQueryFlag("bridgeIntro");
 
     // Open-room default: enter straight into the public city plaza unless bridge intro is requested.
     let savedNickname = "";
@@ -8340,10 +8344,11 @@ export class GameRuntime {
       return;
     }
     const allowFastCityRejoin =
-      this.parseQueryFlag("skip_bridge") ||
-      this.parseQueryFlag("skipBridge") ||
-      this.parseQueryFlag("rejoin_city") ||
-      this.parseQueryFlag("city_live");
+      !explicitLobbyEntry &&
+      (this.parseQueryFlag("skip_bridge") ||
+        this.parseQueryFlag("skipBridge") ||
+        this.parseQueryFlag("rejoin_city") ||
+        this.parseQueryFlag("city_live"));
     this.syncPortalAnchorsFromMovableObjects({ force: true });
     if (allowFastCityRejoin && savedNickname.length >= 2) {
       this.pendingPlayerNameSync = true;
