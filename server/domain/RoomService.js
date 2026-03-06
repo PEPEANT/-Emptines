@@ -1002,7 +1002,7 @@ export class RoomService {
     const objectRevision = normalizeStateRevision(parsed?.objectRevision, 0);
     const chatHistorySource = Array.isArray(parsed?.chatHistory) ? parsed.chatHistory : [];
     const savedLayoutVersion = normalizeMapLayoutVersion(parsed?.layoutVersion, "");
-    const shouldRestoreLayoutState = savedLayoutVersion === this.mapLayoutVersion;
+    const layoutVersionNeedsRewrite = savedLayoutVersion !== this.mapLayoutVersion;
     const mainPortalAd = this.serializeMainPortalAd({ mainPortalAd: parsed?.mainPortalAd });
     const leftBillboard = this.serializeLeftBillboard({ leftBillboard: parsed?.leftBillboard });
     const rightBillboard = this.serializeRightBillboard({ rightBillboard: parsed?.rightBillboard });
@@ -1036,29 +1036,30 @@ export class RoomService {
     room.rightBillboard = rightBillboard;
     room.surfacePolicies = createSurfacePoliciesState(parsed?.surfacePolicies ?? room.surfacePolicies);
     room.objectEditor = normalizeObjectEditorState(parsed?.objectEditor, room.objectEditor);
-    if (shouldRestoreLayoutState) {
-      const migratedObjectPositions = migrateCityObjectPositionsToRearBand(
-        objectPositions,
-        savedCityObjectRearMigrationVersion
-      );
-      room.platformRevision = platformRevision;
-      room.ropeRevision = ropeRevision;
-      room.objectRevision = objectRevision;
-      this.setObjectPositions(room, migratedObjectPositions.positions, {
-        persist: false,
-        bumpRevision: false
-      });
-      this.setPlatforms(room, platforms, { persist: false, bumpRevision: false });
-      this.setRopes(room, ropes, { persist: false, bumpRevision: false });
-      this.setPromoObjects(room, promoObjects, { persist: false });
-      if (migratedObjectPositions.changed) {
-        this.scheduleSurfacePaintSave();
-        this.log?.log?.("[paint] Applied rear-band migration to city object positions.");
-      }
-    } else {
+    if (layoutVersionNeedsRewrite) {
       this.log?.warn?.(
-        `[paint] Skip layout restore due to version mismatch (saved=${savedLayoutVersion || "none"}, runtime=${this.mapLayoutVersion})`
+        `[paint] Layout version mismatch (saved=${savedLayoutVersion || "none"}, runtime=${this.mapLayoutVersion}); applying compatible restore.`
       );
+    }
+    const migratedObjectPositions = migrateCityObjectPositionsToRearBand(
+      objectPositions,
+      savedCityObjectRearMigrationVersion
+    );
+    room.platformRevision = platformRevision;
+    room.ropeRevision = ropeRevision;
+    room.objectRevision = objectRevision;
+    this.setObjectPositions(room, migratedObjectPositions.positions, {
+      persist: false,
+      bumpRevision: false
+    });
+    this.setPlatforms(room, platforms, { persist: false, bumpRevision: false });
+    this.setRopes(room, ropes, { persist: false, bumpRevision: false });
+    this.setPromoObjects(room, promoObjects, { persist: false });
+    if (migratedObjectPositions.changed) {
+      this.log?.log?.("[paint] Applied rear-band migration to city object positions.");
+    }
+    if (migratedObjectPositions.changed || layoutVersionNeedsRewrite) {
+      this.scheduleSurfacePaintSave();
     }
     if (restored.size > 0) {
       this.log?.log?.(
