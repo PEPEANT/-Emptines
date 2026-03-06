@@ -1874,35 +1874,36 @@ export class GameRuntime {
       this.registerMovableObject(tower, `city_tower_${ti}`, towerColliderIndex);
     }
 
-    const skylineMats = [
-      this.createCityWindowMaterial({
+    const skylineMaterialPresets = [
+      {
         style: "slate",
-        repeatX: 2.2,
-        repeatY: 8.8,
-        roughness: 0.62,
-        metalness: 0.12,
-        emissive: 0x1e3850,
-        emissiveIntensity: 0.45
-      }),
-      this.createCityWindowMaterial({
-        style: "cyan",
-        repeatX: 2.3,
-        repeatY: 9.4,
-        roughness: 0.6,
+        repeatX: 2.15,
+        repeatY: 7.6,
+        roughness: 0.56,
         metalness: 0.16,
-        emissive: 0x183a52,
-        emissiveIntensity: 0.48
-      }),
-      this.createCityWindowMaterial({
+        emissive: 0x31506a,
+        emissiveIntensity: 0.62
+      },
+      {
+        style: "cyan",
+        repeatX: 2.2,
+        repeatY: 8.1,
+        roughness: 0.54,
+        metalness: 0.18,
+        emissive: 0x2a5878,
+        emissiveIntensity: 0.68
+      },
+      {
         style: "amber",
-        repeatX: 2.1,
-        repeatY: 8.9,
-        roughness: 0.64,
-        metalness: 0.12,
-        emissive: 0x302010,
-        emissiveIntensity: 0.45
-      })
+        repeatX: 2.05,
+        repeatY: 7.5,
+        roughness: 0.58,
+        metalness: 0.14,
+        emissive: 0x5a4220,
+        emissiveIntensity: 0.58
+      }
     ];
+    const skylineMats = skylineMaterialPresets.map((preset) => this.createCityWindowMaterial(preset));
     const skylineCapMats = [
       new THREE.MeshStandardMaterial({
         color: 0x7adce8, roughness: 0.20, metalness: 0.50,
@@ -1918,11 +1919,11 @@ export class GameRuntime {
       }),
     ];
     const skylineRoofMaterial = new THREE.MeshStandardMaterial({
-      color: 0x7a96aa,
-      roughness: 0.72,
-      metalness: 0.18,
-      emissive: 0x2a4060,
-      emissiveIntensity: 0.40
+      color: 0x98b3c8,
+      roughness: 0.62,
+      metalness: 0.24,
+      emissive: 0x44698e,
+      emissiveIntensity: 0.46
     });
     const bridgeLocalTarget = new THREE.Vector3(
       this.bridgeApproachSpawn.x - cityGroupWorldX,
@@ -2098,9 +2099,18 @@ export class GameRuntime {
       const placedMegaX = placed.x;
       const placedMegaZ = toRearCityZ(placed.z);
 
+      const skylinePreset = skylineMaterialPresets[i % skylineMaterialPresets.length];
       const wallMaterial = skylineMats[i % skylineMats.length].clone();
       const roofMaterial = skylineRoofMaterial.clone();
-      const podiumMaterial = wallMaterial.clone();
+      const podiumMaterial = this.createCityWindowMaterial({
+        style: skylinePreset.style,
+        repeatX: Math.max(1.3, skylinePreset.repeatX * 0.92),
+        repeatY: 2.8 + (i % 2) * 0.35,
+        roughness: 0.5,
+        metalness: 0.2,
+        emissive: skylinePreset.emissive,
+        emissiveIntensity: skylinePreset.emissiveIntensity + 0.1
+      });
       const megaTowerGroup = new THREE.Group();
       megaTowerGroup.name = `city_mega_tower_${i}`;
 
@@ -2119,6 +2129,25 @@ export class GameRuntime {
       podium.castShadow = false;
       podium.receiveShadow = true;
       megaTowerGroup.add(podium);
+
+      const podiumCornice = new THREE.Mesh(
+        new THREE.BoxGeometry(footprint * 1.28, 0.28, footprint * 1.26),
+        new THREE.MeshStandardMaterial({
+          color: 0x8ba6bc,
+          roughness: 0.46,
+          metalness: 0.38,
+          emissive: 0x35526d,
+          emissiveIntensity: 0.26
+        })
+      );
+      podiumCornice.position.set(
+        placedMegaX,
+        liftRearCityY(podiumHeight + 0.14),
+        placedMegaZ
+      );
+      podiumCornice.castShadow = false;
+      podiumCornice.receiveShadow = true;
+      megaTowerGroup.add(podiumCornice);
       const megaColliderIndex = registerCityBuildingCollider(
         placedMegaX,
         placedMegaZ,
@@ -5531,28 +5560,59 @@ export class GameRuntime {
       const wallMaterial = this.createCityWindowMaterial({
         style,
         repeatX: 1.6 + (index % 3) * 0.18,
-        repeatY: 7.2 + (index % 4) * 0.78,
-        roughness: 0.58,
+        repeatY: 6.6 + (index % 4) * 0.64,
+        roughness: 0.52,
         metalness: 0.18,
-        emissive: 0x122130,
-        emissiveIntensity: 0.11
+        emissive: 0x274057,
+        emissiveIntensity: 0.26
+      });
+      const podiumMaterial = this.createCityWindowMaterial({
+        style,
+        repeatX: 1.45 + (index % 3) * 0.12,
+        repeatY: 2.5 + (index % 2) * 0.3,
+        roughness: 0.48,
+        metalness: 0.2,
+        emissive: 0x34526f,
+        emissiveIntensity: 0.32
       });
       const roofMaterial = new THREE.MeshStandardMaterial({
-        color: 0x4d5c69,
-        roughness: 0.72,
-        metalness: 0.16,
-        emissive: 0x1a2633,
-        emissiveIntensity: 0.14
+        color: 0x748898,
+        roughness: 0.62,
+        metalness: 0.2,
+        emissive: 0x27415a,
+        emissiveIntensity: 0.22
       });
 
       const podium = new THREE.Mesh(
         new THREE.BoxGeometry(footprint * 1.24, podiumHeight, footprint * 1.18),
-        [wallMaterial.clone(), wallMaterial.clone(), roofMaterial, roofMaterial, wallMaterial.clone(), wallMaterial.clone()]
+        [
+          podiumMaterial.clone(),
+          podiumMaterial.clone(),
+          roofMaterial,
+          roofMaterial,
+          podiumMaterial.clone(),
+          podiumMaterial.clone()
+        ]
       );
       podium.position.set(anchor.x, podiumHeight * 0.5, anchor.z);
       podium.castShadow = false;
       podium.receiveShadow = true;
       districtGroup.add(podium);
+
+      const podiumCornice = new THREE.Mesh(
+        new THREE.BoxGeometry(footprint * 1.28, 0.24, footprint * 1.22),
+        new THREE.MeshStandardMaterial({
+          color: 0x88a2b7,
+          roughness: 0.48,
+          metalness: 0.32,
+          emissive: 0x2f4f6a,
+          emissiveIntensity: 0.18
+        })
+      );
+      podiumCornice.position.set(anchor.x, podiumHeight + 0.12, anchor.z);
+      podiumCornice.castShadow = false;
+      podiumCornice.receiveShadow = true;
+      districtGroup.add(podiumCornice);
 
       const shaft = new THREE.Mesh(
         new THREE.BoxGeometry(footprint, shaftHeight, footprint * 0.96),
@@ -5803,31 +5863,31 @@ export class GameRuntime {
     const key = String(style ?? "").trim().toLowerCase();
     if (key === "cyan") {
       return {
-        wall: "#3e5468",
-        mullion: "#567088",
-        glassDark: "#1e3a52",
-        glassMid: "#2a5478",
-        glassLight: "#72d4ff",
-        reflection: "rgba(208, 240, 255, 0.28)"
+        wall: "#4c6277",
+        mullion: "#6d869d",
+        glassDark: "#28506f",
+        glassMid: "#3d76a1",
+        glassLight: "#8ce4ff",
+        reflection: "rgba(220, 246, 255, 0.32)"
       };
     }
     if (key === "amber") {
       return {
-        wall: "#524e48",
-        mullion: "#6e6860",
-        glassDark: "#2e3028",
-        glassMid: "#484038",
-        glassLight: "#e0b864",
-        reflection: "rgba(255, 240, 200, 0.28)"
+        wall: "#635d55",
+        mullion: "#847c72",
+        glassDark: "#403c31",
+        glassMid: "#675a4a",
+        glassLight: "#f0ca7a",
+        reflection: "rgba(255, 244, 214, 0.3)"
       };
     }
     return {
-      wall: "#4a5a6a",
-      mullion: "#628298",
-      glassDark: "#283c50",
-      glassMid: "#3a5870",
-      glassLight: "#aad4f0",
-      reflection: "rgba(216, 240, 255, 0.28)"
+      wall: "#596d80",
+      mullion: "#7b98ae",
+      glassDark: "#324d65",
+      glassMid: "#4d7593",
+      glassLight: "#cae6ff",
+      reflection: "rgba(224, 244, 255, 0.34)"
     };
   }
 
@@ -5854,8 +5914,8 @@ export class GameRuntime {
 
     const wallShade = context.createLinearGradient(0, 0, 0, canvas.height);
     wallShade.addColorStop(0, "rgba(255, 255, 255, 0.06)");
-    wallShade.addColorStop(0.55, "rgba(0, 0, 0, 0.02)");
-    wallShade.addColorStop(1, "rgba(0, 0, 0, 0.13)");
+    wallShade.addColorStop(0.55, "rgba(0, 0, 0, 0.015)");
+    wallShade.addColorStop(1, "rgba(0, 0, 0, 0.08)");
     context.fillStyle = wallShade;
     context.fillRect(0, 0, canvas.width, canvas.height);
 
