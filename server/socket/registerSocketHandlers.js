@@ -22,6 +22,27 @@ function sanitizeOwnerKey(rawValue) {
   return text.replace(/[^a-zA-Z0-9:_-]/g, "").slice(0, 96);
 }
 
+function normalizeFeatureMode(rawValue, fallback = "public") {
+  const text = String(rawValue ?? "")
+    .trim()
+    .toLowerCase();
+  if (text === "off" || text === "host" || text === "public") {
+    return text;
+  }
+  return fallback;
+}
+
+function getFeatureModeBlockReason(mode, featureLabel, isHost) {
+  const normalizedMode = normalizeFeatureMode(mode);
+  if (normalizedMode === "public") {
+    return "";
+  }
+  if (normalizedMode === "host") {
+    return isHost ? "" : `${featureLabel} host only`;
+  }
+  return `${featureLabel} disabled`;
+}
+
 function sanitizeChatHistoryRequestPayload(payload = {}) {
   const modeRaw = String(payload?.mode ?? "").trim().toLowerCase();
   const mode = modeRaw === "before-today" ? "before-today" : "all";
@@ -758,12 +779,22 @@ export function registerSocketHandlers({
         ack(ackFn, { ok: false, error: "player not in room" });
         return;
       }
+      const isHost = roomService.isHost(room, socket.id);
+      const paintModeError = getFeatureModeBlockReason(
+        config?.surfacePaintMode,
+        "surface paint",
+        isHost
+      );
+      if (paintModeError) {
+        ack(ackFn, { ok: false, error: paintModeError });
+        return;
+      }
       const paintGuard = consumeSurfacePaintBudget({
         socketState: socketPaintRateState,
         roomStateMap: roomPaintRateState,
         roomCode: room.code,
         surfaceId: payload?.surfaceId ?? "",
-        isHost: roomService.isHost(room, socket.id)
+        isHost
       });
       if (!paintGuard.ok) {
         ack(ackFn, paintGuard);
@@ -1408,11 +1439,17 @@ export function registerSocketHandlers({
         ack(ackFn, { ok: false, error: "player not in room" });
         return;
       }
+      const isHost = roomService.isHost(room, socket.id);
+      const promoModeError = getFeatureModeBlockReason(config?.promoMode, "promo", isHost);
+      if (promoModeError) {
+        ack(ackFn, { ok: false, error: promoModeError });
+        return;
+      }
       const promoGuard = consumePromoOperationBudget({
         socketState: socketPromoRateState,
         ipStateMap: promoOpRateStateByIp,
         clientIp: socket.data.clientIp ?? clientIp,
-        isHost: roomService.isHost(room, socket.id),
+        isHost,
         antiAbuse
       });
       if (!promoGuard.ok) {
@@ -1457,11 +1494,17 @@ export function registerSocketHandlers({
         ack(ackFn, { ok: false, error: "player not in room" });
         return;
       }
+      const isHost = roomService.isHost(room, socket.id);
+      const promoModeError = getFeatureModeBlockReason(config?.promoMode, "promo", isHost);
+      if (promoModeError) {
+        ack(ackFn, { ok: false, error: promoModeError });
+        return;
+      }
       const promoGuard = consumePromoOperationBudget({
         socketState: socketPromoRateState,
         ipStateMap: promoOpRateStateByIp,
         clientIp: socket.data.clientIp ?? clientIp,
-        isHost: roomService.isHost(room, socket.id),
+        isHost,
         antiAbuse
       });
       if (!promoGuard.ok) {

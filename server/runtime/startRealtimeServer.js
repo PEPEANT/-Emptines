@@ -135,6 +135,8 @@ export function startRealtimeServer(options = {}) {
     log.log(`Persistent room: ${config.defaultRoomCode} (capacity ${config.maxRoomPlayers})`);
     log.log(`[paint] store path: ${config.surfacePaintStorePath || "(disabled)"}`);
     log.log(`[paint] map layout version: ${config.mapLayoutVersion}`);
+    log.log(`[policy] surface paint mode: ${config.surfacePaintMode}`);
+    log.log(`[policy] promo mode: ${config.promoMode}`);
   });
 
   // Flush pending surface paint to disk before process exits

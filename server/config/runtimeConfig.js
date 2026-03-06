@@ -10,6 +10,8 @@ export const DEFAULT_SURFACE_PAINT_SAVE_DEBOUNCE_MS = 300;
 export const DEFAULT_MAX_SOCKET_PAYLOAD_BYTES = 35_000_000;
 export const DEFAULT_STATIC_CLIENT_DIR = "dist";
 export const DEFAULT_MAP_LAYOUT_VERSION = "2026-03-04-layout-v1";
+export const DEFAULT_SURFACE_PAINT_MODE = "public";
+export const DEFAULT_PROMO_MODE = "public";
 export const DEFAULT_ANTI_ABUSE_CONFIG = Object.freeze({
   maxConnectionsPerIp: 6,
   connectionWindowMs: 60_000,
@@ -59,6 +61,41 @@ function parseOptionalString(value, maxLength = 256) {
     return "";
   }
   return text.slice(0, Math.max(1, Math.trunc(maxLength)));
+}
+
+function parseFeatureMode(rawValue, fallback = "public") {
+  const text = parseOptionalString(rawValue, 32).toLowerCase();
+  if (
+    text === "off" ||
+    text === "disabled" ||
+    text === "disable" ||
+    text === "none" ||
+    text === "0" ||
+    text === "false"
+  ) {
+    return "off";
+  }
+  if (
+    text === "host" ||
+    text === "host-only" ||
+    text === "host_only" ||
+    text === "private"
+  ) {
+    return "host";
+  }
+  if (
+    text === "public" ||
+    text === "on" ||
+    text === "enabled" ||
+    text === "enable" ||
+    text === "1" ||
+    text === "true"
+  ) {
+    return "public";
+  }
+  return fallback === "off" || fallback === "host" || fallback === "public"
+    ? fallback
+    : "public";
 }
 
 function trimTrailingSlashes(value) {
@@ -193,6 +230,8 @@ export function loadRuntimeConfig(env = process.env) {
     defaultPortalTargetUrl,
     defaultAZonePortalTargetUrl,
     surfacePaintStorePath: resolveSurfacePaintStorePath(env),
+    surfacePaintMode: parseFeatureMode(env.SURFACE_PAINT_MODE, DEFAULT_SURFACE_PAINT_MODE),
+    promoMode: parseFeatureMode(env.PROMO_MODE, DEFAULT_PROMO_MODE),
     mapLayoutVersion:
       parseOptionalString(env.MAP_LAYOUT_VERSION, 128) || DEFAULT_MAP_LAYOUT_VERSION,
     surfacePaintSaveDebounceMs: Math.trunc(

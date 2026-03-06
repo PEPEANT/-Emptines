@@ -140,6 +140,12 @@ Copy `.env.example` to `.env` when needed.
   - Use this when map geometry/portal placement was changed in code and old snapshot should not override it
 - `HOST_CLAIM_KEY` (server env, optional but recommended)
   - Secret key required for `room:host:claim`
+- `SURFACE_PAINT_MODE` (server env, optional)
+  - Controls who can save painted surfaces through sockets
+  - `public` = any player, `host` = host only, `off` = blocked for everyone
+- `PROMO_MODE` (server env, optional)
+  - Controls who can create/remove promo objects through sockets
+  - `public` = any player, `host` = host only, `off` = blocked for everyone
 
 Host auto-claim (client query string):
 
@@ -157,6 +163,26 @@ Single endpoint deployment (recommended):
 5. For persistent world edits on Render, attach a Disk and set:
    - `SURFACE_PAINT_STORE_PATH=/var/data/surface-paint.json`
    - `MAP_LAYOUT_VERSION=2026-03-04-layout-v1` (bump value when map layout changes)
+   - `SURFACE_PAINT_MODE=host`
+   - `PROMO_MODE=host`
+
+## Abuse Recovery
+
+If a public room gets spammed with promo cubes or promo-surface drawings:
+
+```bash
+npm run reset:world -- --promos
+```
+
+- This removes saved `promoObjects` and promo-only painted surfaces (`po_*`), while keeping normal world paints.
+- The script creates a timestamped backup next to the store file before writing.
+- Restart the socket server after running it so clients reload the cleaned snapshot.
+
+For a full wipe of saved world edits:
+
+```bash
+npm run reset:world -- --all
+```
 
 Socket server health endpoints:
 

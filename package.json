@@ -18,6 +18,7 @@
     "doctor": "node scripts/doctor.mjs",
     "audit:world": "node scripts/world-audit.mjs",
     "loadtest:bots": "node scripts/loadtest-bots.mjs",
+    "reset:world": "node scripts/reset-world-state.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "check": "node scripts/verify.mjs",
