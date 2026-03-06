@@ -338,13 +338,15 @@
         placeholder="https://example.com (비워도 됨)"
         autocomplete="off"
       />
-      <div class="promo-panel-row">
+      <div id="promo-allow-others-draw-row" class="promo-panel-row">
         <label for="promo-allow-others-draw">수정 권한</label>
         <label class="promo-panel-check" for="promo-allow-others-draw">
           <input id="promo-allow-others-draw" type="checkbox" />
-          다른 사람 수정 허용
+          다른사람 수정금지
         </label>
-        <span aria-hidden="true"></span>
+        <span id="promo-allow-others-draw-status" class="promo-panel-inline-status">
+          현재: 다른사람 수정 허용
+        </span>
       </div>
       <label class="promo-panel-label" for="promo-draw-canvas">캔버스(네모 오브젝트 확장판)</label>
       <div id="promo-draw-wrap">

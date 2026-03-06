@@ -1344,6 +1344,13 @@ canvas {
   color: #ffe3b8;
 }
 
+#surface-painter-promo-share-toggle.active {
+  border-color: rgba(255, 210, 140, 0.92);
+  background: rgba(69, 42, 11, 0.9);
+  color: #ffe3b5;
+  box-shadow: 0 0 0 1px rgba(255, 194, 106, 0.24);
+}
+
 #surface-painter-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1783,13 +1790,41 @@ body:not(.is-mobile-ui) #promo-place-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(167, 205, 236, 0.58);
+  border-radius: 8px;
+  background: rgba(11, 26, 41, 0.82);
   color: #d7ecff;
   font: 700 0.62rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
   letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
 }
 
 .promo-panel-check input {
   accent-color: #79cfff;
+}
+
+.promo-panel-check.active {
+  border-color: rgba(255, 210, 140, 0.9);
+  background: rgba(70, 42, 10, 0.88);
+  color: #ffe1b2;
+  box-shadow: 0 0 0 1px rgba(255, 196, 116, 0.28);
+}
+
+.promo-panel-check:not(.active) {
+  border-color: rgba(132, 216, 171, 0.72);
+  background: rgba(12, 44, 28, 0.78);
+  color: #c8ffe0;
+}
+
+.promo-panel-inline-status {
+  color: #dcefff;
+  font: 700 0.58rem/1.2 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.04em;
+  justify-self: end;
+  text-align: right;
 }
 
 .promo-panel-actions {

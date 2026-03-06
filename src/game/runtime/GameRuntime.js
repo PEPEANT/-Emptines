@@ -766,7 +766,9 @@ export class GameRuntime {
     this.promoScaleValueEl = document.getElementById("promo-scale-value");
     this.promoTypeSelectEl = document.getElementById("promo-shape");
     this.promoLinkInputEl = document.getElementById("promo-link-url");
+    this.promoAllowOthersDrawRowEl = document.getElementById("promo-allow-others-draw-row");
     this.promoAllowOthersDrawEl = document.getElementById("promo-allow-others-draw");
+    this.promoAllowOthersDrawStatusEl = document.getElementById("promo-allow-others-draw-status");
     this.promoDrawCanvasEl = document.getElementById("promo-draw-canvas");
     this.promoDrawColorInputEl = document.getElementById("promo-draw-color");
     this.promoDrawBgInputEl = document.getElementById("promo-draw-bg");
@@ -6891,6 +6893,22 @@ export class GameRuntime {
     return this.promoObjects.get(ownerKey) ?? null;
   }
 
+  isPromoEditLockEnabled(rawAllowOthersDraw = false) {
+    return !Boolean(rawAllowOthersDraw);
+  }
+
+  getPromoEditLockStatusText(rawAllowOthersDraw = false, { draft = false } = {}) {
+    const locked = this.isPromoEditLockEnabled(rawAllowOthersDraw);
+    if (draft) {
+      return locked
+        ? "현재 설정: 다른사람 수정 금지. 저장/배치 시 반영됩니다."
+        : "현재 설정: 다른사람 수정 허용. 저장/배치 시 반영됩니다.";
+    }
+    return locked
+      ? "현재 상태: 다른사람 수정 금지. 다른 사람은 수정할 수 없습니다."
+      : "현재 상태: 다른사람 수정 허용. 다른 사람도 수정할 수 있습니다.";
+  }
+
   canCurrentPlayerEditPromoSurface(ownerKey = this.getSurfacePainterPromoOwnerKey()) {
     const targetOwnerKey = String(ownerKey ?? "").trim();
     if (!targetOwnerKey) {
@@ -6982,7 +7000,10 @@ export class GameRuntime {
     this.requestPromoUpsert({
       placeInFront: false,
       preserveExistingStyle: true,
-      allowOthersDrawOverride: nextAllow
+      allowOthersDrawOverride: nextAllow,
+      successNotice: nextAllow
+        ? "다른사람 수정 허용으로 변경했습니다."
+        : "다른사람 수정 금지로 변경했습니다."
     });
   }
 
@@ -7068,16 +7089,22 @@ export class GameRuntime {
         isOwnPromoSurface && typeof this.promoAllowOthersDrawDraft === "boolean"
           ? this.promoAllowOthersDrawDraft
           : Boolean(promoTarget?.allowOthersDraw);
-      const showShareToggle = showPromoButtons;
+      const lockEnabled = this.isPromoEditLockEnabled(nextAllow);
+      const showShareToggle = showPromoButtons && this.isHostEntryLink;
       this.surfacePainterPromoShareToggleBtnEl.classList.toggle("hidden", !showShareToggle);
-      this.surfacePainterPromoShareToggleBtnEl.textContent = nextAllow
-        ? "다른사람 수정: 허용"
-        : "다른사람 수정: 비허용";
+      this.surfacePainterPromoShareToggleBtnEl.classList.toggle("active", lockEnabled);
+      this.surfacePainterPromoShareToggleBtnEl.setAttribute(
+        "aria-pressed",
+        lockEnabled ? "true" : "false"
+      );
+      this.surfacePainterPromoShareToggleBtnEl.textContent = lockEnabled
+        ? "다른사람 수정금지: 켜짐"
+        : "다른사람 수정금지: 꺼짐";
       this.surfacePainterPromoShareToggleBtnEl.disabled = Boolean(promoBlockedReason);
       if (promoBlockedReason) {
         this.surfacePainterPromoShareToggleBtnEl.title = promoBlockedReason;
       } else {
-        this.surfacePainterPromoShareToggleBtnEl.removeAttribute("title");
+        this.surfacePainterPromoShareToggleBtnEl.title = this.getPromoEditLockStatusText(nextAllow);
       }
     }
   }
@@ -11399,6 +11426,8 @@ export class GameRuntime {
     const allowOthersDrawValue = typeof this.promoAllowOthersDrawDraft === "boolean"
       ? this.promoAllowOthersDrawDraft
       : Boolean(own?.allowOthersDraw);
+    const lockOthersEditValue = this.isPromoEditLockEnabled(allowOthersDrawValue);
+    const showPromoLockControl = Boolean(this.isHostEntryLink);
     const ownKind = this.normalizePromoKind(own?.kind ?? "block", "block");
     const linkValue = own?.linkUrl ?? "";
     const placeBtnLabel = previewActive ? "배치 확정" : "앞에 배치+저장";
@@ -11467,8 +11496,21 @@ export class GameRuntime {
     if (this.promoLinkInputEl && document.activeElement !== this.promoLinkInputEl) {
       this.promoLinkInputEl.value = linkValue;
     }
+    if (this.promoAllowOthersDrawRowEl) {
+      this.promoAllowOthersDrawRowEl.classList.toggle("hidden", !showPromoLockControl);
+    }
+    const promoAllowOthersDrawCheckWrap = this.promoAllowOthersDrawEl?.closest?.(".promo-panel-check");
+    if (promoAllowOthersDrawCheckWrap) {
+      promoAllowOthersDrawCheckWrap.classList.toggle("active", lockOthersEditValue);
+      promoAllowOthersDrawCheckWrap.title = this.getPromoEditLockStatusText(allowOthersDrawValue);
+    }
+    if (this.promoAllowOthersDrawStatusEl) {
+      this.promoAllowOthersDrawStatusEl.textContent = lockOthersEditValue
+        ? "현재: 다른사람 수정 금지"
+        : "현재: 다른사람 수정 허용";
+    }
     if (this.promoAllowOthersDrawEl && document.activeElement !== this.promoAllowOthersDrawEl) {
-      this.promoAllowOthersDrawEl.checked = allowOthersDrawValue;
+      this.promoAllowOthersDrawEl.checked = lockOthersEditValue;
     }
     if (this.promoTypeSelectEl && document.activeElement !== this.promoTypeSelectEl) {
       const selectedType = this.normalizePromoKind(this.promoTypeSelectEl.value, ownKind);
@@ -11537,7 +11579,7 @@ export class GameRuntime {
     this.promoScaleInputEl && (this.promoScaleInputEl.disabled = disabled);
     this.promoTypeSelectEl && (this.promoTypeSelectEl.disabled = disabled);
     this.promoLinkInputEl && (this.promoLinkInputEl.disabled = disabled);
-    this.promoAllowOthersDrawEl && (this.promoAllowOthersDrawEl.disabled = disabled);
+    this.promoAllowOthersDrawEl && (this.promoAllowOthersDrawEl.disabled = disabled || !showPromoLockControl);
     this.promoDrawColorInputEl && (this.promoDrawColorInputEl.disabled = disabled);
     this.promoDrawBgInputEl && (this.promoDrawBgInputEl.disabled = disabled);
     this.promoDrawSizeInputEl && (this.promoDrawSizeInputEl.disabled = disabled);
@@ -12025,7 +12067,8 @@ export class GameRuntime {
     scaleOverride = null,
     transformOverride = null,
     allowOthersDrawOverride = null,
-    skipPlacementPreview = false
+    skipPlacementPreview = false,
+    successNotice = ""
   } = {}) {
     if (!(this.socket && this.networkConnected)) {
       this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
@@ -12166,6 +12209,9 @@ export class GameRuntime {
         };
         this.promoMediaRemoved = false;
         this.requestPromoState();
+        if (successNotice) {
+          this.appendChatLine("", String(successNotice), "system");
+        }
         this.syncPromoPanelUi();
       }
     );
@@ -14821,7 +14867,16 @@ export class GameRuntime {
     }
     if (this.promoAllowOthersDrawEl) {
       this.promoAllowOthersDrawEl.addEventListener("input", () => {
-        this.promoAllowOthersDrawDraft = Boolean(this.promoAllowOthersDrawEl?.checked);
+        const lockEnabled = Boolean(this.promoAllowOthersDrawEl?.checked);
+        this.promoAllowOthersDrawDraft = !lockEnabled;
+        this.syncPromoPanelUi();
+        if (this.isHostEntryLink) {
+          this.appendChatLine(
+            "",
+            this.getPromoEditLockStatusText(!lockEnabled, { draft: true }),
+            "system"
+          );
+        }
       });
     }
     if (this.promoDrawBgInputEl) {
@@ -15742,8 +15797,14 @@ export class GameRuntime {
     if (!this.promoLinkInputEl) {
       this.promoLinkInputEl = document.getElementById("promo-link-url");
     }
+    if (!this.promoAllowOthersDrawRowEl) {
+      this.promoAllowOthersDrawRowEl = document.getElementById("promo-allow-others-draw-row");
+    }
     if (!this.promoAllowOthersDrawEl) {
       this.promoAllowOthersDrawEl = document.getElementById("promo-allow-others-draw");
+    }
+    if (!this.promoAllowOthersDrawStatusEl) {
+      this.promoAllowOthersDrawStatusEl = document.getElementById("promo-allow-others-draw-status");
     }
     if (!this.promoDrawCanvasEl) {
       this.promoDrawCanvasEl = document.getElementById("promo-draw-canvas");
