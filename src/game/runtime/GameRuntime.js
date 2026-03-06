@@ -2995,7 +2995,7 @@ export class GameRuntime {
       billboardBaseYOffset: 1.35,
       topAdPanelYOffset: 1.65,
       topAdScale: 1.36,
-      rotationY: 0,
+      rotationY: Math.PI,
       onTopAdReady: (payload = {}) => {
         this.portalTopAdBaseTexture = payload?.texture ?? null;
         this.portalTopAdScreenMaterial = payload?.material ?? null;
