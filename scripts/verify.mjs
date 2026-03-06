@@ -170,13 +170,22 @@ async function checkSocketServer() {
     await waitFor(() => serverReady || serverFailed, 6000);
     assert(serverReady, `Server failed to boot:\n${bootLog}`);
 
+    const clientOneAuth = {
+      ...(linkGateAuth ?? {}),
+      playerKey: "verify_player_key_one"
+    };
+    const clientTwoAuth = {
+      ...(linkGateAuth ?? {}),
+      playerKey: "verify_player_key_two"
+    };
+
     c1 = io(`http://localhost:${port}`, {
       transports: ["websocket"],
       timeout: 5000,
       reconnection: true,
       reconnectionAttempts: 8,
       reconnectionDelay: 120,
-      auth: linkGateAuth ?? undefined
+      auth: clientOneAuth
     });
     c2 = io(`http://localhost:${port}`, {
       transports: ["websocket"],
@@ -184,7 +193,7 @@ async function checkSocketServer() {
       reconnection: true,
       reconnectionAttempts: 8,
       reconnectionDelay: 120,
-      auth: linkGateAuth ?? undefined
+      auth: clientTwoAuth
     });
 
     await Promise.all([waitFor(() => c1.connected, 6000), waitFor(() => c2.connected, 6000)]);

@@ -137,6 +137,9 @@ export function startRealtimeServer(options = {}) {
     log.log(`[paint] map layout version: ${config.mapLayoutVersion}`);
     log.log(`[policy] surface paint mode: ${config.surfacePaintMode}`);
     log.log(`[policy] promo mode: ${config.promoMode}`);
+    log.log(
+      `[guard] connections/ip=${config.antiAbuse.maxConnectionsPerIp} burst=${config.antiAbuse.maxConnectionsPerWindowPerIp}/${config.antiAbuse.connectionWindowMs}ms ban=${config.antiAbuse.connectionBanMs}ms after ${config.antiAbuse.connectionViolationsBeforeBan} violations`
+    );
   });
 
   // Flush pending surface paint to disk before process exits

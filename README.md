@@ -146,6 +146,16 @@ Copy `.env.example` to `.env` when needed.
 - `PROMO_MODE` (server env, optional)
   - Controls who can create/remove promo objects through sockets
   - `public` = any player, `host` = host only, `off` = blocked for everyone
+- `ABUSE_MAX_CONNECTIONS_PER_IP` (server env, optional)
+  - Maximum concurrent sockets allowed from one IP before new connections are blocked
+- `ABUSE_MAX_CONNECTIONS_PER_WINDOW_PER_IP` (server env, optional)
+  - Maximum connection attempts allowed from one IP inside the rolling connection window
+- `ABUSE_CONNECTION_VIOLATION_WINDOW_MS` (server env, optional)
+  - Rolling window used to count repeated connection-limit violations per IP
+- `ABUSE_CONNECTION_VIOLATIONS_BEFORE_BAN` (server env, optional)
+  - Number of repeated connection-limit hits before the IP is temporarily banned
+- `ABUSE_CONNECTION_BAN_MS` (server env, optional)
+  - Temporary ban duration after repeated connection-limit violations
 
 Host auto-claim (client query string):
 
@@ -165,6 +175,11 @@ Single endpoint deployment (recommended):
    - `MAP_LAYOUT_VERSION=2026-03-04-layout-v1` (bump value when map layout changes)
    - `SURFACE_PAINT_MODE=host`
    - `PROMO_MODE=host`
+   - `ABUSE_MAX_CONNECTIONS_PER_IP=3`
+   - `ABUSE_MAX_CONNECTIONS_PER_WINDOW_PER_IP=12`
+   - `ABUSE_CONNECTION_VIOLATION_WINDOW_MS=180000`
+   - `ABUSE_CONNECTION_VIOLATIONS_BEFORE_BAN=3`
+   - `ABUSE_CONNECTION_BAN_MS=900000`
 
 ## Abuse Recovery
 

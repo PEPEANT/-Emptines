@@ -16262,7 +16262,8 @@ export class GameRuntime {
       reconnectionDelayMax: 5000,
       auth: {
         linkGateVersion: this.socketLinkGateVersion,
-        linkGateMode: this.socketLinkGateMode || "player"
+        linkGateMode: this.socketLinkGateMode || "player",
+        playerKey: this.promoOwnerKey
       }
     });
 
@@ -16363,6 +16364,21 @@ export class GameRuntime {
       this.appendChatLine("", "같은 계정 키로 이미 접속 중인 창이 있어 연결이 종료됩니다.", "system");
     });
 
+    socket.on("session:blocked", (payload = {}) => {
+      const reason = String(payload?.reason ?? "").trim().toLowerCase();
+      let message = "세션 연결이 차단되었습니다.";
+      if (reason === "session key required") {
+        message = "세션 키가 없어 접속이 차단되었습니다. 새로고침 후 다시 시도하세요.";
+      } else if (reason === "ip temporarily banned") {
+        message = "짧은 시간에 너무 많은 접속이 감지되어 잠시 차단되었습니다.";
+      } else if (reason === "ip concurrent limit reached") {
+        message = "같은 네트워크에서 동시에 접속할 수 있는 수를 초과했습니다.";
+      } else if (reason === "ip connect rate limited") {
+        message = "짧은 시간에 너무 많은 재접속이 감지되었습니다.";
+      }
+      this.appendChatLine("", message, "system");
+    });
+
     socket.on("disconnect", () => {
       this.networkConnected = false;
       this.localPlayerId = null;
@@ -16437,6 +16453,11 @@ export class GameRuntime {
       if (connectErrorMessage.includes("link gate denied")) {
         this.socketEndpointValidationError = "허용된 접속 링크만 사용할 수 있습니다.";
         this.socketEndpointLinkRequired = true;
+      } else if (connectErrorMessage.includes("session key required")) {
+        this.socketEndpointValidationError = "세션 키가 없어 접속이 차단되었습니다. 새로고침 후 다시 시도하세요.";
+      } else if (connectErrorMessage.includes("ip temporarily banned")) {
+        this.socketEndpointValidationError =
+          "짧은 시간에 너무 많은 접속이 감지되어 잠시 차단되었습니다.";
       }
       this.networkConnected = false;
       this.localPlayerId = null;

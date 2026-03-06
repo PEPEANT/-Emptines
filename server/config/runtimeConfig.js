@@ -13,9 +13,12 @@ export const DEFAULT_MAP_LAYOUT_VERSION = "2026-03-04-layout-v1";
 export const DEFAULT_SURFACE_PAINT_MODE = "public";
 export const DEFAULT_PROMO_MODE = "public";
 export const DEFAULT_ANTI_ABUSE_CONFIG = Object.freeze({
-  maxConnectionsPerIp: 6,
+  maxConnectionsPerIp: 3,
   connectionWindowMs: 60_000,
-  maxConnectionsPerWindowPerIp: 24,
+  maxConnectionsPerWindowPerIp: 12,
+  connectionViolationWindowMs: 180_000,
+  connectionViolationsBeforeBan: 3,
+  connectionBanMs: 15 * 60 * 1000,
   promoWindowMs: 15_000,
   promoMaxOpsPerSocketWindow: 14,
   promoMaxOpsPerIpWindow: 40
@@ -372,6 +375,30 @@ export function loadRuntimeConfig(env = process.env) {
           DEFAULT_ANTI_ABUSE_CONFIG.maxConnectionsPerWindowPerIp,
           2,
           500
+        )
+      ),
+      connectionViolationWindowMs: Math.trunc(
+        parseBoundedNumber(
+          env.ABUSE_CONNECTION_VIOLATION_WINDOW_MS,
+          DEFAULT_ANTI_ABUSE_CONFIG.connectionViolationWindowMs,
+          5_000,
+          30 * 60 * 1000
+        )
+      ),
+      connectionViolationsBeforeBan: Math.trunc(
+        parseBoundedNumber(
+          env.ABUSE_CONNECTION_VIOLATIONS_BEFORE_BAN,
+          DEFAULT_ANTI_ABUSE_CONFIG.connectionViolationsBeforeBan,
+          1,
+          20
+        )
+      ),
+      connectionBanMs: Math.trunc(
+        parseBoundedNumber(
+          env.ABUSE_CONNECTION_BAN_MS,
+          DEFAULT_ANTI_ABUSE_CONFIG.connectionBanMs,
+          5_000,
+          24 * 60 * 60 * 1000
         )
       ),
       promoWindowMs: Math.trunc(

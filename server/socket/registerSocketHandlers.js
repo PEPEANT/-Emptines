@@ -89,10 +89,14 @@ const PAINT_SOCKET_MAX_SURFACES = 18;
 const PAINT_SOCKET_MIN_INTERVAL_MS = 120;
 const PAINT_ROOM_WINDOW_MS = 3_000;
 const PAINT_ROOM_MAX_WRITES = 120;
+const SESSION_REQUIRED_MIN_KEY_LENGTH = 8;
 const DEFAULT_ANTI_ABUSE = Object.freeze({
-  maxConnectionsPerIp: 6,
+  maxConnectionsPerIp: 3,
   connectionWindowMs: 60_000,
-  maxConnectionsPerWindowPerIp: 24,
+  maxConnectionsPerWindowPerIp: 12,
+  connectionViolationWindowMs: 180_000,
+  connectionViolationsBeforeBan: 3,
+  connectionBanMs: 15 * 60 * 1000,
   promoWindowMs: 15_000,
   promoMaxOpsPerSocketWindow: 14,
   promoMaxOpsPerIpWindow: 40
@@ -129,6 +133,11 @@ function getSocketClientIp(socket) {
   return normalizeClientIp(socket?.handshake?.address ?? "");
 }
 
+function getSocketAuthOwnerKey(socket) {
+  const auth = socket?.handshake?.auth ?? {};
+  return sanitizeOwnerKey(auth?.playerKey ?? auth?.ownerKey ?? auth?.sessionKey ?? "");
+}
+
 function pruneRecent(now, recent = [], windowMs = 60_000) {
   const lowerBound = now - Math.max(1_000, Math.trunc(Number(windowMs) || 60_000));
   let start = 0;
@@ -142,6 +151,39 @@ function pruneRecent(now, recent = [], windowMs = 60_000) {
   }
 }
 
+function registerConnectionViolation(state, now, antiAbuse = DEFAULT_ANTI_ABUSE) {
+  if (!Array.isArray(state.violations)) {
+    state.violations = [];
+  }
+  const violationWindowMs = Math.max(
+    5_000,
+    Math.trunc(
+      Number(antiAbuse?.connectionViolationWindowMs) ||
+        DEFAULT_ANTI_ABUSE.connectionViolationWindowMs
+    )
+  );
+  const connectionViolationsBeforeBan = Math.max(
+    1,
+    Math.trunc(
+      Number(antiAbuse?.connectionViolationsBeforeBan) ||
+        DEFAULT_ANTI_ABUSE.connectionViolationsBeforeBan
+    )
+  );
+  const connectionBanMs = Math.max(
+    5_000,
+    Math.trunc(Number(antiAbuse?.connectionBanMs) || DEFAULT_ANTI_ABUSE.connectionBanMs)
+  );
+  pruneRecent(now, state.violations, violationWindowMs);
+  state.violations.push(now);
+  if (state.violations.length >= connectionViolationsBeforeBan) {
+    state.blockedUntil = Math.max(
+      Math.trunc(Number(state.blockedUntil) || 0),
+      now + connectionBanMs
+    );
+  }
+  return Math.trunc(Number(state.blockedUntil) || 0);
+}
+
 function reserveConnectionSlotByIp({
   map,
   clientIp,
@@ -150,7 +192,12 @@ function reserveConnectionSlotByIp({
   antiAbuse = DEFAULT_ANTI_ABUSE
 }) {
   const ipKey = normalizeClientIp(clientIp);
-  const state = map.get(ipKey) ?? { active: new Set(), recent: [] };
+  const state = map.get(ipKey) ?? {
+    active: new Set(),
+    recent: [],
+    violations: [],
+    blockedUntil: 0
+  };
   const maxConnectionsPerIp = Math.max(
     1,
     Math.trunc(Number(antiAbuse?.maxConnectionsPerIp) || DEFAULT_ANTI_ABUSE.maxConnectionsPerIp)
@@ -166,16 +213,44 @@ function reserveConnectionSlotByIp({
         DEFAULT_ANTI_ABUSE.maxConnectionsPerWindowPerIp
     )
   );
+  const violationWindowMs = Math.max(
+    5_000,
+    Math.trunc(
+      Number(antiAbuse?.connectionViolationWindowMs) ||
+        DEFAULT_ANTI_ABUSE.connectionViolationWindowMs
+    )
+  );
 
   pruneRecent(now, state.recent, connectionWindowMs);
+  if (!Array.isArray(state.violations)) {
+    state.violations = [];
+  }
+  pruneRecent(now, state.violations, violationWindowMs);
+  const blockedUntil = Math.trunc(Number(state.blockedUntil) || 0);
+  if (blockedUntil > now) {
+    map.set(ipKey, state);
+    return { ok: false, error: "ip temporarily banned", ip: ipKey, blockedUntil };
+  }
   state.recent.push(now);
   if (state.recent.length > maxConnectionsPerWindowPerIp) {
+    const nextBlockedUntil = registerConnectionViolation(state, now, antiAbuse);
     map.set(ipKey, state);
-    return { ok: false, error: "ip connect rate limited", ip: ipKey };
+    return {
+      ok: false,
+      error: nextBlockedUntil > now ? "ip temporarily banned" : "ip connect rate limited",
+      ip: ipKey,
+      blockedUntil: nextBlockedUntil
+    };
   }
   if (state.active.size >= maxConnectionsPerIp) {
+    const nextBlockedUntil = registerConnectionViolation(state, now, antiAbuse);
     map.set(ipKey, state);
-    return { ok: false, error: "ip concurrent limit reached", ip: ipKey };
+    return {
+      ok: false,
+      error: nextBlockedUntil > now ? "ip temporarily banned" : "ip concurrent limit reached",
+      ip: ipKey,
+      blockedUntil: nextBlockedUntil
+    };
   }
 
   state.active.add(String(socketId ?? "").trim());
@@ -183,15 +258,40 @@ function reserveConnectionSlotByIp({
   return { ok: true, ip: ipKey };
 }
 
-function releaseConnectionSlotByIp(map, clientIp, socketId) {
+function releaseConnectionSlotByIp(map, clientIp, socketId, antiAbuse = DEFAULT_ANTI_ABUSE) {
   const ipKey = normalizeClientIp(clientIp);
   const state = map.get(ipKey);
   if (!state) {
     return;
   }
   state.active?.delete?.(String(socketId ?? "").trim());
-  pruneRecent(Date.now(), state.recent, DEFAULT_ANTI_ABUSE.connectionWindowMs);
-  if ((state.active?.size ?? 0) <= 0 && (!Array.isArray(state.recent) || state.recent.length <= 0)) {
+  const now = Date.now();
+  pruneRecent(
+    now,
+    state.recent,
+    Math.max(
+      1_000,
+      Math.trunc(Number(antiAbuse?.connectionWindowMs) || DEFAULT_ANTI_ABUSE.connectionWindowMs)
+    )
+  );
+  pruneRecent(
+    now,
+    state.violations,
+    Math.max(
+      5_000,
+      Math.trunc(
+        Number(antiAbuse?.connectionViolationWindowMs) ||
+          DEFAULT_ANTI_ABUSE.connectionViolationWindowMs
+      )
+    )
+  );
+  const blockedUntil = Math.trunc(Number(state.blockedUntil) || 0);
+  if (
+    (state.active?.size ?? 0) <= 0 &&
+    (!Array.isArray(state.recent) || state.recent.length <= 0) &&
+    (!Array.isArray(state.violations) || state.violations.length <= 0) &&
+    blockedUntil <= now
+  ) {
     map.delete(ipKey);
     return;
   }
@@ -384,6 +484,24 @@ export function registerSocketHandlers({
           DEFAULT_ANTI_ABUSE.maxConnectionsPerWindowPerIp
       )
     ),
+    connectionViolationWindowMs: Math.max(
+      5_000,
+      Math.trunc(
+        Number(config?.antiAbuse?.connectionViolationWindowMs) ||
+          DEFAULT_ANTI_ABUSE.connectionViolationWindowMs
+      )
+    ),
+    connectionViolationsBeforeBan: Math.max(
+      1,
+      Math.trunc(
+        Number(config?.antiAbuse?.connectionViolationsBeforeBan) ||
+          DEFAULT_ANTI_ABUSE.connectionViolationsBeforeBan
+      )
+    ),
+    connectionBanMs: Math.max(
+      5_000,
+      Math.trunc(Number(config?.antiAbuse?.connectionBanMs) || DEFAULT_ANTI_ABUSE.connectionBanMs)
+    ),
     promoWindowMs: Math.max(
       1_000,
       Math.trunc(Number(config?.antiAbuse?.promoWindowMs) || DEFAULT_ANTI_ABUSE.promoWindowMs)
@@ -573,11 +691,52 @@ export function registerSocketHandlers({
       return result;
     };
 
-    const online = playerCounter.increment();
     socket.data.playerName = randomDefaultName();
     socket.data.roomCode = null;
-    socket.data.playerKey = "";
+    socket.data.playerKey = getSocketAuthOwnerKey(socket);
     socket.data.clientIp = clientIp;
+
+    const initialPlayerKey = sanitizeOwnerKey(socket.data.playerKey ?? "");
+    if (!initialPlayerKey || initialPlayerKey.length < SESSION_REQUIRED_MIN_KEY_LENGTH) {
+      log?.warn?.(`[guard] session key required ip=${clientIp} socket=${socket.id}`);
+      socket.emit("session:blocked", { reason: "session key required" });
+      releaseConnectionSlotByIp(connectionStateByIp, clientIp, socket.id, antiAbuse);
+      setTimeout(() => {
+        try {
+          socket.disconnect(true);
+        } catch {
+          // ignore disconnect errors
+        }
+      }, 60);
+      return;
+    }
+
+    const duplicateSocketId = findDuplicateSessionSocketId(
+      io,
+      roomService.getDefaultRoom(),
+      initialPlayerKey,
+      socket.id
+    );
+    if (duplicateSocketId) {
+      log?.warn?.(
+        `[guard] duplicate session denied ip=${clientIp} socket=${socket.id} duplicate=${duplicateSocketId}`
+      );
+      socket.emit("session:duplicate", {
+        reason: "duplicate session",
+        duplicateSocketId
+      });
+      releaseConnectionSlotByIp(connectionStateByIp, clientIp, socket.id, antiAbuse);
+      setTimeout(() => {
+        try {
+          socket.disconnect(true);
+        } catch {
+          // ignore disconnect errors
+        }
+      }, 60);
+      return;
+    }
+
+    const online = playerCounter.increment();
     worldRuntime?.onPlayerConnected(socket);
 
     log.log(`[+] player connected (${online}) ${socket.id}`);
@@ -1566,12 +1725,22 @@ export function registerSocketHandlers({
     });
 
     socket.on("disconnecting", () => {
-      releaseConnectionSlotByIp(connectionStateByIp, socket.data.clientIp ?? clientIp, socket.id);
+      releaseConnectionSlotByIp(
+        connectionStateByIp,
+        socket.data.clientIp ?? clientIp,
+        socket.id,
+        antiAbuse
+      );
       roomService.leaveCurrentRoom(socket);
     });
 
     socket.on("disconnect", () => {
-      releaseConnectionSlotByIp(connectionStateByIp, socket.data.clientIp ?? clientIp, socket.id);
+      releaseConnectionSlotByIp(
+        connectionStateByIp,
+        socket.data.clientIp ?? clientIp,
+        socket.id,
+        antiAbuse
+      );
       const remaining = playerCounter.decrement();
       worldRuntime?.onPlayerDisconnected(socket);
       log.log(`[-] player disconnected (${remaining}) ${socket.id}`);
