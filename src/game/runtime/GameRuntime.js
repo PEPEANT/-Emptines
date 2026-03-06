@@ -3012,7 +3012,12 @@ export class GameRuntime {
     bridgeFarEndTempleGate.rotation.y = bridgeYaw;
 
     const cityEntryTempleGate = this.createKoreanTempleGateMesh();
-    cityEntryTempleGate.position.set(this.bridgeCityEntry.x, 0, this.bridgeCityEntry.z + 2.2);
+    const cityEntryGatePullback = this.mobileEnabled ? 2.2 : 2.8;
+    cityEntryTempleGate.position.set(
+      this.bridgeCityEntry.x - bridgeDirection.x * cityEntryGatePullback,
+      0,
+      this.bridgeCityEntry.z - bridgeDirection.z * cityEntryGatePullback
+    );
     cityEntryTempleGate.rotation.y = bridgeYaw;
 
     const portalGroup = new THREE.Group();
