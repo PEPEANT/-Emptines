@@ -716,6 +716,7 @@ export class GameRuntime {
     this.chatSeenMessageIdTtlMs = 2 * 60 * 1000;
     this.chatHistoryRequestMinIntervalMs = 600;
     this.lastChatHistoryRequestAt = 0;
+    this.chatHistoryLoaded = false;
     this.chatHistoryExpanded = false;
     this.toolUiEl = document.getElementById("tool-ui");
     this.chatUiEl = document.getElementById("chat-ui");
@@ -16276,11 +16277,6 @@ export class GameRuntime {
     }
   }
 
-  getLocalDayStartMs(nowMs = Date.now()) {
-    const now = new Date(nowMs);
-    return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  }
-
   syncChatHistoryExpandedUi() {
     this.resolveUiElements();
     if (this.chatUiEl) {
@@ -16302,23 +16298,13 @@ export class GameRuntime {
     const nextExpanded = Boolean(expanded);
     this.chatHistoryExpanded = nextExpanded;
     this.syncChatHistoryExpandedUi();
-    if (!requestHistory || !this.chatOpen) {
+    if (this.chatOpen) {
+      this.scrollChatLogToLatest({ defer: true });
+    }
+    if (!requestHistory || !this.chatOpen || this.chatHistoryLoaded) {
       return;
     }
-    if (nextExpanded) {
-      this.requestChatHistory({
-        force: true,
-        mode: "before-today",
-        beforeCreatedAtMs: this.getLocalDayStartMs(),
-        replace: true
-      });
-      return;
-    }
-    this.requestChatHistory({
-      force: true,
-      mode: "all",
-      replace: true
-    });
+    this.requestChatHistory({ force: true });
   }
 
   setChatOpen(open) {
@@ -16371,16 +16357,10 @@ export class GameRuntime {
     if (this.chatOpen) {
       this.chalkDrawingActive = false;
       this.chalkLastStamp = null;
-      if (this.chatHistoryExpanded) {
-        this.requestChatHistory({
-          force: true,
-          mode: "before-today",
-          beforeCreatedAtMs: this.getLocalDayStartMs(),
-          replace: true
-        });
-      } else {
-        this.requestChatHistory();
+      if (!this.chatHistoryLoaded) {
+        this.requestChatHistory({ force: true });
       }
+      this.scrollChatLogToLatest({ defer: true });
     }
     this.syncMobileUiState();
     this.syncChatLiveUi();
@@ -18136,6 +18116,28 @@ export class GameRuntime {
       this.chatSeenMessageIds.clear();
       this.chatMessageSeq = 0;
     }
+    this.chatHistoryLoaded = false;
+  }
+
+  scrollChatLogToLatest({ defer = false } = {}) {
+    this.resolveUiElements();
+    if (!this.chatLogEl) {
+      return;
+    }
+    const apply = () => {
+      if (!this.chatLogEl) {
+        return;
+      }
+      this.chatLogEl.scrollTop = this.chatLogEl.scrollHeight;
+    };
+    if (defer && typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => {
+        apply();
+        requestAnimationFrame(apply);
+      });
+      return;
+    }
+    apply();
   }
 
   requestChatHistory({ force = false, mode = "", beforeCreatedAtMs = 0, replace = false } = {}) {
@@ -18181,12 +18183,11 @@ export class GameRuntime {
     if (replaceExisting) {
       this.clearChatLogs({ clearSeenIds: true });
     }
+    this.chatHistoryLoaded = true;
     if (!messages.length) {
       if (replaceExisting && this.chatHistoryExpanded) {
         this.appendChatLine("", "어제까지 불러올 채팅 기록이 없습니다.", "system");
-        if (this.chatLogEl) {
-          this.chatLogEl.scrollTop = 0;
-        }
+        this.scrollChatLogToLatest({ defer: true });
       }
       return;
     }
@@ -18228,8 +18229,8 @@ export class GameRuntime {
         senderId && this.localPlayerId && senderId === this.localPlayerId ? "self" : "remote";
       this.appendChatLine(senderName, text, lineType);
     }
-    if (replaceExisting && this.chatHistoryExpanded && this.chatLogEl) {
-      this.chatLogEl.scrollTop = 0;
+    if (replaceExisting) {
+      this.scrollChatLogToLatest({ defer: true });
     }
   }
 

@@ -1915,12 +1915,13 @@ body:not(.is-mobile-ui) #promo-place-btn {
   bottom: 14px;
   z-index: 33;
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 8px;
   align-items: stretch;
   padding: 8px;
   width: min(66vw, 400px);
   max-height: min(52vh, 420px);
+  overflow: hidden;
   border: 1px solid rgba(179, 208, 236, 0.62);
   border-radius: 10px;
   background: rgba(10, 21, 34, 0.82);
@@ -1984,8 +1985,14 @@ body:not(.is-mobile-ui) #promo-place-btn {
   max-height: min(86vh, 880px);
 }
 
+#chat-ui.history-expanded:not(.mobile-fullscreen) {
+  height: min(86vh, 880px);
+}
+
 #chat-ui.history-expanded #chat-log {
-  min-height: min(56vh, 560px);
+  min-height: 0;
+  height: 100%;
+  max-height: none;
 }
 
 #promo-hotkey-hint {
@@ -2019,9 +2026,12 @@ body:not(.is-mobile-ui) #promo-place-btn {
 }
 
 #chat-log {
-  height: auto;
+  height: min(24vh, 208px);
   min-height: 110px;
+  max-height: min(24vh, 208px);
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   padding: 8px;
   border: 1px solid rgba(174, 206, 237, 0.5);
   border-radius: 8px;
