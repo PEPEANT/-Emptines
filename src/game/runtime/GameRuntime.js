@@ -99,7 +99,7 @@ const ROOM_ZONE_LABELS = Object.freeze({
 const A_ZONE_FIXED_PORTAL_IMAGE_URL = new URL("../../../png/REC_FPS.png", import.meta.url).href;
 const HALL_FIXED_PORTAL_IMAGE_URL = new URL("../../../png/PER.png", import.meta.url).href;
 const BOX_FACE_KEYS = ["px", "nx", "py", "ny", "pz", "nz"];
-const HOST_CONTROLLED_BRIDGE_SURFACE_ID = "bridge_panel_12:nz";
+const HOST_CONTROLLED_BRIDGE_SURFACE_ID_PATTERN = /^bridge_panel_\d+:(?:px|nx|py|ny|pz|nz)$/;
 const NPC_GREETING_SESSION_KEY = "emptines_npc_greeting_seen_v1";
 const CITY_AD_BILLBOARD_BASE_PREFIX = "city_ad_board_";
 const OBJECT_EDITOR_SETTINGS_STORAGE_KEY = "objectEditorSettings_v1";
@@ -385,8 +385,8 @@ export class GameRuntime {
       persistentStateReason: ""
     };
     this.surfacePaintPolicyState = {
-      bridgePanel12Nz: {
-        surfaceId: HOST_CONTROLLED_BRIDGE_SURFACE_ID,
+      bridgePanelsNz: {
+        surfacePattern: "bridge_panel_*:*",
         allowOthersDraw: false,
         updatedAt: 0
       }
@@ -7318,17 +7318,24 @@ export class GameRuntime {
 
   normalizeSurfacePaintPolicyState(rawPolicies = null) {
     const source = rawPolicies && typeof rawPolicies === "object" ? rawPolicies : {};
+    const bridgePanelsNzSource =
+      source.bridgePanelsNz && typeof source.bridgePanelsNz === "object"
+        ? source.bridgePanelsNz
+        : source.bridge_panels_nz && typeof source.bridge_panels_nz === "object"
+          ? source.bridge_panels_nz
+          : {};
     const bridgePanel12NzSource =
       source.bridgePanel12Nz && typeof source.bridgePanel12Nz === "object"
         ? source.bridgePanel12Nz
         : source.bridge_panel_12_nz && typeof source.bridge_panel_12_nz === "object"
           ? source.bridge_panel_12_nz
           : {};
-    const fallback = this.surfacePaintPolicyState?.bridgePanel12Nz ?? {};
+    const fallback = this.surfacePaintPolicyState?.bridgePanelsNz ?? {};
     return {
-      bridgePanel12Nz: {
-        surfaceId: HOST_CONTROLLED_BRIDGE_SURFACE_ID,
+      bridgePanelsNz: {
+        surfacePattern: "bridge_panel_*:*",
         allowOthersDraw: Boolean(
+          bridgePanelsNzSource.allowOthersDraw ??
           bridgePanel12NzSource.allowOthersDraw ??
             bridgePanel12NzSource.allow_others_draw ??
             fallback.allowOthersDraw
@@ -7336,6 +7343,7 @@ export class GameRuntime {
         updatedAt: Math.max(
           0,
           Math.trunc(
+            Number(bridgePanelsNzSource.updatedAt) ||
             Number(bridgePanel12NzSource.updatedAt) ||
               Number(bridgePanel12NzSource.updated_at) ||
               Number(fallback.updatedAt) ||
@@ -7352,14 +7360,16 @@ export class GameRuntime {
   }
 
   isHostControlledSurfaceId(surfaceId = "") {
-    return String(surfaceId ?? "").trim().toLowerCase() === HOST_CONTROLLED_BRIDGE_SURFACE_ID;
+    return HOST_CONTROLLED_BRIDGE_SURFACE_ID_PATTERN.test(
+      String(surfaceId ?? "").trim().toLowerCase()
+    );
   }
 
   getHostControlledSurfaceAllowOthersDraw(surfaceId = "") {
     if (!this.isHostControlledSurfaceId(surfaceId)) {
       return true;
     }
-    return Boolean(this.surfacePaintPolicyState?.bridgePanel12Nz?.allowOthersDraw);
+    return Boolean(this.surfacePaintPolicyState?.bridgePanelsNz?.allowOthersDraw);
   }
 
   getSurfacePaintPolicyBlockedReason(surfaceId = "") {

@@ -80,7 +80,7 @@ const PROMO_BLOCKED_PORTAL_ZONES = Object.freeze([
   Object.freeze({ x: -60, z: 0, radius: 6.4 }),
   Object.freeze({ x: 0, z: 22, radius: 6.2 })
 ]);
-const HOST_CONTROLLED_SURFACE_ID = "bridge_panel_12:nz";
+const HOST_CONTROLLED_SURFACE_ID_PATTERN = /^bridge_panel_\d+:(?:px|nx|py|ny|pz|nz)$/;
 const CHAT_MESSAGE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,80}$/;
 const MAX_CHAT_MESSAGES = 5000;
 const MAX_CHAT_TEXT_CHARS = 200;
@@ -386,7 +386,7 @@ function normalizeSurfaceImageDataUrl(rawValue) {
 }
 
 function isHostControlledSurfaceId(surfaceId = "") {
-  return String(surfaceId ?? "").trim().toLowerCase() === HOST_CONTROLLED_SURFACE_ID;
+  return HOST_CONTROLLED_SURFACE_ID_PATTERN.test(String(surfaceId ?? "").trim().toLowerCase());
 }
 
 function normalizeSurfacePaintEntry(rawValue, fallbackUpdatedAt = Date.now()) {
@@ -624,20 +624,40 @@ function createObjectEditorState() {
 
 function createSurfacePoliciesState(rawValue = null) {
   const source = rawValue && typeof rawValue === "object" ? rawValue : {};
+  const bridgePanelsNzSource =
+    source.bridgePanelsNz && typeof source.bridgePanelsNz === "object"
+      ? source.bridgePanelsNz
+      : source.bridge_panels_nz && typeof source.bridge_panels_nz === "object"
+        ? source.bridge_panels_nz
+        : {};
   const bridgePanel12NzSource =
     source.bridgePanel12Nz && typeof source.bridgePanel12Nz === "object"
       ? source.bridgePanel12Nz
       : source.bridge_panel_12_nz && typeof source.bridge_panel_12_nz === "object"
         ? source.bridge_panel_12_nz
         : {};
+  const allowOthersDraw = normalizeBooleanFlag(
+    bridgePanelsNzSource.allowOthersDraw ?? bridgePanelsNzSource.allow_others_draw,
+    normalizeBooleanFlag(
+      bridgePanel12NzSource.allowOthersDraw ?? bridgePanel12NzSource.allow_others_draw,
+      false
+    )
+  );
+  const updatedAt = Math.max(
+    0,
+    Math.trunc(
+      Number(bridgePanelsNzSource.updatedAt) ||
+        Number(bridgePanelsNzSource.updated_at) ||
+        Number(bridgePanel12NzSource.updatedAt) ||
+        Number(bridgePanel12NzSource.updated_at) ||
+        Date.now()
+    )
+  );
   return {
-    bridgePanel12Nz: {
-      surfaceId: HOST_CONTROLLED_SURFACE_ID,
-      allowOthersDraw: normalizeBooleanFlag(bridgePanel12NzSource.allowOthersDraw, false),
-      updatedAt: Math.max(
-        0,
-        Math.trunc(Number(bridgePanel12NzSource.updatedAt) || Date.now())
-      )
+    bridgePanelsNz: {
+      surfacePattern: "bridge_panel_*:*",
+      allowOthersDraw,
+      updatedAt
     }
   };
 }
@@ -1320,12 +1340,21 @@ export class RoomService {
   serializeSurfacePolicies(room) {
     const policies = this.getSurfacePolicies(room);
     return {
-      bridgePanel12Nz: {
-        surfaceId: HOST_CONTROLLED_SURFACE_ID,
-        allowOthersDraw: normalizeBooleanFlag(policies?.bridgePanel12Nz?.allowOthersDraw, false),
+      bridgePanelsNz: {
+        surfacePattern: "bridge_panel_*:*",
+        allowOthersDraw: normalizeBooleanFlag(policies?.bridgePanelsNz?.allowOthersDraw, false),
         updatedAt: Math.max(
           0,
-          Math.trunc(Number(policies?.bridgePanel12Nz?.updatedAt) || Date.now())
+          Math.trunc(Number(policies?.bridgePanelsNz?.updatedAt) || Date.now())
+        )
+      },
+      // backward-compat mirror for older clients that still read a single surface key
+      bridgePanel12Nz: {
+        surfaceId: "bridge_panel_12:nz",
+        allowOthersDraw: normalizeBooleanFlag(policies?.bridgePanelsNz?.allowOthersDraw, false),
+        updatedAt: Math.max(
+          0,
+          Math.trunc(Number(policies?.bridgePanelsNz?.updatedAt) || Date.now())
         )
       }
     };
@@ -1345,15 +1374,15 @@ export class RoomService {
 
     const policies = this.getSurfacePolicies(room);
     const previous = {
-      allowOthersDraw: normalizeBooleanFlag(policies?.bridgePanel12Nz?.allowOthersDraw, false),
-      updatedAt: Math.max(0, Math.trunc(Number(policies?.bridgePanel12Nz?.updatedAt) || 0))
+      allowOthersDraw: normalizeBooleanFlag(policies?.bridgePanelsNz?.allowOthersDraw, false),
+      updatedAt: Math.max(0, Math.trunc(Number(policies?.bridgePanelsNz?.updatedAt) || 0))
     };
     const allowOthersDraw = normalizeBooleanFlag(rawAllowOthersDraw, previous.allowOthersDraw);
     if (allowOthersDraw === previous.allowOthersDraw) {
       return {
         ok: true,
         changed: false,
-        surfaceId: HOST_CONTROLLED_SURFACE_ID,
+        surfaceId,
         allowOthersDraw: previous.allowOthersDraw,
         updatedAt: previous.updatedAt,
         surfacePolicies: this.serializeSurfacePolicies(room)
@@ -1361,8 +1390,8 @@ export class RoomService {
     }
 
     const updatedAt = Date.now();
-    policies.bridgePanel12Nz = {
-      surfaceId: HOST_CONTROLLED_SURFACE_ID,
+    policies.bridgePanelsNz = {
+      surfacePattern: "bridge_panel_*:*",
       allowOthersDraw,
       updatedAt
     };
@@ -1370,7 +1399,7 @@ export class RoomService {
     return {
       ok: true,
       changed: true,
-      surfaceId: HOST_CONTROLLED_SURFACE_ID,
+      surfaceId,
       allowOthersDraw,
       updatedAt,
       surfacePolicies: this.serializeSurfacePolicies(room)
@@ -2275,7 +2304,7 @@ export class RoomService {
     }
     if (isHostControlledSurfaceId(surfaceId) && !actorIsHost) {
       const policies = this.getSurfacePolicies(room);
-      const allowOthersDraw = normalizeBooleanFlag(policies?.bridgePanel12Nz?.allowOthersDraw, false);
+      const allowOthersDraw = normalizeBooleanFlag(policies?.bridgePanelsNz?.allowOthersDraw, false);
       if (!allowOthersDraw) {
         return { ok: false, error: "host locked surface" };
       }
