@@ -887,6 +887,8 @@ export class RoomService {
     this.surfacePaintSaveQueued = false;
     this.surfacePaintForceNextFlush = false;
     this.surfacePaintSaveInFlightPromise = null;
+    this.surfacePaintLastPersistError = "";
+    this.surfacePaintLastPersistAt = 0;
     this.getDefaultRoom();
     this.loadSurfacePaintFromDisk();
   }
@@ -1035,7 +1037,7 @@ export class RoomService {
 
   async flushSurfacePaintToDiskNow() {
     if (!this.surfacePaintStorePath) {
-      return;
+      throw new Error("persistent storage path missing");
     }
     this.surfacePaintSaveQueued = true;
     this.surfacePaintForceNextFlush = true;
@@ -1050,7 +1052,7 @@ export class RoomService {
         // ignore; follow-up flush below still attempts persistence
       }
     }
-    await this.flushSurfacePaintToDisk();
+    let flushResult = await this.flushSurfacePaintToDisk();
     if (this.surfacePaintSaveInFlightPromise) {
       try {
         await this.surfacePaintSaveInFlightPromise;
@@ -1058,11 +1060,19 @@ export class RoomService {
         // ignore completion wait errors; caller only needs best-effort durability
       }
     }
+    if (!flushResult || typeof flushResult !== "object") {
+      flushResult = this.surfacePaintLastPersistError
+        ? { ok: false, error: this.surfacePaintLastPersistError }
+        : { ok: true };
+    }
+    if (!flushResult.ok) {
+      throw new Error(String(flushResult.error ?? "failed to persist surface store"));
+    }
   }
 
   async flushSurfacePaintToDisk() {
     if (!this.surfacePaintStorePath || this.surfacePaintSaveInFlight || !this.surfacePaintSaveQueued) {
-      return;
+      return { ok: false, error: "surface store unavailable" };
     }
 
     this.surfacePaintSaveInFlight = true;
@@ -1091,6 +1101,7 @@ export class RoomService {
       cityObjectRearMigrationVersion: CITY_OBJECT_REAR_MIGRATION_VERSION
     };
     const tmpPath = `${this.surfacePaintStorePath}.tmp`;
+    let persistError = "";
 
     const writePromise = (async () => {
       try {
@@ -1098,6 +1109,7 @@ export class RoomService {
         await writeFile(tmpPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
         await rename(tmpPath, this.surfacePaintStorePath);
       } catch (error) {
+        persistError = String(error?.message ?? error ?? "persist failed").trim();
         this.log?.warn?.(
           `[paint] Failed to persist surface store (${this.surfacePaintStorePath}): ${
             error?.message ?? error
@@ -1127,6 +1139,13 @@ export class RoomService {
         this.surfacePaintForceNextFlush = false;
       }
     }
+    if (persistError) {
+      this.surfacePaintLastPersistError = persistError;
+      return { ok: false, error: persistError };
+    }
+    this.surfacePaintLastPersistError = "";
+    this.surfacePaintLastPersistAt = Date.now();
+    return { ok: true };
   }
 
   getRoomByCode(code) {

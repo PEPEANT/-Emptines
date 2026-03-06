@@ -653,6 +653,24 @@ export function registerSocketHandlers({
       });
     };
 
+    const flushPersistentStateIfRequested = async (
+      payload = {},
+      ackFn,
+      featureLabel = "editing"
+    ) => {
+      if (!Boolean(payload?.forceFlush) || typeof roomService.flushSurfacePaintToDiskNow !== "function") {
+        return true;
+      }
+      try {
+        await roomService.flushSurfacePaintToDiskNow();
+        return true;
+      } catch (error) {
+        const reason = String(error?.message ?? error ?? "persist failed").trim() || "persist failed";
+        ack(ackFn, { ok: false, error: `${featureLabel} persist failed: ${reason}` });
+        return false;
+      }
+    };
+
     const emitChatHistoryState = (requestPayload = {}) => {
       const room = roomService.getRoomBySocket(socket);
       if (!room) {
@@ -1006,12 +1024,8 @@ export function registerSocketHandlers({
           authorId: socket.id
         });
       }
-      if (Boolean(payload?.forceFlush) && typeof roomService.flushSurfacePaintToDiskNow === "function") {
-        try {
-          await roomService.flushSurfacePaintToDiskNow();
-        } catch {
-          // ignore immediate flush failures; debounced persistence still applies
-        }
+      if (!(await flushPersistentStateIfRequested(payload, ackFn, "surface paint"))) {
+        return;
       }
 
       ack(ackFn, {
@@ -1574,12 +1588,8 @@ export function registerSocketHandlers({
         return;
       }
       roomService.emitPlatformUpdate(room);
-      if (Boolean(payload?.forceFlush) && typeof roomService.flushSurfacePaintToDiskNow === "function") {
-        try {
-          await roomService.flushSurfacePaintToDiskNow();
-        } catch {
-          // ignore immediate flush failures; debounced persistence still applies
-        }
+      if (!(await flushPersistentStateIfRequested(payload, ackFn, "platform editing"))) {
+        return;
       }
       ack(ackFn, { ok: true, revision: roomService.getPlatformRevision(room) });
     });
@@ -1609,12 +1619,8 @@ export function registerSocketHandlers({
         return;
       }
       roomService.emitRopeUpdate(room);
-      if (Boolean(payload?.forceFlush) && typeof roomService.flushSurfacePaintToDiskNow === "function") {
-        try {
-          await roomService.flushSurfacePaintToDiskNow();
-        } catch {
-          // ignore immediate flush failures; debounced persistence still applies
-        }
+      if (!(await flushPersistentStateIfRequested(payload, ackFn, "rope editing"))) {
+        return;
       }
       ack(ackFn, { ok: true, revision: roomService.getRopeRevision(room) });
     });
@@ -1651,12 +1657,8 @@ export function registerSocketHandlers({
         return;
       }
       roomService.emitObjectPositionUpdate(room);
-      if (Boolean(payload?.forceFlush) && typeof roomService.flushSurfacePaintToDiskNow === "function") {
-        try {
-          await roomService.flushSurfacePaintToDiskNow();
-        } catch {
-          // ignore immediate flush failures; debounced persistence still applies
-        }
+      if (!(await flushPersistentStateIfRequested(payload, ackFn, "object editing"))) {
+        return;
       }
       ack(ackFn, { ok: true, revision: roomService.getObjectRevision(room) });
     });
@@ -1711,12 +1713,8 @@ export function registerSocketHandlers({
       }
       roomService.emitPromoObjectsUpdate(room);
       roomService.emitRoomUpdate(room);
-      if (Boolean(payload?.forceFlush) && typeof roomService.flushSurfacePaintToDiskNow === "function") {
-        try {
-          await roomService.flushSurfacePaintToDiskNow();
-        } catch {
-          // ignore immediate flush failures; debounced persistence still applies
-        }
+      if (!(await flushPersistentStateIfRequested(payload, ackFn, "promo"))) {
+        return;
       }
       ack(ackFn, {
         ok: true,
@@ -1770,12 +1768,8 @@ export function registerSocketHandlers({
       if (result.changed) {
         roomService.emitPromoObjectsUpdate(room);
         roomService.emitRoomUpdate(room);
-        if (Boolean(payload?.forceFlush) && typeof roomService.flushSurfacePaintToDiskNow === "function") {
-          try {
-            await roomService.flushSurfacePaintToDiskNow();
-          } catch {
-            // ignore immediate flush failures; debounced persistence still applies
-          }
+        if (!(await flushPersistentStateIfRequested(payload, ackFn, "promo"))) {
+          return;
         }
       }
       ack(ackFn, {
