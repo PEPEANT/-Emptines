@@ -1,4 +1,6 @@
 import { Server } from "socket.io";
+import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { loadRuntimeConfig } from "../config/runtimeConfig.js";
 import { RoomService } from "../domain/RoomService.js";
 import { createStatusServer } from "../http/createStatusServer.js";
@@ -15,10 +17,48 @@ function buildFallbackRoomStats(maxRoomPlayers) {
   };
 }
 
+function validatePersistentStateStorePath(storePath) {
+  const normalizedPath = String(storePath ?? "").trim();
+  if (!normalizedPath) {
+    return {
+      ok: false,
+      reason: "persistent storage path missing"
+    };
+  }
+
+  const probePath = `${normalizedPath}.probe-${process.pid}-${Date.now()}`;
+  try {
+    mkdirSync(dirname(normalizedPath), { recursive: true });
+    writeFileSync(probePath, "", "utf8");
+    unlinkSync(probePath);
+    return { ok: true, path: normalizedPath };
+  } catch (error) {
+    try {
+      unlinkSync(probePath);
+    } catch {
+      // ignore cleanup failures
+    }
+    return {
+      ok: false,
+      reason: error?.message ?? String(error ?? "storage validation failed")
+    };
+  }
+}
+
 export function startRealtimeServer(options = {}) {
   const env = options.env ?? process.env;
   const log = options.log ?? console;
   const config = loadRuntimeConfig(env);
+  const persistenceCheck = validatePersistentStateStorePath(config.surfacePaintStorePath);
+  config.persistentStateAvailable = persistenceCheck.ok;
+  config.persistentStateReason = persistenceCheck.ok
+    ? ""
+    : String(persistenceCheck.reason ?? "persistent storage unavailable");
+  if (!persistenceCheck.ok) {
+    config.surfacePaintStorePath = "";
+    config.surfacePaintMode = "off";
+    config.promoMode = "off";
+  }
   const linkGateVersion = String(env.EMPTINES_LINK_GATE_VERSION ?? "2026-03-03-allowlist-v1").trim();
   const linkGateDisabledRaw = String(env.EMPTINES_LINK_GATE_DISABLED ?? "").trim().toLowerCase();
   const linkGateEnabled =
@@ -135,6 +175,9 @@ export function startRealtimeServer(options = {}) {
     log.log(`Persistent room: ${config.defaultRoomCode} (capacity ${config.maxRoomPlayers})`);
     log.log(`[paint] store path: ${config.surfacePaintStorePath || "(disabled)"}`);
     log.log(`[paint] map layout version: ${config.mapLayoutVersion}`);
+    if (!config.persistentStateAvailable) {
+      log.warn(`[paint] persistent state unavailable: ${config.persistentStateReason}`);
+    }
     log.log(`[policy] surface paint mode: ${config.surfacePaintMode}`);
     log.log(`[policy] promo mode: ${config.promoMode}`);
     log.log(

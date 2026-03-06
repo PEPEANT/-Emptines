@@ -43,6 +43,17 @@ function getFeatureModeBlockReason(mode, featureLabel, isHost) {
   return `${featureLabel} disabled`;
 }
 
+function getPersistentStateBlockReason(config, featureLabel = "editing") {
+  if (config?.persistentStateAvailable !== false) {
+    return "";
+  }
+  const reason = String(config?.persistentStateReason ?? "").trim();
+  if (!reason) {
+    return `${featureLabel} disabled`;
+  }
+  return `${featureLabel} disabled: ${reason}`;
+}
+
 function sanitizeChatHistoryRequestPayload(payload = {}) {
   const modeRaw = String(payload?.mode ?? "").trim().toLowerCase();
   const mode = modeRaw === "before-today" ? "before-today" : "all";
@@ -939,6 +950,11 @@ export function registerSocketHandlers({
         return;
       }
       const isHost = roomService.isHost(room, socket.id);
+      const persistenceError = getPersistentStateBlockReason(config, "surface paint");
+      if (persistenceError) {
+        ack(ackFn, { ok: false, error: persistenceError });
+        return;
+      }
       const paintModeError = getFeatureModeBlockReason(
         config?.surfacePaintMode,
         "surface paint",
@@ -1137,6 +1153,11 @@ export function registerSocketHandlers({
         ack(ackFn, { ok: false, error: "host only" });
         return;
       }
+      const persistenceError = getPersistentStateBlockReason(config, "portal ad");
+      if (persistenceError) {
+        ack(ackFn, { ok: false, error: persistenceError });
+        return;
+      }
 
       const result = roomService.setMainPortalAdImage(
         room,
@@ -1164,6 +1185,11 @@ export function registerSocketHandlers({
       }
       if (!roomService.isHost(room, socket.id)) {
         ack(ackFn, { ok: false, error: "host only" });
+        return;
+      }
+      const persistenceError = getPersistentStateBlockReason(config, "portal ad");
+      if (persistenceError) {
+        ack(ackFn, { ok: false, error: persistenceError });
         return;
       }
 
@@ -1288,6 +1314,11 @@ export function registerSocketHandlers({
         ack(ackFn, { ok: false, error: "host only" });
         return;
       }
+      const persistenceError = getPersistentStateBlockReason(config, "billboard");
+      if (persistenceError) {
+        ack(ackFn, { ok: false, error: persistenceError });
+        return;
+      }
 
       const result = roomService.setRightBillboardVideo(
         room,
@@ -1319,6 +1350,11 @@ export function registerSocketHandlers({
         ack(ackFn, { ok: false, error: "host only" });
         return;
       }
+      const persistenceError = getPersistentStateBlockReason(config, "billboard");
+      if (persistenceError) {
+        ack(ackFn, { ok: false, error: persistenceError });
+        return;
+      }
 
       const result = roomService.resetRightBillboard(room);
       if (!result.ok) {
@@ -1345,6 +1381,11 @@ export function registerSocketHandlers({
       }
       if (!roomService.isHost(room, socket.id)) {
         ack(ackFn, { ok: false, error: "host only" });
+        return;
+      }
+      const persistenceError = getPersistentStateBlockReason(config, "billboard");
+      if (persistenceError) {
+        ack(ackFn, { ok: false, error: persistenceError });
         return;
       }
 
@@ -1382,6 +1423,11 @@ export function registerSocketHandlers({
         ack(ackFn, { ok: false, error: "host only" });
         return;
       }
+      const persistenceError = getPersistentStateBlockReason(config, "billboard");
+      if (persistenceError) {
+        ack(ackFn, { ok: false, error: persistenceError });
+        return;
+      }
 
       const result = roomService.setLeftBillboardImage(
         room,
@@ -1411,6 +1457,11 @@ export function registerSocketHandlers({
       }
       if (!roomService.isHost(room, socket.id)) {
         ack(ackFn, { ok: false, error: "host only" });
+        return;
+      }
+      const persistenceError = getPersistentStateBlockReason(config, "billboard");
+      if (persistenceError) {
+        ack(ackFn, { ok: false, error: persistenceError });
         return;
       }
 
@@ -1501,6 +1552,11 @@ export function registerSocketHandlers({
         ack(ackFn, { ok: false, error: "host only" });
         return;
       }
+      const persistenceError = getPersistentStateBlockReason(config, "platform editing");
+      if (persistenceError) {
+        ack(ackFn, { ok: false, error: persistenceError });
+        return;
+      }
       const result = roomService.setPlatforms(room, payload?.platforms);
       if (!result.ok) {
         ack(ackFn, result);
@@ -1529,6 +1585,11 @@ export function registerSocketHandlers({
       }
       if (!roomService.isHost(room, socket.id)) {
         ack(ackFn, { ok: false, error: "host only" });
+        return;
+      }
+      const persistenceError = getPersistentStateBlockReason(config, "rope editing");
+      if (persistenceError) {
+        ack(ackFn, { ok: false, error: persistenceError });
         return;
       }
       const result = roomService.setRopes(room, payload?.ropes);
@@ -1565,6 +1626,11 @@ export function registerSocketHandlers({
         ack(ackFn, { ok: false, error: "host only" });
         return;
       }
+      const persistenceError = getPersistentStateBlockReason(config, "object editing");
+      if (persistenceError) {
+        ack(ackFn, { ok: false, error: persistenceError });
+        return;
+      }
       const result = roomService.setObjectPositions(
         room,
         payload?.positions ?? payload?.objectPositions ?? payload
@@ -1599,6 +1665,11 @@ export function registerSocketHandlers({
         return;
       }
       const isHost = roomService.isHost(room, socket.id);
+      const persistenceError = getPersistentStateBlockReason(config, "promo");
+      if (persistenceError) {
+        ack(ackFn, { ok: false, error: persistenceError });
+        return;
+      }
       const promoModeError = getFeatureModeBlockReason(config?.promoMode, "promo", isHost);
       if (promoModeError) {
         ack(ackFn, { ok: false, error: promoModeError });
@@ -1654,6 +1725,11 @@ export function registerSocketHandlers({
         return;
       }
       const isHost = roomService.isHost(room, socket.id);
+      const persistenceError = getPersistentStateBlockReason(config, "promo");
+      if (persistenceError) {
+        ack(ackFn, { ok: false, error: persistenceError });
+        return;
+      }
       const promoModeError = getFeatureModeBlockReason(config?.promoMode, "promo", isHost);
       if (promoModeError) {
         ack(ackFn, { ok: false, error: promoModeError });
@@ -1705,6 +1781,11 @@ export function registerSocketHandlers({
       }
       if (!roomService.isHost(room, socket.id)) {
         ack(ackFn, { ok: false, error: "host only" });
+        return;
+      }
+      const persistenceError = getPersistentStateBlockReason(config, "editor settings");
+      if (persistenceError) {
+        ack(ackFn, { ok: false, error: persistenceError });
         return;
       }
       const result = roomService.setObjectEditor(room, payload?.settings ?? payload);

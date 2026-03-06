@@ -19124,7 +19124,7 @@ export class GameRuntime {
         : GAME_CONSTANTS.DYNAMIC_RESOLUTION.mobileMinRatio;
       this.dynamicResolution.enabled = true;
     } else {
-      const remoteHardCap = Math.min(this.baseRemoteHardCap, 48);
+      const remoteHardCap = Math.min(this.baseRemoteHardCap, 32);
       const meshDistance = Math.min(Math.sqrt(this.baseRemoteMeshDistanceSq), 96);
       const labelDistance = Math.min(Math.sqrt(this.baseRemoteLabelDistanceSq), 30);
       const farDistance = Math.min(Math.sqrt(this.baseRemoteFarDistanceSq), 52);

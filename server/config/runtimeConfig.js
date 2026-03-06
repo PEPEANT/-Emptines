@@ -9,8 +9,8 @@ export const DEFAULT_SURFACE_PAINT_SAVE_DEBOUNCE_MS = 300;
 export const DEFAULT_MAX_SOCKET_PAYLOAD_BYTES = 35_000_000;
 export const DEFAULT_STATIC_CLIENT_DIR = "dist";
 export const DEFAULT_MAP_LAYOUT_VERSION = "2026-03-06-layout-v3";
-export const DEFAULT_SURFACE_PAINT_MODE = "public";
-export const DEFAULT_PROMO_MODE = "public";
+export const DEFAULT_SURFACE_PAINT_MODE = "host";
+export const DEFAULT_PROMO_MODE = "host";
 export const DEFAULT_ANTI_ABUSE_CONFIG = Object.freeze({
   maxConnectionsPerIp: 3,
   connectionWindowMs: 60_000,
@@ -42,7 +42,7 @@ export const DEFAULT_SERVER_SIM_CONFIG = {
 
 export const DEFAULT_SNAPSHOT_CONFIG = {
   aoiRadius: 380,
-  maxPeersPerClient: 48,
+  maxPeersPerClient: 32,
   heartbeatMs: 950,
   minMoveSq: 0.00064,
   minYawDelta: 0.01,
