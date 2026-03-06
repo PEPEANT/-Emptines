@@ -3066,7 +3066,7 @@ export class GameRuntime {
       line1: "프로젝트 UGC : 호스트 지정형",
       line2: "링크 설정 후 즉시 사용 가능",
       line3: "",
-      rotationY: Math.PI,
+      rotationY: 0,
       palette: {
         bgFrom: "rgba(6, 16, 28, 0.50)",
         bgTo: "rgba(8, 24, 39, 0.58)",
@@ -3264,7 +3264,7 @@ export class GameRuntime {
       billboardBaseYOffset: 1.35,
       topAdPanelYOffset: 1.65,
       topAdScale: 1.36,
-      rotationY: Math.PI,
+      rotationY: 0,
       onTopAdReady: (payload = {}) => {
         this.portalTopAdBaseTexture = payload?.texture ?? null;
         this.portalTopAdScreenMaterial = payload?.material ?? null;
@@ -19096,7 +19096,7 @@ export class GameRuntime {
 
   getDevicePixelRatioCap() {
     if (!this.mobileEnabled) {
-      return 1.5;
+      return 1.25;
     }
     return this.isLowSpecMobile ? 1.25 : 1.5;
   }
@@ -19124,10 +19124,10 @@ export class GameRuntime {
         : GAME_CONSTANTS.DYNAMIC_RESOLUTION.mobileMinRatio;
       this.dynamicResolution.enabled = true;
     } else {
-      const remoteHardCap = Math.min(this.baseRemoteHardCap, 32);
-      const meshDistance = Math.min(Math.sqrt(this.baseRemoteMeshDistanceSq), 96);
-      const labelDistance = Math.min(Math.sqrt(this.baseRemoteLabelDistanceSq), 30);
-      const farDistance = Math.min(Math.sqrt(this.baseRemoteFarDistanceSq), 52);
+      const remoteHardCap = Math.min(this.baseRemoteHardCap, 28);
+      const meshDistance = Math.min(Math.sqrt(this.baseRemoteMeshDistanceSq), 84);
+      const labelDistance = Math.min(Math.sqrt(this.baseRemoteLabelDistanceSq), 26);
+      const farDistance = Math.min(Math.sqrt(this.baseRemoteFarDistanceSq), 46);
       this.remoteHardCap = remoteHardCap;
       this.remoteMeshDistanceSq = Math.pow(meshDistance, 2);
       this.remoteLabelDistanceSq = Math.pow(labelDistance, 2);
