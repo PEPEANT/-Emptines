@@ -2781,8 +2781,8 @@ export class GameRuntime {
     createAxisGuideSign({
       x: 11.2,
       z: 51.6,
-      line1: "LAB",
-      line2: "host-ready experiment portal",
+      line1: "프로젝트 UGC",
+      line2: "host-ready portal",
       accent: 0xb1d7ff
     });
 
@@ -3030,7 +3030,7 @@ export class GameRuntime {
     const portalBillboard = this.createPortalTimeBillboard({
       dynamic: false,
       topAdImageUrl: PORTAL_TOP_AD_IMAGE_URL,
-      line1: "실험 포탈 : 호스트 지정형",
+      line1: "프로젝트 UGC : 호스트 지정형",
       line2: "링크 설정 후 즉시 사용 가능",
       line3: "",
       rotationY: Math.PI,
@@ -9251,7 +9251,7 @@ export class GameRuntime {
       if (destination) {
         this.triggerPortalTransfer(destination, {
           immediate: true,
-          transitionText: "실험 포탈 이동 중...",
+          transitionText: "프로젝트 UGC 이동 중...",
           portalHint: "ox"
         });
       }
