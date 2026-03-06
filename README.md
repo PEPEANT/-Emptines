@@ -4,13 +4,23 @@
 
 이 프로젝트는 단순한 게임이 아니라, 인간과 AI가 공존하는 포스트휴먼 메타도시를 위한 장기 설계도다.
 
-- 세계관 기준서: [`WORLD_LORE.md`](./WORLD_LORE.md)
-- 장기 선언문: [`WHITEPAPER.md`](./WHITEPAPER.md)
+- 문서 시작점: [`docs/INDEX.md`](./docs/INDEX.md)
+- 백서 정본: `C:\Users\rneet\OneDrive\Desktop\DIS\EM\WHITEPAPER.md`
+- 세계관 정본: `C:\Users\rneet\OneDrive\Desktop\DIS\EM\WORLD_LORE.md`
+- 로컬 백서 미러: [`WHITEPAPER.md`](./WHITEPAPER.md)
+- 로컬 세계관 미러: [`WORLD_LORE.md`](./WORLD_LORE.md)
+- UGC 기준 정본: `C:\Users\rneet\OneDrive\Desktop\UGC\AGENTS.md`
 - 기준 시작일: `2026-03-05`
-- 장기 목표 시점: `2046-03-05`
+- 장기 목표 시점: `2045-03-05`
 
 이 저장소는 AGI/ASI 시대의 협업 제작을 염두에 두고,
 사람과 에이전트가 함께 이어서 만들 수 있는 구조를 지향한다.
+
+Canonical ownership:
+
+- `EM`은 백서와 세계관의 정본 저장소다.
+- `UGC`는 오브젝트 배치와 UGC 운영 규칙의 정본 저장소다.
+- `Emptines`는 공식 사이트의 런타임 구현 저장소다.
 
 Minimal void-world multiplayer prototype built with Three.js + Vite.
 
