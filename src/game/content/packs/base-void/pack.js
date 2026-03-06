@@ -181,21 +181,21 @@ export const BASE_VOID_PACK = {
         railColor: 0x8fa2b8
       },
       city: {
-        spawn: [0, GAME_CONSTANTS.PLAYER_HEIGHT, -8]
+        spawn: [0, GAME_CONSTANTS.PLAYER_HEIGHT, -8],
+        lookTarget: [0, GAME_CONSTANTS.PLAYER_HEIGHT, 44]
       },
       portal: {
-        // OX portal moved to B-zone (opposite side of FPS portal).
-        position: [60, 0.08, 0],
-        // Align OX portal to B-zone center lane and rotate 90deg.
+        // Right-side experiment portal. Leave the default target blank so the host can plug one later.
+        position: [60, 0.08, -4],
         yawDegrees: 90,
         radius: 4.4,
         cooldownSeconds: 60,
         warningSeconds: 16,
         openSeconds: 24,
-        targetUrl: "https://singularity-ox.onrender.com/?v=08d5432",
+        targetUrl: "",
         aZoneTargetUrl: "https://reclaim-fps.onrender.com/",
-        // Old OX position now hosts the concert hall portal.
-        hallPosition: [0, 0.08, 22],
+        // Move the live/performance portal to the left side pad so the center lane stays open.
+        hallPosition: [-60, 0.08, -4],
         hallTargetUrl:
           "https://performance-i3w5.onrender.com/performance/?host=0&room=event01&from=emptines"
       }

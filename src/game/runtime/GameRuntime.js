@@ -86,8 +86,7 @@ const MAX_LEFT_BILLBOARD_IMAGE_CHARS = 4_200_000;
 const MAX_MAIN_PORTAL_AD_IMAGE_CHARS = 4_200_000;
 const MAX_BILLBOARD_VIDEO_DATA_URL_CHARS = 30_000_000;
 const MAX_BILLBOARD_VIDEO_BYTES = 20 * 1024 * 1024;
-const DEFAULT_PORTAL_TARGET_URL =
-  "https://singularity-ox.onrender.com/?v=08d5432";
+const DEFAULT_PORTAL_TARGET_URL = "";
 const A_ZONE_FIXED_PORTAL_TARGET_URL = "https://reclaim-fps.onrender.com/";
 const HALL_FIXED_PORTAL_TARGET_URL =
   "https://performance-i3w5.onrender.com/performance/?host=0&room=event01&from=emptines";
@@ -110,7 +109,8 @@ const PORTAL_MOVABLE_IDS = Object.freeze({
   fps: "portal_fps",
   hall: "portal_hall"
 });
-const MAIN_PORTAL_ONLY_MODE = true;
+const A_ZONE_PORTAL_ENABLED = false;
+const HALL_VENUE_BACKDROP_ENABLED = false;
 const OBJECT_EDITOR_ROTATE_STEP_RAD = Math.PI / 36; // 5deg
 const OBJECT_EDITOR_ROTATE_SNAP_STEP_RAD = Math.PI / 12; // 15deg
 const OBJECT_EDITOR_MIN_LIMIT = 1;
@@ -876,6 +876,10 @@ export class GameRuntime {
       cityConfig?.spawn,
       [0, GAME_CONSTANTS.PLAYER_HEIGHT, -8]
     );
+    this.cityLookTarget = parseVec3(
+      cityConfig?.lookTarget,
+      [this.citySpawn.x, GAME_CONSTANTS.PLAYER_HEIGHT, this.citySpawn.z + 52]
+    );
     this.entryMusicSourcePosition.set(this.citySpawn.x, 4.2, this.citySpawn.z + 18);
     this.bridgeWidth = Math.max(4, Number(bridgeConfig?.width) || 10);
     this.bridgeGateHalfWidth = Math.max(1.5, this.bridgeWidth * 0.28);
@@ -903,13 +907,6 @@ export class GameRuntime {
       portalConfig?.hallTargetUrl ?? HALL_FIXED_PORTAL_TARGET_URL,
       this.normalizePortalTargetUrl(HALL_FIXED_PORTAL_TARGET_URL, "")
     );
-    if (MAIN_PORTAL_ONLY_MODE) {
-      // Single-portal mode defaults the main portal destination to the performance server.
-      this.portalTargetUrl = this.normalizePortalTargetUrl(
-        this.portalTargetUrl || this.hallPortalTargetUrl,
-        this.normalizePortalTargetUrl(HALL_FIXED_PORTAL_TARGET_URL, "")
-      );
-    }
     this.hostAZonePortalTargetCandidate = this.aZonePortalTargetUrl;
     this.hostAZonePortalTargetSynced = true;
     this.portalPrewarmLastAt = new Map();
@@ -2476,6 +2473,85 @@ export class GameRuntime {
       }
     }
 
+    const cityAxisGroup = new THREE.Group();
+    const axisRoadMaterial = new THREE.MeshStandardMaterial({
+      color: 0x313b47,
+      roughness: 0.78,
+      metalness: 0.08,
+      emissive: 0x18222e,
+      emissiveIntensity: 0.14
+    });
+    const axisTrimMaterial = new THREE.MeshStandardMaterial({
+      color: 0x88a8c4,
+      roughness: 0.34,
+      metalness: 0.46,
+      emissive: 0x2d4b66,
+      emissiveIntensity: 0.22
+    });
+    const axisGlowMaterial = new THREE.MeshBasicMaterial({
+      color: 0x7fe4ff,
+      transparent: true,
+      opacity: 0.38,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+
+    const axisRoad = new THREE.Mesh(
+      new THREE.BoxGeometry(18.5, 0.08, 84),
+      axisRoadMaterial
+    );
+    axisRoad.position.set(0, 0.04, 54);
+    axisRoad.receiveShadow = true;
+    cityAxisGroup.add(axisRoad);
+
+    const axisCenterStripe = new THREE.Mesh(
+      new THREE.BoxGeometry(1.2, 0.02, 76),
+      axisTrimMaterial
+    );
+    axisCenterStripe.position.set(0, 0.091, 56);
+    axisCenterStripe.receiveShadow = true;
+    cityAxisGroup.add(axisCenterStripe);
+
+    for (const side of [-1, 1]) {
+      const axisShoulder = new THREE.Mesh(
+        new THREE.BoxGeometry(1.2, 0.12, 82),
+        axisTrimMaterial
+      );
+      axisShoulder.position.set(side * 8.9, 0.06, 54);
+      axisShoulder.receiveShadow = true;
+      cityAxisGroup.add(axisShoulder);
+
+      const axisGlowRail = new THREE.Mesh(
+        new THREE.BoxGeometry(0.16, 0.26, 82),
+        axisGlowMaterial
+      );
+      axisGlowRail.position.set(side * 8.25, 0.18, 54);
+      axisGlowRail.renderOrder = 7;
+      cityAxisGroup.add(axisGlowRail);
+    }
+
+    const stepDepth = 5.8;
+    const stepRise = 0.04;
+    for (let stepIndex = 0; stepIndex < 5; stepIndex += 1) {
+      const step = new THREE.Mesh(
+        new THREE.BoxGeometry(16.2 + stepIndex * 1.2, 0.08 + stepIndex * stepRise, stepDepth),
+        axisRoadMaterial
+      );
+      step.position.set(0, 0.04 + stepIndex * stepRise * 0.5, 18 + stepIndex * (stepDepth - 0.15));
+      step.receiveShadow = true;
+      cityAxisGroup.add(step);
+    }
+
+    const axisLanding = new THREE.Mesh(
+      new THREE.BoxGeometry(20.5, 0.12, 12),
+      axisRoadMaterial
+    );
+    axisLanding.position.set(0, 0.06, 34);
+    axisLanding.receiveShadow = true;
+    cityAxisGroup.add(axisLanding);
+
+    cityGroup.add(cityAxisGroup);
+
     this.addPlazaBillboards(cityGroup);
     if (this.isChalkFeatureEnabled()) {
       this.addChalkTable(cityGroup);
@@ -2648,7 +2724,18 @@ export class GameRuntime {
     const portalGroup = new THREE.Group();
     portalGroup.position.copy(this.portalFloorPosition);
     portalGroup.position.y = 0;
-    portalGroup.rotation.y = this.portalYawRadians;
+    const portalFacingDirection = new THREE.Vector3(
+      this.citySpawn.x - portalGroup.position.x,
+      0,
+      this.citySpawn.z - portalGroup.position.z
+    );
+    if (portalFacingDirection.lengthSq() < 0.0001) {
+      portalGroup.rotation.y = this.portalYawRadians;
+    } else {
+      portalFacingDirection.normalize();
+      portalGroup.rotation.y = Math.atan2(portalFacingDirection.x, portalFacingDirection.z);
+      this.portalYawRadians = portalGroup.rotation.y;
+    }
 
     const portalBase = new THREE.Mesh(
       new THREE.TorusGeometry(this.portalRadius * 0.92, 0.24, 18, this.mobileEnabled ? 28 : 56),
@@ -2707,8 +2794,8 @@ export class GameRuntime {
     const portalBillboard = this.createPortalTimeBillboard({
       dynamic: false,
       topAdImageUrl: PORTAL_TOP_AD_IMAGE_URL,
-      line1: "메인 포탈 : 상시 입장 가능",
-      line2: "링크 변경 즉시 적용",
+      line1: "실험 포탈 : 호스트 지정형",
+      line2: "링크 설정 후 즉시 사용 가능",
       line3: "",
       rotationY: Math.PI,
       palette: {
@@ -2930,16 +3017,11 @@ export class GameRuntime {
     });
     hallPortalGroup.add(hallPortalBillboard);
 
-    // Low-poly concert hall building behind the hall portal.
-    const hallBackDirection = hallFacingDirection.clone().multiplyScalar(-1);
-    const hallVenueOffset = Math.max(18, hallPortalRadius * 4.25);
-    const hallVenueCenter = new THREE.Vector3(
-      hallPortalGroup.position.x + hallBackDirection.x * hallVenueOffset,
-      0,
-      hallPortalGroup.position.z + hallBackDirection.z * hallVenueOffset
-    );
+    // Keep the old concert hall mesh parked and hidden so the center axis stays open.
+    const hallVenueCenter = new THREE.Vector3(0, -220, 0);
     const hallVenueGroup = new THREE.Group();
     hallVenueGroup.position.copy(hallVenueCenter);
+    hallVenueGroup.visible = HALL_VENUE_BACKDROP_ENABLED;
 
     const hallVenueWallMat = new THREE.MeshStandardMaterial({
       color: 0x3e4554,
@@ -3066,10 +3148,12 @@ export class GameRuntime {
         maxY
       );
     };
-    registerHallVenueCollider(0, 2.2, 24.8, 18.2, 0, 17);
-    registerHallVenueCollider(-14.2, 0.8, 7.4, 12.4, 0, 13);
-    registerHallVenueCollider(14.2, 0.8, 7.4, 12.4, 0, 13);
-    registerHallVenueCollider(0, -8.5, 11.2, 4.6, 0.5, 7);
+    if (HALL_VENUE_BACKDROP_ENABLED) {
+      registerHallVenueCollider(0, 2.2, 24.8, 18.2, 0, 17);
+      registerHallVenueCollider(-14.2, 0.8, 7.4, 12.4, 0, 13);
+      registerHallVenueCollider(14.2, 0.8, 7.4, 12.4, 0, 13);
+      registerHallVenueCollider(0, -8.5, 11.2, 4.6, 0.5, 7);
+    }
 
     // Portal anchors are movable objects. Their collider slot exists only so
     // they can reuse object-state persistence/edit flows without affecting collisions.
@@ -3154,11 +3238,9 @@ export class GameRuntime {
     this.bridgeBoundaryRing = null;
     this.bridgeBoundaryHalo = null;
     this.bridgeBoundaryBeam = null;
-    if (MAIN_PORTAL_ONLY_MODE) {
-      portalGroup.visible = false;
-      aZonePortalGroup.visible = false;
-      hallPortalGroup.visible = true;
-    }
+    portalGroup.visible = true;
+    aZonePortalGroup.visible = A_ZONE_PORTAL_ENABLED;
+    hallPortalGroup.visible = true;
     const hubChildren = [
       bridgeGroup,
       cityGroup,
@@ -3167,10 +3249,9 @@ export class GameRuntime {
       bridgeFarEndTempleGate,
       cityEntryTempleGate
     ];
-    if (MAIN_PORTAL_ONLY_MODE) {
-      hubChildren.push(hallPortalGroup);
-    } else {
-      hubChildren.push(portalGroup, aZonePortalGroup, hallPortalGroup);
+    hubChildren.push(portalGroup, hallPortalGroup);
+    if (A_ZONE_PORTAL_ENABLED) {
+      hubChildren.push(aZonePortalGroup);
     }
     hubChildren.push(hallVenueGroup);
     group.add(...hubChildren);
@@ -7560,7 +7641,7 @@ export class GameRuntime {
       this.flowStage = "city_live";
       this.bridgeNpcPlayApproved = true;
       this.playerPosition.copy(this.citySpawn);
-      this.yaw = this.getLookYaw(this.citySpawn, this.portalFloorPosition);
+      this.yaw = this.getLookYaw(this.citySpawn, this.cityLookTarget);
       this.pitch = -0.02;
       this.hubFlowUiEl?.classList.add("hidden");
       this.hideNicknameGate();
@@ -7571,7 +7652,10 @@ export class GameRuntime {
       return;
     }
 
-    // Keep bridge entry as default. Fast city rejoin is opt-in via query.
+    const forceBridgeIntro =
+      this.parseQueryFlag("bridge_intro") || this.parseQueryFlag("bridgeIntro");
+
+    // Open-room default: enter straight into the public city plaza unless bridge intro is requested.
     let savedNickname = "";
     try { savedNickname = String(localStorage.getItem("emptines_nickname") ?? "").trim(); } catch (_) {}
     if (savedNickname.length >= 2) {
@@ -7601,6 +7685,22 @@ export class GameRuntime {
         return;
       }
     }
+    if (!forceBridgeIntro) {
+      this.pendingPlayerNameSync = true;
+      this.pendingAuthoritativeStateSync = true;
+      this.flowStage = "city_live";
+      this.bridgeNpcPlayApproved = true;
+      this.playerPosition.copy(this.citySpawn);
+      this.yaw = this.getLookYaw(this.citySpawn, this.cityLookTarget);
+      this.pitch = -0.02;
+      this.hubFlowUiEl?.classList.add("hidden");
+      this.hideNicknameGate();
+      this.hideNpcChoiceGate();
+      this.setMirrorGateVisible(false);
+      this.lastSafePosition.copy(this.playerPosition);
+      this.ensureEntryMusicPlayback();
+      return;
+    }
     const allowFastCityRejoin =
       this.parseQueryFlag("skip_bridge") ||
       this.parseQueryFlag("skipBridge") ||
@@ -7613,7 +7713,7 @@ export class GameRuntime {
       this.flowStage = "city_live";
       this.bridgeNpcPlayApproved = true;
       this.playerPosition.copy(this.citySpawn);
-      this.yaw = this.getLookYaw(this.citySpawn, this.portalFloorPosition);
+      this.yaw = this.getLookYaw(this.citySpawn, this.cityLookTarget);
       this.pitch = -0.02;
       this.hubFlowUiEl?.classList.add("hidden");
       this.hideNicknameGate();
@@ -8872,12 +8972,12 @@ export class GameRuntime {
     if (hallPortalOpenNow && !this.portalTransitioning && this.isPlayerInHallPortalZone()) {
       this.triggerPortalTransfer(this.buildHallPortalTransferUrl(), {
         immediate: true,
-        transitionText: "공연장 포탈 이동 중...",
+        transitionText: "라이브 포탈 이동 중...",
         portalHint: "hall"
       });
       return;
     }
-    if (!MAIN_PORTAL_ONLY_MODE && !this.portalTransitioning && this.isPlayerInAZonePortalZone()) {
+    if (A_ZONE_PORTAL_ENABLED && !this.portalTransitioning && this.isPlayerInAZonePortalZone()) {
       this.triggerPortalTransfer(this.buildAZonePortalTransferUrl(), {
         immediate: true,
         transitionText: "FPS 포탈 이동 중...",
@@ -8890,7 +8990,7 @@ export class GameRuntime {
       if (destination) {
         this.triggerPortalTransfer(destination, {
           immediate: true,
-          transitionText: "메인 포탈 이동 중...",
+          transitionText: "실험 포탈 이동 중...",
           portalHint: "ox"
         });
       }
@@ -9323,9 +9423,6 @@ export class GameRuntime {
   }
 
   isPlayerInPortalZone() {
-    if (MAIN_PORTAL_ONLY_MODE) {
-      return false;
-    }
     const triggerRadius = this.portalRadius * 0.78;
     const triggerRadiusSquared = triggerRadius * triggerRadius;
     // Only the city-end portal (under billboard) is interactive.
@@ -9336,7 +9433,7 @@ export class GameRuntime {
   }
 
   isPlayerInAZonePortalZone() {
-    if (MAIN_PORTAL_ONLY_MODE) {
+    if (!A_ZONE_PORTAL_ENABLED) {
       return false;
     }
     const triggerRadius = this.aZonePortalRadius * 0.78;
@@ -9609,9 +9706,9 @@ export class GameRuntime {
       Number(this.citySpawn?.z) || -8
     );
     const lookTarget = new THREE.Vector3(
-      Number(this.portalFloorPosition?.x) || 0,
+      Number(this.cityLookTarget?.x) || 0,
       GAME_CONSTANTS.PLAYER_HEIGHT,
-      Number(this.portalFloorPosition?.z) || 22
+      Number(this.cityLookTarget?.z) || 44
     );
     const yaw = this.getLookYaw(spawnPosition, lookTarget);
 
@@ -9774,14 +9871,14 @@ export class GameRuntime {
   }
 
   buildAZonePortalTransferUrl() {
+    if (!A_ZONE_PORTAL_ENABLED) {
+      return "";
+    }
     const target = String(this.aZonePortalTargetUrl ?? "").trim();
     return target || A_ZONE_FIXED_PORTAL_TARGET_URL;
   }
 
   buildHallPortalTransferUrl() {
-    if (MAIN_PORTAL_ONLY_MODE) {
-      return this.buildPortalTransferUrl();
-    }
     const target = String(this.hallPortalTargetUrl ?? "").trim();
     const fallback = this.normalizePortalTargetUrl(HALL_FIXED_PORTAL_TARGET_URL, "");
     return target || fallback;
@@ -10496,10 +10593,10 @@ export class GameRuntime {
     }
     if (this.hostAZonePortalTargetInputEl) {
       const aZoneTargetRow = this.hostAZonePortalTargetInputEl.closest?.(".host-row");
-      aZoneTargetRow?.classList.toggle("hidden", MAIN_PORTAL_ONLY_MODE);
+      aZoneTargetRow?.classList.toggle("hidden", !A_ZONE_PORTAL_ENABLED);
       const aZoneTargetCustomRow = this.hostAZonePortalTargetInputEl.closest?.(".host-custom-row");
-      aZoneTargetCustomRow?.classList.toggle("hidden", MAIN_PORTAL_ONLY_MODE);
-      aZoneTargetCustomRow?.previousElementSibling?.classList.toggle("hidden", MAIN_PORTAL_ONLY_MODE);
+      aZoneTargetCustomRow?.classList.toggle("hidden", !A_ZONE_PORTAL_ENABLED);
+      aZoneTargetCustomRow?.previousElementSibling?.classList.toggle("hidden", !A_ZONE_PORTAL_ENABLED);
       this.hostAZonePortalTargetInputEl.disabled = controlsBusy;
       if (document.activeElement !== this.hostAZonePortalTargetInputEl) {
         const nextValue = String(
@@ -10512,7 +10609,7 @@ export class GameRuntime {
     }
     if (this.hostAZonePortalTargetApplyBtnEl) {
       if (!this.hostAZonePortalTargetInputEl) {
-        this.hostAZonePortalTargetApplyBtnEl.classList.toggle("hidden", MAIN_PORTAL_ONLY_MODE);
+        this.hostAZonePortalTargetApplyBtnEl.classList.toggle("hidden", !A_ZONE_PORTAL_ENABLED);
       }
       this.hostAZonePortalTargetApplyBtnEl.disabled = controlsBusy;
     }
