@@ -139,6 +139,7 @@ const PLAYER_PLACEABLE_BLOCKED_MESSAGE =
   "포탈존 , 스폰지점 , 다리 , 중앙 에서는 설치가 불가능합니다";
 const PROMO_BLOCKED_CENTER_RADIUS = 11.5;
 const PROMO_BLOCKED_PORTAL_RADIUS_PADDING = 1.9;
+const PROMO_SEA_ONLY_GROUND_HALF_EXTENT_FALLBACK = 120;
 
 function resolveRuntimeAssetUrl(relativePath) {
   const normalized = String(relativePath ?? "").trim().replace(/^\/+/, "");
@@ -12182,11 +12183,24 @@ export class GameRuntime {
       return "center";
     }
 
+    const configuredGroundSize = Number(this.worldContent?.ground?.size);
+    const groundHalfExtent =
+      (Number.isFinite(configuredGroundSize) && configuredGroundSize > 0
+        ? configuredGroundSize
+        : PROMO_SEA_ONLY_GROUND_HALF_EXTENT_FALLBACK * 2) * 0.5;
+    const landHalfExtent = Math.max(20, groundHalfExtent) + footprintRadius;
+    if (Math.abs(x) <= landHalfExtent && Math.abs(z) <= landHalfExtent) {
+      return "land";
+    }
+
     return "";
   }
 
   getPromoPlacementBlockReasonMessage(blockReason = "") {
     const reason = String(blockReason ?? "").trim().toLowerCase();
+    if (reason === "land") {
+      return "홍보 오브젝트는 바다 구역에서만 배치할 수 있습니다.";
+    }
     if (reason === "spawn" || reason === "bridge" || reason === "portal" || reason === "center") {
       return PLAYER_PLACEABLE_BLOCKED_MESSAGE;
     }
@@ -12209,6 +12223,9 @@ export class GameRuntime {
     }
     if (errorText === "placement blocked at center") {
       return "center";
+    }
+    if (errorText === "placement blocked on land") {
+      return "land";
     }
     return "";
   }
