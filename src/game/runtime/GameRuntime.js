@@ -12798,7 +12798,8 @@ export class GameRuntime {
     transformOverride = null,
     allowOthersDrawOverride = null,
     skipPlacementPreview = false,
-    successNotice = ""
+    successNotice = "",
+    retryOnMissingOwn = true
   } = {}) {
     if (!(this.socket && this.networkConnected)) {
       this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
@@ -12822,8 +12823,29 @@ export class GameRuntime {
         own = surfaceTarget;
       }
     }
-    if (!own && preserveExistingStyle) {
-      this.appendChatLine("", "오브젝트 동기화 중입니다. 잠시 후 다시 시도하세요.", "system");
+    const hasExplicitTransformOverride =
+      Boolean(transformOverride) && typeof transformOverride === "object";
+    const canCreateWithoutOwn =
+      Boolean(placeInFront) || Boolean(placeAtCenter) || hasExplicitTransformOverride;
+    if (!own && preserveExistingStyle && !canCreateWithoutOwn) {
+      if (retryOnMissingOwn) {
+        this.requestPromoState();
+        window.setTimeout(() => {
+          this.requestPromoUpsert({
+            placeInFront,
+            placeAtCenter,
+            preserveExistingStyle,
+            scaleOverride,
+            transformOverride,
+            allowOthersDrawOverride,
+            skipPlacementPreview,
+            successNotice,
+            retryOnMissingOwn: false
+          });
+        }, 180);
+        return;
+      }
+      this.appendChatLine("", "오브젝트 상태 동기화가 지연되고 있습니다. 다시 시도해주세요.", "system");
       this.requestPromoState();
       return;
     }
@@ -16898,11 +16920,11 @@ export class GameRuntime {
       const saved = localStorage.getItem(this.graphicsQualityStorageKey);
       const text = String(saved ?? "").trim();
       if (!text) {
-        return this.mobileEnabled ? "high" : "medium";
+        return "high";
       }
       return this.normalizeGraphicsQuality(text);
     } catch {
-      return this.mobileEnabled ? "high" : "medium";
+      return "high";
     }
   }
 
