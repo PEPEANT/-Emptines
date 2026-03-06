@@ -1220,24 +1220,26 @@ export class GameRuntime {
     this.setupOceanLayer(world.ocean);
 
     const marker = world.originMarker;
-    const originMarker = new THREE.Mesh(
-      new THREE.CylinderGeometry(
-        marker.radiusTop,
-        marker.radiusBottom,
-        marker.height,
-        marker.radialSegments
-      ),
-      new THREE.MeshStandardMaterial({
-        color: marker.material.color,
-        roughness: marker.material.roughness,
-        metalness: marker.material.metalness,
-        emissive: marker.material.emissive,
-        emissiveIntensity: marker.material.emissiveIntensity
-      })
-    );
-    originMarker.position.fromArray(marker.position);
-    originMarker.castShadow = true;
-    this.scene.add(originMarker);
+    if (marker && marker.enabled !== false) {
+      const originMarker = new THREE.Mesh(
+        new THREE.CylinderGeometry(
+          marker.radiusTop,
+          marker.radiusBottom,
+          marker.height,
+          marker.radialSegments
+        ),
+        new THREE.MeshStandardMaterial({
+          color: marker.material.color,
+          roughness: marker.material.roughness,
+          metalness: marker.material.metalness,
+          emissive: marker.material.emissive,
+          emissiveIntensity: marker.material.emissiveIntensity
+        })
+      );
+      originMarker.position.fromArray(marker.position);
+      originMarker.castShadow = true;
+      this.scene.add(originMarker);
+    }
   }
 
   clearHubFlowWorld() {
@@ -1436,8 +1438,16 @@ export class GameRuntime {
     }
 
     const bridgeYaw = Math.atan2(bridgeDirection.x, bridgeDirection.z);
+    const cityPlazaCenterZ = this.citySpawn.z + 4;
+    const plazaRadius = this.mobileEnabled ? 24.8 : 25.4;
+    const plazaRingRadius = Math.max(21.8, plazaRadius - (this.mobileEnabled ? 0.7 : 0.85));
     const bridgeSpawnOverhang = this.mobileEnabled ? 15 : 18;
-    const bridgeCityOverhang = this.mobileEnabled ? 3 : 4;
+    const targetBridgeCityEdgeZ = cityPlazaCenterZ - plazaRadius + 0.6;
+    const bridgeCityOverhang = THREE.MathUtils.clamp(
+      targetBridgeCityEdgeZ - this.bridgeCityEntry.z,
+      -18,
+      this.mobileEnabled ? 2 : 3
+    );
     const bridgeCenterShift = (bridgeCityOverhang - bridgeSpawnOverhang) * 0.5;
     const bridgeCenter = new THREE.Vector3(
       (this.bridgeSpawn.x + this.bridgeCityEntry.x) * 0.5 + bridgeDirection.x * bridgeCenterShift,
@@ -1496,7 +1506,7 @@ export class GameRuntime {
     }
 
     const cityGroup = new THREE.Group();
-    cityGroup.position.set(this.citySpawn.x, 0, this.citySpawn.z + 4);
+    cityGroup.position.set(this.citySpawn.x, 0, cityPlazaCenterZ);
     const cityTerraceRise = this.mobileEnabled ? 0.26 : 0.34;
     const cityTerraceFrontZ = 40;
     const cityTerraceDepth = this.mobileEnabled ? 92 : 108;
@@ -1506,7 +1516,7 @@ export class GameRuntime {
     this.addFutureCityBackdrop(group, bridgeDirection);
 
     const plaza = new THREE.Mesh(
-      new THREE.CylinderGeometry(34, 34, 0.22, this.mobileEnabled ? 26 : 42),
+      new THREE.CylinderGeometry(plazaRadius, plazaRadius, 0.22, this.mobileEnabled ? 26 : 42),
       new THREE.MeshStandardMaterial({
         color: 0x39434d,
         roughness: 0.82,
@@ -1520,7 +1530,7 @@ export class GameRuntime {
     cityGroup.add(plaza);
 
     const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(24.5, 0.38, 20, this.mobileEnabled ? 44 : 80),
+      new THREE.TorusGeometry(plazaRingRadius, 0.38, 20, this.mobileEnabled ? 44 : 80),
       new THREE.MeshStandardMaterial({
         color: 0x81a8ce,
         roughness: 0.3,
@@ -6497,6 +6507,10 @@ export class GameRuntime {
     }
 
     const cameraPos = this.camera.position;
+    this.surfacePaintProbeForwardVector
+      .set(0, 0, -1)
+      .applyQuaternion(this.camera.quaternion)
+      .normalize();
     let bestTarget = null;
     let bestScore = Number.POSITIVE_INFINITY;
     for (const mesh of this.paintableSurfaceMeshes) {
@@ -6516,6 +6530,17 @@ export class GameRuntime {
       if (!Number.isFinite(horizontalDistance) || horizontalDistance > maxDistance) {
         continue;
       }
+      const distance = Math.hypot(dx, dy, dz);
+      const invDistance = distance > 0.0001 ? 1 / distance : 1;
+      const facingDot =
+        (dx * this.surfacePaintProbeForwardVector.x +
+          dy * this.surfacePaintProbeForwardVector.y +
+          dz * this.surfacePaintProbeForwardVector.z) *
+        invDistance;
+      // Prevent unrelated billboard prompts while looking at nearby non-billboard meshes.
+      if (facingDot < 0.42) {
+        continue;
+      }
 
       const preferredFace = String(mesh.userData?.paintPreferredFace ?? "pz").trim().toLowerCase();
       const faceKey = BOX_FACE_KEYS.includes(preferredFace) ? preferredFace : "pz";
@@ -6525,7 +6550,7 @@ export class GameRuntime {
       }
 
       // Allow selecting rooftop floating billboards while standing near the building base.
-      const score = horizontalDistance + Math.abs(dy) * 0.02;
+      const score = horizontalDistance + Math.abs(dy) * 0.02 - facingDot * 2.4;
       if (score >= bestScore) {
         continue;
       }

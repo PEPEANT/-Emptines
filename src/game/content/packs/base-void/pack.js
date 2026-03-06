@@ -151,6 +151,7 @@ export const BASE_VOID_PACK = {
       wetBandColor: 0xc8a16a
     },
     originMarker: {
+      enabled: false,
       radiusTop: 0.4,
       radiusBottom: 0.4,
       height: 1.6,
