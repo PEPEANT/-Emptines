@@ -140,7 +140,6 @@ const PLAYER_PLACEABLE_BLOCKED_MESSAGE =
   "포탈존 , 스폰지점 , 다리 , 중앙 에서는 설치가 불가능합니다";
 const PROMO_BLOCKED_CENTER_RADIUS = 11.5;
 const PROMO_BLOCKED_PORTAL_RADIUS_PADDING = 1.9;
-const PROMO_SEA_ONLY_GROUND_HALF_EXTENT_FALLBACK = 120;
 
 function resolveRuntimeAssetUrl(relativePath) {
   const normalized = String(relativePath ?? "").trim().replace(/^\/+/, "");
@@ -12473,16 +12472,6 @@ export class GameRuntime {
       return "center";
     }
 
-    const configuredGroundSize = Number(this.worldContent?.ground?.size);
-    const groundHalfExtent =
-      (Number.isFinite(configuredGroundSize) && configuredGroundSize > 0
-        ? configuredGroundSize
-        : PROMO_SEA_ONLY_GROUND_HALF_EXTENT_FALLBACK * 2) * 0.5;
-    const landHalfExtent = Math.max(20, groundHalfExtent) + footprintRadius;
-    if (Math.abs(x) <= landHalfExtent && Math.abs(z) <= landHalfExtent) {
-      return "land";
-    }
-
     return "";
   }
 
@@ -14940,7 +14929,10 @@ export class GameRuntime {
         this.setPromoPanelDesktopOpen(false, { syncUi: true });
         return;
       }
-      if (this.promoPlacementPreviewActive && event.code === "Escape") {
+      if (
+        this.promoPlacementPreviewActive &&
+        (event.code === "Escape" || (!this.mobileEnabled && event.code === "KeyY"))
+      ) {
         event.preventDefault();
         this.clearPromoPlacementPreview({ syncUi: true });
         this.appendChatLine("", "배치 미리보기를 취소했습니다.", "system");

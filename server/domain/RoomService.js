@@ -75,7 +75,6 @@ const PROMO_BLOCKED_BRIDGE_HALF_WIDTH = 7;
 const PROMO_BLOCKED_CENTER_X = 0;
 const PROMO_BLOCKED_CENTER_Z = 0;
 const PROMO_BLOCKED_CENTER_RADIUS = 11.5;
-const PROMO_SEA_ONLY_LAND_HALF_EXTENT = 120;
 const PROMO_BLOCKED_PORTAL_ZONES = Object.freeze([
   Object.freeze({ x: 60, z: 0, radius: 6.4 }),
   Object.freeze({ x: -60, z: 0, radius: 6.4 }),
@@ -791,11 +790,6 @@ function getPromoPlacementBlockReason(x, z, scale = 1) {
   const centerBlockedRadius = PROMO_BLOCKED_CENTER_RADIUS + footprintRadius;
   if (centerDx * centerDx + centerDz * centerDz <= centerBlockedRadius * centerBlockedRadius) {
     return "center";
-  }
-
-  const landHalfExtent = PROMO_SEA_ONLY_LAND_HALF_EXTENT + footprintRadius;
-  if (Math.abs(safeX) <= landHalfExtent && Math.abs(safeZ) <= landHalfExtent) {
-    return "land";
   }
 
   return "";
