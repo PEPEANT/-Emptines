@@ -182,7 +182,7 @@ export const BASE_VOID_PACK = {
       },
       city: {
         spawn: [0, GAME_CONSTANTS.PLAYER_HEIGHT, -8],
-        lookTarget: [0, GAME_CONSTANTS.PLAYER_HEIGHT, 44]
+        lookTarget: [0, GAME_CONSTANTS.PLAYER_HEIGHT, 56]
       },
       portal: {
         // Right-side experiment portal. Leave the default target blank so the host can plug one later.

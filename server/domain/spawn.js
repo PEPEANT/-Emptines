@@ -5,7 +5,7 @@ const MIN_DISTANCE = 1.6;
 const SPAWN_CENTER_X = 0;
 const SPAWN_CENTER_Z = -8;
 const SPAWN_FACE_TARGET_X = 0;
-const SPAWN_FACE_TARGET_Z = 44;
+const SPAWN_FACE_TARGET_Z = 56;
 
 function getStatePosition(state) {
   const x = Number(state?.x);

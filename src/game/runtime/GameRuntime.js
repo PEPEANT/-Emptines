@@ -1486,6 +1486,12 @@ export class GameRuntime {
 
     const cityGroup = new THREE.Group();
     cityGroup.position.set(this.citySpawn.x, 0, this.citySpawn.z + 4);
+    const cityTerraceRise = this.mobileEnabled ? 0.26 : 0.34;
+    const cityTerraceFrontZ = 40;
+    const cityTerraceDepth = this.mobileEnabled ? 92 : 108;
+    const cityTerraceCenterZ = cityTerraceFrontZ + cityTerraceDepth * 0.5;
+    const cityTerraceWidth = this.mobileEnabled ? 116 : 132;
+    const liftRearCityY = (value) => cityTerraceRise + (Number(value) || 0);
     this.addFutureCityBackdrop(group, bridgeDirection);
 
     const plaza = new THREE.Mesh(
@@ -1515,6 +1521,49 @@ export class GameRuntime {
     ring.rotation.x = Math.PI / 2;
     ring.position.y = 0.24;
     cityGroup.add(ring);
+
+    const cityTerraceMaterial = new THREE.MeshStandardMaterial({
+      color: 0x44515f,
+      roughness: 0.84,
+      metalness: 0.08,
+      emissive: 0x202b38,
+      emissiveIntensity: 0.12
+    });
+    const cityTerrace = new THREE.Mesh(
+      new THREE.BoxGeometry(cityTerraceWidth, cityTerraceRise, cityTerraceDepth),
+      cityTerraceMaterial
+    );
+    cityTerrace.position.set(0, cityTerraceRise * 0.5, cityTerraceCenterZ);
+    cityTerrace.receiveShadow = true;
+    cityGroup.add(cityTerrace);
+
+    const cityTerraceTop = new THREE.Mesh(
+      new THREE.BoxGeometry(cityTerraceWidth * 0.92, 0.05, cityTerraceDepth - 2.8),
+      new THREE.MeshStandardMaterial({
+        color: 0x2e3945,
+        roughness: 0.46,
+        metalness: 0.16,
+        emissive: 0x172534,
+        emissiveIntensity: 0.12
+      })
+    );
+    cityTerraceTop.position.set(0, cityTerraceRise + 0.025, cityTerraceCenterZ + 0.8);
+    cityTerraceTop.receiveShadow = true;
+    cityGroup.add(cityTerraceTop);
+
+    const cityTerraceFrontTrim = new THREE.Mesh(
+      new THREE.BoxGeometry(cityTerraceWidth * 0.72, 0.05, 0.34),
+      new THREE.MeshStandardMaterial({
+        color: 0x8bc2ea,
+        roughness: 0.26,
+        metalness: 0.54,
+        emissive: 0x31567d,
+        emissiveIntensity: 0.28
+      })
+    );
+    cityTerraceFrontTrim.position.set(0, cityTerraceRise + 0.03, cityTerraceFrontZ + 0.18);
+    cityTerraceFrontTrim.receiveShadow = true;
+    cityGroup.add(cityTerraceFrontTrim);
 
     // Side district expansion: extend roads and pads on both sides of the city center.
     const sideRoadMaterial = new THREE.MeshStandardMaterial({
@@ -1582,8 +1631,8 @@ export class GameRuntime {
       A: { centerX: -60, objectEnabled: true },
       B: { centerX: 60, objectEnabled: true }
     };
-    // Shift city buildings to the rear band between the hall and skyline to keep the plaza readable.
-    const cityBuildingRearOffsetZ = 96;
+    // Push the skyline back so the center lane reads like an approach into the city.
+    const cityBuildingRearOffsetZ = 118;
     const toRearCityZ = (value) => (Number(value) || 0) + cityBuildingRearOffsetZ;
 
     const zoneABorder = new THREE.Mesh(
@@ -1809,11 +1858,18 @@ export class GameRuntime {
         continue;
       }
       const placedTowerZ = toRearCityZ(placed.z);
-      tower.position.set(placed.x, h * 0.5, placedTowerZ);
+      tower.position.set(placed.x, liftRearCityY(h * 0.5), placedTowerZ);
       tower.castShadow = false;
       tower.receiveShadow = true;
       cityGroup.add(tower);
-      const towerColliderIndex = registerCityBuildingCollider(placed.x, placedTowerZ, 4.8, 4.8, -2, h + 4);
+      const towerColliderIndex = registerCityBuildingCollider(
+        placed.x,
+        placedTowerZ,
+        4.8,
+        4.8,
+        -2,
+        liftRearCityY(h + 4)
+      );
       this.registerMovableObject(tower, `city_tower_${ti}`, towerColliderIndex);
     }
 
@@ -1959,7 +2015,8 @@ export class GameRuntime {
       towerZ,
       footprint,
       towerHeight,
-      parentGroup = cityGroup
+      parentGroup = cityGroup,
+      baseY = 0
     ) => {
       const toCenter = new THREE.Vector3(-towerX, 0, -towerZ);
       if (toCenter.lengthSq() < 0.0001) {
@@ -1983,7 +2040,7 @@ export class GameRuntime {
       const upperBoardWidth = THREE.MathUtils.clamp(footprint * 1.2, 6.2, 9.2);
       const upperBoardHeight = THREE.MathUtils.clamp(footprint * 0.78, 3.6, 5.4);
       const upperFloatHeight = Math.max(3.2, footprint * 0.56);
-      const upperBoardY = towerHeight + upperFloatHeight;
+      const upperBoardY = baseY + towerHeight + upperFloatHeight;
       const upperOffset = footprint * 0.52;
       const upperBoard = buildCityAdBoard({
         boardWidth: upperBoardWidth,
@@ -2057,7 +2114,7 @@ export class GameRuntime {
           podiumMaterial
         ]
       );
-      podium.position.set(placedMegaX, podiumHeight * 0.5, placedMegaZ);
+      podium.position.set(placedMegaX, liftRearCityY(podiumHeight * 0.5), placedMegaZ);
       podium.castShadow = false;
       podium.receiveShadow = true;
       megaTowerGroup.add(podium);
@@ -2067,7 +2124,7 @@ export class GameRuntime {
         footprint * 1.24,
         footprint * 1.22,
         -2,
-        totalTowerHeight + 6
+        liftRearCityY(totalTowerHeight + 6)
       );
 
       const megaTower = new THREE.Mesh(
@@ -2081,7 +2138,7 @@ export class GameRuntime {
           wallMaterial  // -Z
         ]
       );
-      megaTower.position.set(placedMegaX, podiumHeight + shaftHeight * 0.5, placedMegaZ);
+      megaTower.position.set(placedMegaX, liftRearCityY(podiumHeight + shaftHeight * 0.5), placedMegaZ);
       megaTower.castShadow = false;
       megaTower.receiveShadow = true;
       megaTowerGroup.add(megaTower);
@@ -2097,7 +2154,11 @@ export class GameRuntime {
           wallMaterial.clone()
         ]
       );
-      upperShaft.position.set(placedMegaX, podiumHeight + shaftHeight + crownHeight * 0.5 + 0.12, placedMegaZ);
+      upperShaft.position.set(
+        placedMegaX,
+        liftRearCityY(podiumHeight + shaftHeight + crownHeight * 0.5 + 0.12),
+        placedMegaZ
+      );
       upperShaft.castShadow = false;
       upperShaft.receiveShadow = true;
       megaTowerGroup.add(upperShaft);
@@ -2111,7 +2172,7 @@ export class GameRuntime {
         ),
         skylineCapMats[i % 3]
       );
-      towerCap.position.set(placedMegaX, totalTowerHeight + 0.86, placedMegaZ);
+      towerCap.position.set(placedMegaX, liftRearCityY(totalTowerHeight + 0.86), placedMegaZ);
       towerCap.castShadow = false;
       towerCap.receiveShadow = true;
       megaTowerGroup.add(towerCap);
@@ -2126,7 +2187,7 @@ export class GameRuntime {
         toneMapped: false
       });
       const edgeHeight = shaftHeight * 0.9;
-      const edgeY = podiumHeight + edgeHeight * 0.5 + 0.36;
+      const edgeY = liftRearCityY(podiumHeight + edgeHeight * 0.5 + 0.36);
       const edgeOffsetX = footprint * 0.48;
       const edgeOffsetZ = footprint * 0.46;
       for (const sx of [-1, 1]) {
@@ -2151,7 +2212,8 @@ export class GameRuntime {
         placedMegaZ,
         footprint,
         totalTowerHeight,
-        megaTowerGroup
+        megaTowerGroup,
+        cityTerraceRise
       );
       cityGroup.add(megaTowerGroup);
       this.registerMovableObject(megaTowerGroup, `city_mega_tower_${i}`, megaColliderIndex);
@@ -2206,7 +2268,7 @@ export class GameRuntime {
         continue;
       }
       const placedKioskZ = toRearCityZ(placed.z);
-      kiosk.position.set(placed.x, height * 0.5, placedKioskZ);
+      kiosk.position.set(placed.x, liftRearCityY(height * 0.5), placedKioskZ);
       kiosk.castShadow = false;
       kiosk.receiveShadow = true;
       cityGroup.add(kiosk);
@@ -2216,7 +2278,7 @@ export class GameRuntime {
         footprint + 0.5,
         footprint + 0.5,
         -2,
-        height + 3
+        liftRearCityY(height + 3)
       );
       this.registerMovableObject(kiosk, `city_kiosk_${index}`, kioskColliderIndex);
     }
@@ -2271,7 +2333,7 @@ export class GameRuntime {
         continue;
       }
       const placedDistrictZ = toRearCityZ(placed.z);
-      block.position.set(placed.x, height * 0.5, placedDistrictZ);
+      block.position.set(placed.x, liftRearCityY(height * 0.5), placedDistrictZ);
       block.castShadow = false;
       block.receiveShadow = true;
       cityGroup.add(block);
@@ -2281,7 +2343,7 @@ export class GameRuntime {
         footprint + 0.6,
         depth + 0.6,
         -2,
-        height + 4
+        liftRearCityY(height + 4)
       );
       this.registerMovableObject(block, `city_block_${index}`, blockColliderIndex);
     }
@@ -2336,7 +2398,7 @@ export class GameRuntime {
         continue;
       }
       const placedOuterDistrictZ = toRearCityZ(placed.z);
-      block.position.set(placed.x, height * 0.5, placedOuterDistrictZ);
+      block.position.set(placed.x, liftRearCityY(height * 0.5), placedOuterDistrictZ);
       block.castShadow = false;
       block.receiveShadow = true;
       cityGroup.add(block);
@@ -2346,7 +2408,7 @@ export class GameRuntime {
         width + 0.7,
         depth + 0.7,
         -2,
-        height + 4
+        liftRearCityY(height + 4)
       );
       this.registerMovableObject(block, `city_outer_block_${index}`, outerBlockColliderIndex);
     }
@@ -2395,7 +2457,7 @@ export class GameRuntime {
         `city_bridge_block_${bridgeDistrictIndex}`
       );
       const bridgeBlockZ = toRearCityZ(localZ);
-      bridgeBlock.position.set(localX, height * 0.5, bridgeBlockZ);
+      bridgeBlock.position.set(localX, liftRearCityY(height * 0.5), bridgeBlockZ);
       bridgeBlock.castShadow = false;
       bridgeBlock.receiveShadow = true;
       cityGroup.add(bridgeBlock);
@@ -2405,7 +2467,7 @@ export class GameRuntime {
         width + 0.7,
         depth + 0.7,
         -2,
-        height + 4
+        liftRearCityY(height + 4)
       );
       this.registerMovableObject(
         bridgeBlock,
@@ -2490,6 +2552,13 @@ export class GameRuntime {
       emissive: 0x2d4b66,
       emissiveIntensity: 0.22
     });
+    const axisRailMaterial = new THREE.MeshStandardMaterial({
+      color: 0x5a6978,
+      roughness: 0.42,
+      metalness: 0.36,
+      emissive: 0x23364a,
+      emissiveIntensity: 0.18
+    });
     const axisGlowMaterial = new THREE.MeshBasicMaterial({
       color: 0x7fe4ff,
       transparent: true,
@@ -2497,60 +2566,225 @@ export class GameRuntime {
       depthWrite: false,
       blending: THREE.AdditiveBlending
     });
+    const createAxisGuideSign = ({ x = 0, z = 0, line1 = "", line2 = "", accent = 0x8fdcff }) => {
+      const signGroup = new THREE.Group();
+      signGroup.position.set(x, cityTerraceRise, z);
+      signGroup.rotation.y = Math.PI;
 
-    const axisRoad = new THREE.Mesh(
-      new THREE.BoxGeometry(18.5, 0.08, 84),
+      const panelWidth = 4.9;
+      const panelHeight = 1.12;
+      const postHeight = 1.08;
+      const postOffsetX = 1.52;
+      const accentColor = new THREE.Color(accent);
+      const accentCss = `#${accentColor.getHexString()}`;
+      const canvas = document.createElement("canvas");
+      canvas.width = 1024;
+      canvas.height = 256;
+      const context = canvas.getContext("2d");
+      if (context) {
+        const gradient = context.createLinearGradient(0, 0, canvas.width, canvas.height);
+        gradient.addColorStop(0, "rgba(8, 16, 26, 0.98)");
+        gradient.addColorStop(1, "rgba(14, 28, 40, 0.98)");
+        context.fillStyle = gradient;
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.strokeStyle = accentCss;
+        context.lineWidth = 12;
+        context.strokeRect(12, 12, canvas.width - 24, canvas.height - 24);
+        context.fillStyle = accentCss;
+        context.fillRect(0, canvas.height - 28, canvas.width, 10);
+        context.textAlign = "center";
+        context.textBaseline = "middle";
+        context.fillStyle = "#e8f6ff";
+        context.font = '700 92px "Segoe UI", "Malgun Gothic", sans-serif';
+        context.fillText(line1, canvas.width * 0.5, 102);
+        context.fillStyle = "#9fdfff";
+        context.font = '600 40px "Segoe UI", "Malgun Gothic", sans-serif';
+        context.fillText(line2, canvas.width * 0.5, 178);
+      }
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.minFilter = THREE.LinearFilter;
+      texture.magFilter = THREE.LinearFilter;
+      texture.generateMipmaps = false;
+
+      for (const side of [-1, 1]) {
+        const post = new THREE.Mesh(
+          new THREE.BoxGeometry(0.14, postHeight, 0.14),
+          axisRailMaterial
+        );
+        post.position.set(side * postOffsetX, postHeight * 0.5, -0.02);
+        post.castShadow = !this.mobileEnabled;
+        post.receiveShadow = true;
+        signGroup.add(post);
+      }
+
+      const frame = new THREE.Mesh(
+        new THREE.BoxGeometry(panelWidth + 0.18, panelHeight + 0.18, 0.14),
+        new THREE.MeshStandardMaterial({
+          color: 0x10161d,
+          roughness: 0.28,
+          metalness: 0.5,
+          emissive: 0x22384d,
+          emissiveIntensity: 0.24
+        })
+      );
+      frame.position.set(0, postHeight + 0.44, 0);
+      frame.castShadow = !this.mobileEnabled;
+      frame.receiveShadow = true;
+
+      const glow = new THREE.Mesh(
+        new THREE.PlaneGeometry(panelWidth + 0.26, panelHeight + 0.26),
+        new THREE.MeshBasicMaterial({
+          color: accent,
+          transparent: true,
+          opacity: 0.12,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          toneMapped: false,
+          side: THREE.DoubleSide
+        })
+      );
+      glow.position.set(0, postHeight + 0.44, 0.06);
+      glow.renderOrder = 11;
+
+      const panel = new THREE.Mesh(
+        new THREE.PlaneGeometry(panelWidth, panelHeight),
+        new THREE.MeshBasicMaterial({
+          map: texture,
+          transparent: true,
+          toneMapped: false,
+          side: THREE.DoubleSide
+        })
+      );
+      panel.position.set(0, postHeight + 0.44, 0.09);
+      panel.renderOrder = 12;
+
+      signGroup.add(frame, glow, panel);
+      cityAxisGroup.add(signGroup);
+    };
+
+    const axisForecourt = new THREE.Mesh(
+      new THREE.BoxGeometry(24, 0.08, 16),
       axisRoadMaterial
     );
-    axisRoad.position.set(0, 0.04, 54);
-    axisRoad.receiveShadow = true;
-    cityAxisGroup.add(axisRoad);
+    axisForecourt.position.set(0, 0.04, 12);
+    axisForecourt.receiveShadow = true;
+    cityAxisGroup.add(axisForecourt);
 
-    const axisCenterStripe = new THREE.Mesh(
-      new THREE.BoxGeometry(1.2, 0.02, 76),
+    const axisForecourtTrim = new THREE.Mesh(
+      new THREE.BoxGeometry(12.4, 0.03, 0.42),
       axisTrimMaterial
     );
-    axisCenterStripe.position.set(0, 0.091, 56);
-    axisCenterStripe.receiveShadow = true;
-    cityAxisGroup.add(axisCenterStripe);
+    axisForecourtTrim.position.set(0, 0.091, 18.8);
+    axisForecourtTrim.receiveShadow = true;
+    cityAxisGroup.add(axisForecourtTrim);
 
-    for (const side of [-1, 1]) {
-      const axisShoulder = new THREE.Mesh(
-        new THREE.BoxGeometry(1.2, 0.12, 82),
-        axisTrimMaterial
-      );
-      axisShoulder.position.set(side * 8.9, 0.06, 54);
-      axisShoulder.receiveShadow = true;
-      cityAxisGroup.add(axisShoulder);
-
-      const axisGlowRail = new THREE.Mesh(
-        new THREE.BoxGeometry(0.16, 0.26, 82),
-        axisGlowMaterial
-      );
-      axisGlowRail.position.set(side * 8.25, 0.18, 54);
-      axisGlowRail.renderOrder = 7;
-      cityAxisGroup.add(axisGlowRail);
-    }
-
-    const stepDepth = 5.8;
-    const stepRise = 0.04;
-    for (let stepIndex = 0; stepIndex < 5; stepIndex += 1) {
+    const stairCount = 6;
+    const stepDepth = 4.7;
+    const stairFrontZ = 19.6;
+    const stairWidthBase = 22.4;
+    for (let stepIndex = 0; stepIndex < stairCount; stepIndex += 1) {
+      const stepHeight = cityTerraceRise * ((stepIndex + 1) / stairCount);
       const step = new THREE.Mesh(
-        new THREE.BoxGeometry(16.2 + stepIndex * 1.2, 0.08 + stepIndex * stepRise, stepDepth),
+        new THREE.BoxGeometry(stairWidthBase + stepIndex * 2.1, stepHeight, stepDepth),
         axisRoadMaterial
       );
-      step.position.set(0, 0.04 + stepIndex * stepRise * 0.5, 18 + stepIndex * (stepDepth - 0.15));
+      step.position.set(0, stepHeight * 0.5, stairFrontZ + stepIndex * (stepDepth - 0.18));
       step.receiveShadow = true;
       cityAxisGroup.add(step);
     }
 
     const axisLanding = new THREE.Mesh(
-      new THREE.BoxGeometry(20.5, 0.12, 12),
+      new THREE.BoxGeometry(31, cityTerraceRise, 15.5),
       axisRoadMaterial
     );
-    axisLanding.position.set(0, 0.06, 34);
+    axisLanding.position.set(0, cityTerraceRise * 0.5, 50);
     axisLanding.receiveShadow = true;
     cityAxisGroup.add(axisLanding);
+
+    const axisRoad = new THREE.Mesh(
+      new THREE.BoxGeometry(24, 0.08, 76),
+      axisRoadMaterial
+    );
+    axisRoad.position.set(0, cityTerraceRise + 0.04, 82);
+    axisRoad.receiveShadow = true;
+    cityAxisGroup.add(axisRoad);
+
+    const axisCenterStripe = new THREE.Mesh(
+      new THREE.BoxGeometry(1.2, 0.02, 70),
+      axisTrimMaterial
+    );
+    axisCenterStripe.position.set(0, cityTerraceRise + 0.091, 82);
+    axisCenterStripe.receiveShadow = true;
+    cityAxisGroup.add(axisCenterStripe);
+
+    for (const side of [-1, 1]) {
+      const axisShoulder = new THREE.Mesh(
+        new THREE.BoxGeometry(1.35, 0.12, 74),
+        axisTrimMaterial
+      );
+      axisShoulder.position.set(side * 11.4, cityTerraceRise + 0.06, 82);
+      axisShoulder.receiveShadow = true;
+      cityAxisGroup.add(axisShoulder);
+
+      const axisGlowRail = new THREE.Mesh(
+        new THREE.BoxGeometry(0.16, 0.26, 74),
+        axisGlowMaterial
+      );
+      axisGlowRail.position.set(side * 10.72, cityTerraceRise + 0.18, 82);
+      axisGlowRail.renderOrder = 7;
+      cityAxisGroup.add(axisGlowRail);
+
+      const stairRail = new THREE.Mesh(
+        new THREE.BoxGeometry(0.18, 0.8, 34),
+        axisRailMaterial
+      );
+      stairRail.position.set(side * 13.6, 0.4, 35.6);
+      stairRail.castShadow = !this.mobileEnabled;
+      stairRail.receiveShadow = true;
+      cityAxisGroup.add(stairRail);
+
+      const stairRailGlow = new THREE.Mesh(
+        new THREE.BoxGeometry(0.08, 0.22, 34),
+        axisGlowMaterial
+      );
+      stairRailGlow.position.set(side * 13.28, 0.62, 35.6);
+      stairRailGlow.renderOrder = 7;
+      cityAxisGroup.add(stairRailGlow);
+
+      for (let postIndex = 0; postIndex < 5; postIndex += 1) {
+        const post = new THREE.Mesh(
+          new THREE.BoxGeometry(0.22, 1.02, 0.22),
+          axisRailMaterial
+        );
+        post.position.set(side * 13.55, 0.51, 41 + postIndex * 5.4);
+        post.castShadow = !this.mobileEnabled;
+        post.receiveShadow = true;
+        cityAxisGroup.add(post);
+      }
+    }
+
+    createAxisGuideSign({
+      x: -11.2,
+      z: 51.6,
+      line1: "LIVE",
+      line2: "performance portal",
+      accent: 0x8feebf
+    });
+    createAxisGuideSign({
+      x: 0,
+      z: 54.2,
+      line1: "CITY CORE",
+      line2: "enter the upper district",
+      accent: 0x8fdcff
+    });
+    createAxisGuideSign({
+      x: 11.2,
+      z: 51.6,
+      line1: "LAB",
+      line2: "host-ready experiment portal",
+      accent: 0xb1d7ff
+    });
 
     cityGroup.add(cityAxisGroup);
 
@@ -3493,7 +3727,7 @@ export class GameRuntime {
       side: THREE.DoubleSide,
       toneMapped: false
     });
-    const boardScale = this.mobileEnabled ? 1.2 : 1.5;
+    const boardScale = this.mobileEnabled ? 1.02 : 1.18;
     const columnHeight = 8.6 * boardScale;
     const columnWidth = 0.44 * boardScale;
     const frameWidth = 8.6 * boardScale;
@@ -3507,9 +3741,9 @@ export class GameRuntime {
     const frameY = 7.2 * boardScale;
     const frameZ = -0.22 * boardScale;
     const placements = [
-      // Move all legged boards to the plaza center and face incoming players.
-      { x: -15.2, z: 14.8, yaw: Math.PI },
-      { x: 15.2, z: 14.8, yaw: Math.PI }
+      // Keep the center lane open by moving the large ad boards to the side terraces.
+      { x: -33.5, z: 42.5, yaw: Math.PI * 0.75 },
+      { x: 33.5, z: 42.5, yaw: -Math.PI * 0.75 }
     ];
 
     placements.forEach((placement, index) => {
