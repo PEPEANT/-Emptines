@@ -644,6 +644,15 @@ export function registerSocketHandlers({
       socket.emit("promo:state", { objects: roomService.serializePromoObjects(room) });
     };
 
+    const emitRuntimePolicyState = () => {
+      socket.emit("runtime:policy", {
+        promoMode: String(config?.promoMode ?? "").trim().toLowerCase(),
+        surfacePaintMode: String(config?.surfacePaintMode ?? "").trim().toLowerCase(),
+        persistentStateAvailable: config?.persistentStateAvailable !== false,
+        persistentStateReason: String(config?.persistentStateReason ?? "").trim()
+      });
+    };
+
     const emitChatHistoryState = (requestPayload = {}) => {
       const room = roomService.getRoomBySocket(socket);
       if (!room) {
@@ -689,6 +698,7 @@ export function registerSocketHandlers({
     const joinDefaultAndAck = (nameOverride, ackFn) => {
       const result = roomService.joinDefaultRoom(socket, nameOverride);
       if (result?.ok) {
+        emitRuntimePolicyState();
         emitSurfacePaintState();
         emitSharedMusicState();
         emitLeftBillboardState();
@@ -753,6 +763,7 @@ export function registerSocketHandlers({
     log.log(`[+] player connected (${online}) ${socket.id}`);
 
     roomService.joinDefaultRoom(socket);
+    emitRuntimePolicyState();
     emitSurfacePaintState();
     emitSharedMusicState();
     emitLeftBillboardState();

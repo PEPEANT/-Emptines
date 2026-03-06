@@ -377,6 +377,12 @@ export class GameRuntime {
     this.promoPlacementPreviewCurrentScale = PROMO_DEFAULT_SCALE;
     this.promoPlacementPreviewBlockReason = "";
     this.promoPlacementPreviewTransform = null;
+    this.runtimePolicyState = {
+      promoMode: "",
+      surfacePaintMode: "",
+      persistentStateAvailable: null,
+      persistentStateReason: ""
+    };
     this.hostCustomBlockPlacementPreviewActive = false;
     this.hostCustomBlockPlacementPreviewMesh = null;
     this.hostCustomBlockPlacementPreviewTargetId = "";
@@ -7225,11 +7231,12 @@ export class GameRuntime {
     if (!ownerKey) {
       return "홍보 오브젝트 표면에서만 사용 가능합니다.";
     }
+    const policyBlockedReason = this.getPromoActionBlockedReason();
+    if (policyBlockedReason) {
+      return policyBlockedReason;
+    }
     if (ownerKey !== String(this.promoOwnerKey ?? "")) {
       return "내 오브젝트에서만 사용할 수 있습니다.";
-    }
-    if (!(this.socket && this.networkConnected)) {
-      return "서버 연결 후 사용 가능합니다.";
     }
     if (this.promoSetInFlight || this.promoRemoveInFlight) {
       return "오브젝트 반영 중입니다.";
@@ -11372,6 +11379,101 @@ export class GameRuntime {
     this.promoStatusEl.textContent = String(message ?? "").trim();
   }
 
+  normalizeRuntimeFeatureMode(rawValue, fallback = "") {
+    const text = String(rawValue ?? "")
+      .trim()
+      .toLowerCase();
+    if (text === "public" || text === "host" || text === "off") {
+      return text;
+    }
+    return fallback;
+  }
+
+  getPersistentStateUnavailableMessage(featureLabel = "프로젝트 홍보") {
+    const reason = String(this.runtimePolicyState?.persistentStateReason ?? "").trim();
+    const lowerReason = reason.toLowerCase();
+    if (lowerReason.includes("eacces") || lowerReason.includes("permission denied")) {
+      return `${featureLabel} 저장용 디스크를 사용할 수 없습니다. 운영자 확인이 필요합니다.`;
+    }
+    if (lowerReason.includes("path missing")) {
+      return `${featureLabel} 저장 경로가 설정되지 않았습니다. 운영자 확인이 필요합니다.`;
+    }
+    return `${featureLabel} 저장을 현재 사용할 수 없습니다. 운영자 확인이 필요합니다.`;
+  }
+
+  applyRuntimePolicyState(payload = {}) {
+    const nextPromoMode = this.normalizeRuntimeFeatureMode(
+      payload?.promoMode,
+      this.normalizeRuntimeFeatureMode(this.runtimePolicyState?.promoMode, "")
+    );
+    const nextSurfacePaintMode = this.normalizeRuntimeFeatureMode(
+      payload?.surfacePaintMode,
+      this.normalizeRuntimeFeatureMode(this.runtimePolicyState?.surfacePaintMode, "")
+    );
+    const nextPersistentStateAvailable =
+      typeof payload?.persistentStateAvailable === "boolean"
+        ? payload.persistentStateAvailable
+        : this.runtimePolicyState?.persistentStateAvailable ?? null;
+    const nextPersistentStateReason = String(
+      payload?.persistentStateReason ?? this.runtimePolicyState?.persistentStateReason ?? ""
+    ).trim();
+    this.runtimePolicyState = {
+      promoMode: nextPromoMode,
+      surfacePaintMode: nextSurfacePaintMode,
+      persistentStateAvailable: nextPersistentStateAvailable,
+      persistentStateReason: nextPersistentStateReason
+    };
+    this.syncPromoPanelUi();
+    this.updateSurfacePainterSaveAvailability();
+  }
+
+  getPromoActionBlockedReason() {
+    if (!(this.socket && this.networkConnected)) {
+      return "서버 연결 후 사용 가능";
+    }
+    if (this.runtimePolicyState?.persistentStateAvailable === false) {
+      return this.getPersistentStateUnavailableMessage("프로젝트 홍보");
+    }
+    const promoMode = this.normalizeRuntimeFeatureMode(this.runtimePolicyState?.promoMode, "");
+    if (promoMode === "off") {
+      return "프로젝트 홍보 저장이 현재 비활성화되어 있습니다.";
+    }
+    if (promoMode === "host" && !this.hasHostPrivilege()) {
+      return "프로젝트 홍보 저장은 방장만 가능합니다.";
+    }
+    return "";
+  }
+
+  getPromoActionErrorMessage(rawErrorText = "", actionLabel = "저장") {
+    const errorText = String(rawErrorText ?? "").trim();
+    const normalizedError = errorText.toLowerCase();
+    const blockedReason = this.getPromoPlacementBlockReasonFromServerError(normalizedError);
+    if (blockedReason) {
+      return this.getPromoPlacementBlockReasonMessage(blockedReason) || PLAYER_PLACEABLE_BLOCKED_MESSAGE;
+    }
+    if (normalizedError === "promo host only" || normalizedError === "host only") {
+      return "프로젝트 홍보 저장은 방장만 가능합니다.";
+    }
+    if (normalizedError === "promo disabled") {
+      return "프로젝트 홍보 저장이 현재 비활성화되어 있습니다.";
+    }
+    if (
+      normalizedError.startsWith("promo disabled:") ||
+      normalizedError.includes("permission denied") ||
+      normalizedError.includes("eacces") ||
+      normalizedError.includes("persistent storage path missing")
+    ) {
+      return this.getPersistentStateUnavailableMessage("프로젝트 홍보");
+    }
+    if (normalizedError === "owner key required") {
+      return "세션 식별이 없어 프로젝트 홍보를 저장할 수 없습니다. 새로고침 후 다시 시도하세요.";
+    }
+    if (normalizedError === "promo rate limited" || normalizedError === "promo ip flood detected") {
+      return "짧은 시간에 너무 많이 저장해 잠시 제한되었습니다.";
+    }
+    return `홍보 오브젝트 ${actionLabel} 실패: ${errorText || "unknown"}`;
+  }
+
   getOwnPromoObject() {
     return this.promoObjects.get(this.promoOwnerKey) ?? null;
   }
@@ -11874,7 +11976,8 @@ export class GameRuntime {
       }
     }
 
-    const disabled = !connected || busy;
+    const promoActionBlockedReason = this.getPromoActionBlockedReason();
+    const disabled = !connected || busy || Boolean(promoActionBlockedReason);
     this.promoScaleInputEl && (this.promoScaleInputEl.disabled = disabled);
     this.promoTypeSelectEl && (this.promoTypeSelectEl.disabled = disabled);
     this.promoLinkInputEl && (this.promoLinkInputEl.disabled = disabled);
@@ -11895,6 +11998,8 @@ export class GameRuntime {
       this.setPromoPanelStatus("서버 연결 후 사용 가능");
     } else if (busy) {
       this.setPromoPanelStatus("홍보 오브젝트 동기화 중...");
+    } else if (promoActionBlockedReason) {
+      this.setPromoPanelStatus(promoActionBlockedReason);
     } else if (previewActive) {
       const blockReasonMessage = this.getPromoPlacementBlockReasonMessage(
         this.promoPlacementPreviewBlockReason
@@ -12226,6 +12331,16 @@ export class GameRuntime {
     if (this.getOwnPromoObject()) {
       return false;
     }
+    const policyBlockedReason = this.getPromoActionBlockedReason();
+    if (policyBlockedReason) {
+      if (announce) {
+        this.appendChatLine("", policyBlockedReason, "system");
+      }
+      if (syncUi) {
+        this.syncPromoPanelUi();
+      }
+      return false;
+    }
     if (this.hostCustomBlockPlacementPreviewActive) {
       this.clearHostCustomBlockPlacementPreview({ syncUi: true });
     }
@@ -12373,6 +12488,12 @@ export class GameRuntime {
       this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
       return;
     }
+    const policyBlockedReason = this.getPromoActionBlockedReason();
+    if (policyBlockedReason) {
+      this.appendChatLine("", policyBlockedReason, "system");
+      this.syncPromoPanelUi();
+      return;
+    }
     if (this.promoSetInFlight) {
       return;
     }
@@ -12489,15 +12610,7 @@ export class GameRuntime {
         this.promoSetInFlight = false;
         if (!response?.ok) {
           const errorText = String(response?.error ?? "unknown");
-          const blockedReason = this.getPromoPlacementBlockReasonFromServerError(errorText);
-          if (blockedReason) {
-            const blockedMessage =
-              this.getPromoPlacementBlockReasonMessage(blockedReason) ||
-              PLAYER_PLACEABLE_BLOCKED_MESSAGE;
-            this.appendChatLine("", blockedMessage, "system");
-          } else {
-            this.appendChatLine("", `홍보 오브젝트 저장 실패: ${errorText}`, "system");
-          }
+          this.appendChatLine("", this.getPromoActionErrorMessage(errorText, "저장"), "system");
           this.syncPromoPanelUi();
           return;
         }
@@ -12521,6 +12634,12 @@ export class GameRuntime {
       this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
       return;
     }
+    const policyBlockedReason = this.getPromoActionBlockedReason();
+    if (policyBlockedReason) {
+      this.appendChatLine("", policyBlockedReason, "system");
+      this.syncPromoPanelUi();
+      return;
+    }
     if (this.promoRemoveInFlight) {
       return;
     }
@@ -12529,7 +12648,8 @@ export class GameRuntime {
     this.socket.emit("promo:remove", { forceFlush: true }, (response = {}) => {
       this.promoRemoveInFlight = false;
       if (!response?.ok) {
-        this.appendChatLine("", `홍보 오브젝트 삭제 실패: ${String(response?.error ?? "unknown")}`, "system");
+        const errorText = String(response?.error ?? "unknown");
+        this.appendChatLine("", this.getPromoActionErrorMessage(errorText, "삭제"), "system");
         this.syncPromoPanelUi();
         return;
       }
@@ -16761,6 +16881,12 @@ export class GameRuntime {
       this.updateRoomPlayerSnapshot([]);
       this.clearPromoObjectVisuals();
       this.promoObjects.clear();
+      this.runtimePolicyState = {
+        promoMode: "",
+        surfacePaintMode: "",
+        persistentStateAvailable: null,
+        persistentStateReason: ""
+      };
       this.clearPromoPlacementPreview({ syncUi: false });
       this.clearHostCustomBlockPlacementPreview({ syncUi: false });
       this.nearestPromoLinkObject = null;
@@ -16813,6 +16939,10 @@ export class GameRuntime {
         message = "짧은 시간에 너무 많은 재접속이 감지되었습니다.";
       }
       this.appendChatLine("", message, "system");
+    });
+
+    socket.on("runtime:policy", (payload = {}) => {
+      this.applyRuntimePolicyState(payload ?? {});
     });
 
     socket.on("disconnect", () => {
@@ -16869,6 +16999,12 @@ export class GameRuntime {
       this.clearRemotePlayers();
       this.clearPromoObjectVisuals();
       this.promoObjects.clear();
+      this.runtimePolicyState = {
+        promoMode: "",
+        surfacePaintMode: "",
+        persistentStateAvailable: null,
+        persistentStateReason: ""
+      };
       this.clearPromoPlacementPreview({ syncUi: false });
       this.clearHostCustomBlockPlacementPreview({ syncUi: false });
       this.nearestPromoLinkObject = null;
@@ -16940,6 +17076,12 @@ export class GameRuntime {
       this.clearRemotePlayers();
       this.clearPromoObjectVisuals();
       this.promoObjects.clear();
+      this.runtimePolicyState = {
+        promoMode: "",
+        surfacePaintMode: "",
+        persistentStateAvailable: null,
+        persistentStateReason: ""
+      };
       this.clearPromoPlacementPreview({ syncUi: false });
       this.clearHostCustomBlockPlacementPreview({ syncUi: false });
       this.nearestPromoLinkObject = null;
