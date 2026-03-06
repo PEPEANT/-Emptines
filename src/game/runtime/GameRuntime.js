@@ -1429,12 +1429,15 @@ export class GameRuntime {
     }
 
     const bridgeYaw = Math.atan2(bridgeDirection.x, bridgeDirection.z);
+    const bridgeSpawnOverhang = this.mobileEnabled ? 15 : 18;
+    const bridgeCityOverhang = this.mobileEnabled ? 3 : 4;
+    const bridgeCenterShift = (bridgeCityOverhang - bridgeSpawnOverhang) * 0.5;
     const bridgeCenter = new THREE.Vector3(
-      (this.bridgeSpawn.x + this.bridgeCityEntry.x) * 0.5,
+      (this.bridgeSpawn.x + this.bridgeCityEntry.x) * 0.5 + bridgeDirection.x * bridgeCenterShift,
       0.15,
-      (this.bridgeSpawn.z + this.bridgeCityEntry.z) * 0.5
+      (this.bridgeSpawn.z + this.bridgeCityEntry.z) * 0.5 + bridgeDirection.z * bridgeCenterShift
     );
-    const bridgeDeckLength = bridgeLength + 30;
+    const bridgeDeckLength = bridgeLength + bridgeSpawnOverhang + bridgeCityOverhang;
     const bridgeGroup = new THREE.Group();
     bridgeGroup.position.copy(bridgeCenter);
     bridgeGroup.rotation.y = bridgeYaw;
