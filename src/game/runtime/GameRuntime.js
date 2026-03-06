@@ -3002,7 +3002,7 @@ export class GameRuntime {
       portalGroup.rotation.y = this.portalYawRadians;
     } else {
       portalFacingDirection.normalize();
-      portalGroup.rotation.y = Math.atan2(portalFacingDirection.x, portalFacingDirection.z) + Math.PI;
+      portalGroup.rotation.y = Math.atan2(portalFacingDirection.x, portalFacingDirection.z);
       this.portalYawRadians = portalGroup.rotation.y;
     }
 
@@ -3106,7 +3106,7 @@ export class GameRuntime {
       aZoneFacingDirection.normalize();
     }
     aZonePortalGroup.rotation.y =
-      Math.atan2(aZoneFacingDirection.x, aZoneFacingDirection.z) + Math.PI;
+      Math.atan2(aZoneFacingDirection.x, aZoneFacingDirection.z);
 
     const aZonePortalBase = new THREE.Mesh(
       new THREE.TorusGeometry(aZonePortalRadius * 0.9, 0.22, 18, this.mobileEnabled ? 26 : 52),
@@ -3202,7 +3202,7 @@ export class GameRuntime {
     } else {
       hallFacingDirection.normalize();
     }
-    hallPortalGroup.rotation.y = Math.atan2(hallFacingDirection.x, hallFacingDirection.z) + Math.PI;
+    hallPortalGroup.rotation.y = Math.atan2(hallFacingDirection.x, hallFacingDirection.z);
 
     const hallPortalBase = new THREE.Mesh(
       new THREE.TorusGeometry(hallPortalRadius * 0.9, 0.22, 18, this.mobileEnabled ? 26 : 52),
