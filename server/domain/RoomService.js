@@ -34,6 +34,7 @@ const MAX_LEFT_BILLBOARD_IMAGE_CHARS = 4_200_000;
 const MAX_MAIN_PORTAL_AD_IMAGE_CHARS = 4_200_000;
 const MAX_BILLBOARD_VIDEO_DATA_URL_CHARS = 30_000_000;
 const SURFACE_PAINT_STORE_VERSION = 1;
+const SURFACE_PAINT_CORE_PAYLOAD_VERSION = 1;
 const MAX_SHARED_AUDIO_DATA_URL_CHARS = 12_000_000;
 const MAX_SHARED_AUDIO_NAME_CHARS = 120;
 const DEFAULT_PLATFORM_LIMIT = 400;
@@ -1057,7 +1058,27 @@ export class RoomService {
     }
 
     const savedAt = Math.max(0, Math.trunc(Number(parsed?.savedAt) || Date.now()));
-    const surfaces = Array.isArray(parsed?.surfaces) ? parsed.surfaces : [];
+    const hasSurfacePaintCoreField =
+      parsed && typeof parsed === "object"
+        ? Object.prototype.hasOwnProperty.call(parsed, "surfacePaintCore")
+        : false;
+    const hasLegacySurfacesField =
+      parsed && typeof parsed === "object"
+        ? Object.prototype.hasOwnProperty.call(parsed, "surfaces")
+        : false;
+    const surfacePaintCoreSource =
+      parsed?.surfacePaintCore && typeof parsed.surfacePaintCore === "object"
+        ? parsed.surfacePaintCore
+        : null;
+    const surfaces = hasSurfacePaintCoreField
+      ? Array.isArray(surfacePaintCoreSource?.surfaces)
+        ? surfacePaintCoreSource.surfaces
+        : Array.isArray(parsed?.surfacePaintCore)
+          ? parsed.surfacePaintCore
+          : []
+      : Array.isArray(parsed?.surfaces)
+        ? parsed.surfaces
+        : [];
     const platforms = Array.isArray(parsed?.platforms) ? parsed.platforms : [];
     const ropes = Array.isArray(parsed?.ropes) ? parsed.ropes : [];
     const promoObjects = Array.isArray(parsed?.promoObjects) ? parsed.promoObjects : [];
@@ -1126,10 +1147,17 @@ export class RoomService {
     this.setPlatforms(room, platforms, { persist: false, bumpRevision: false });
     this.setRopes(room, ropes, { persist: false, bumpRevision: false });
     this.setPromoObjects(room, promoObjects, { persist: false });
+    if (!hasSurfacePaintCoreField && hasLegacySurfacesField) {
+      this.log?.log?.("[paint] Migrating legacy surfaces to surfacePaintCore.");
+    }
     if (!hasHostCustomBlocksField && hasLegacyObjectPositionsField) {
       this.log?.log?.("[paint] Migrating legacy objectPositions to hostCustomBlocks subset.");
     }
-    if ((!hasHostCustomBlocksField && hasLegacyObjectPositionsField) || layoutVersionNeedsRewrite) {
+    if (
+      (!hasSurfacePaintCoreField && hasLegacySurfacesField) ||
+      (!hasHostCustomBlocksField && hasLegacyObjectPositionsField) ||
+      layoutVersionNeedsRewrite
+    ) {
       this.scheduleSurfacePaintSave();
     }
     if (restored.size > 0) {
@@ -1199,12 +1227,16 @@ export class RoomService {
     const forceNextFlush = this.surfacePaintForceNextFlush;
     this.surfacePaintForceNextFlush = false;
     const room = this.getDefaultRoom();
+    const serializedSurfacePaint = this.serializeSurfacePaint(room);
     const payload = {
       version: SURFACE_PAINT_STORE_VERSION,
       savedAt: Date.now(),
       defaultRoomCode: this.defaultRoomCode,
       layoutVersion: this.mapLayoutVersion,
-      surfaces: this.serializeSurfacePaint(room),
+      surfacePaintCore: {
+        payloadVersion: SURFACE_PAINT_CORE_PAYLOAD_VERSION,
+        surfaces: serializedSurfacePaint
+      },
       chatHistory: this.serializeChatHistory(room),
       mainPortalAd: this.serializeMainPortalAd(room),
       leftBillboard: this.serializeLeftBillboard(room),
@@ -1289,10 +1321,39 @@ export class RoomService {
   getPersistenceStatus() {
     const room = this.getDefaultRoom();
     const hostCustomBlocks = this.serializeObjectPositions(room);
+    const surfacePaint = this.serializeSurfacePaint(room);
     const storePath = this.surfacePaintStorePath || null;
     const available = Boolean(storePath);
     const lastPersistAt = Math.max(0, Math.trunc(Number(this.surfacePaintLastPersistAt) || 0));
     const lastPersistError = String(this.surfacePaintLastPersistError ?? "").trim();
+    const grayBlockCoreMemory = {
+      schemaVersion: CORE_MEMORY_SCHEMA_VERSION,
+      authoredType: "gray_block",
+      payloadVersion: 1,
+      durabilityTier: "core",
+      storageKey: "hostCustomBlocks",
+      available,
+      reason: available ? "" : "persistent storage path missing",
+      count: Object.keys(hostCustomBlocks).length,
+      lastPersistAt: lastPersistAt > 0 ? lastPersistAt : null,
+      lastPersistError: lastPersistError || null,
+      queued: Boolean(this.surfacePaintSaveQueued),
+      inFlight: Boolean(this.surfacePaintSaveInFlight)
+    };
+    const surfacePaintCoreMemory = {
+      schemaVersion: CORE_MEMORY_SCHEMA_VERSION,
+      authoredType: "surface_paint",
+      payloadVersion: SURFACE_PAINT_CORE_PAYLOAD_VERSION,
+      durabilityTier: "core",
+      storageKey: "surfacePaintCore",
+      available,
+      reason: available ? "" : "persistent storage path missing",
+      count: surfacePaint.length,
+      lastPersistAt: lastPersistAt > 0 ? lastPersistAt : null,
+      lastPersistError: lastPersistError || null,
+      queued: Boolean(this.surfacePaintSaveQueued),
+      inFlight: Boolean(this.surfacePaintSaveInFlight)
+    };
     return {
       storePath,
       available,
@@ -1300,20 +1361,10 @@ export class RoomService {
       inFlight: Boolean(this.surfacePaintSaveInFlight),
       lastPersistAt: lastPersistAt > 0 ? lastPersistAt : null,
       lastPersistError: lastPersistError || null,
-      coreMemory: {
-        schemaVersion: CORE_MEMORY_SCHEMA_VERSION,
-        authoredType: "gray_block",
-        payloadVersion: 1,
-        durabilityTier: "core",
-        storageKey: "hostCustomBlocks",
-        available,
-        reason: available ? "" : "persistent storage path missing",
-        count: Object.keys(hostCustomBlocks).length,
-        lastPersistAt: lastPersistAt > 0 ? lastPersistAt : null,
-        lastPersistError: lastPersistError || null,
-        queued: Boolean(this.surfacePaintSaveQueued),
-        inFlight: Boolean(this.surfacePaintSaveInFlight)
-      }
+      coreMemorySchemaVersion: CORE_MEMORY_SCHEMA_VERSION,
+      coreMemory: grayBlockCoreMemory,
+      grayBlockCoreMemory,
+      surfacePaintCoreMemory
     };
   }
 

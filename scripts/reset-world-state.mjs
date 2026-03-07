@@ -2,6 +2,8 @@ import { access, copyFile, readFile, writeFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { loadRuntimeConfig } from "../server/config/runtimeConfig.js";
 
+const SURFACE_PAINT_CORE_PAYLOAD_VERSION = 1;
+
 function hasFlag(flagSet, ...names) {
   return names.some((name) => flagSet.has(name));
 }
@@ -36,6 +38,16 @@ async function pathExists(filePath) {
 
 function normalizeSurfaceList(rawValue) {
   return Array.isArray(rawValue) ? rawValue : [];
+}
+
+function normalizeSurfacePaintCore(rawValue, fallback = []) {
+  if (Array.isArray(rawValue)) {
+    return rawValue;
+  }
+  if (rawValue && typeof rawValue === "object" && Array.isArray(rawValue.surfaces)) {
+    return rawValue.surfaces;
+  }
+  return Array.isArray(fallback) ? fallback : [];
 }
 
 function normalizeObject(rawValue, fallback = {}) {
@@ -77,7 +89,7 @@ async function main() {
   const raw = await readFile(storePath, "utf8");
   const parsed = JSON.parse(raw);
   const next = normalizeObject(parsed, {});
-  const beforeSurfaces = normalizeSurfaceList(next.surfaces);
+  const beforeSurfaces = normalizeSurfacePaintCore(next.surfacePaintCore, normalizeSurfaceList(next.surfaces));
   const beforePromoObjects = normalizeSurfaceList(next.promoObjects);
   const beforePlatforms = normalizeSurfaceList(next.platforms);
   const beforeRopes = normalizeSurfaceList(next.ropes);
@@ -157,7 +169,11 @@ async function main() {
   }
 
   next.savedAt = now;
-  next.surfaces = surfaces;
+  next.surfacePaintCore = {
+    payloadVersion: SURFACE_PAINT_CORE_PAYLOAD_VERSION,
+    surfaces
+  };
+  delete next.surfaces;
   next.promoObjects = promoObjects;
   next.platforms = platforms;
   next.ropes = ropes;

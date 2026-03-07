@@ -645,12 +645,14 @@ export function registerSocketHandlers({
     };
 
     const emitRuntimePolicyState = () => {
+      const persistenceStatus = roomService?.getPersistenceStatus?.() ?? null;
       socket.emit("runtime:policy", {
         promoMode: String(config?.promoMode ?? "").trim().toLowerCase(),
         surfacePaintMode: String(config?.surfacePaintMode ?? "").trim().toLowerCase(),
         persistentStateAvailable: config?.persistentStateAvailable !== false,
         persistentStateReason: String(config?.persistentStateReason ?? "").trim(),
-        coreMemory: roomService?.getPersistenceStatus?.()?.coreMemory ?? null
+        coreMemory: persistenceStatus?.grayBlockCoreMemory ?? persistenceStatus?.coreMemory ?? null,
+        surfacePaintCoreMemory: persistenceStatus?.surfacePaintCoreMemory ?? null
       });
     };
 
