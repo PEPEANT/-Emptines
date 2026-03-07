@@ -119,6 +119,7 @@ const OBJECT_EDITOR_MAX_LIMIT = 10000;
 const OBJECT_EDITOR_MIN_SCALE = 0.25;
 const OBJECT_EDITOR_MAX_SCALE = 8;
 const HOST_CUSTOM_BLOCK_POOL_SIZE = 24;
+const HOST_CUSTOM_BLOCK_ID_PATTERN = /^host_custom_block_\d+$/;
 const HOST_CUSTOM_BLOCK_MIN_SIZE = 0.5;
 const HOST_CUSTOM_BLOCK_MAX_SIZE = 8;
 const HOST_CUSTOM_BLOCK_DEFAULT_SIZE = 2.5;
@@ -20268,9 +20269,36 @@ export class GameRuntime {
     return true;
   }
 
+  resetHostCustomPaintBlockEntryToDefault(entry) {
+    if (!entry?.mesh || entry?.isHostCustomPaintBlock !== true) {
+      return false;
+    }
+    const fallbackPosition = entry.defaultPosition ?? entry.mesh.position;
+    const fallbackScale = entry.defaultScale ?? entry.mesh.scale;
+    const fallbackRotation = entry.defaultRotation ?? entry.mesh.rotation;
+    const fallbackVisible = typeof entry.defaultVisible === "boolean" ? entry.defaultVisible : false;
+    entry.mesh.position.set(
+      Number(fallbackPosition?.x) || 0,
+      Number(fallbackPosition?.y) || 0,
+      Number(fallbackPosition?.z) || 0
+    );
+    entry.mesh.scale.set(
+      Number(fallbackScale?.x) || 1,
+      Number(fallbackScale?.y) || 1,
+      Number(fallbackScale?.z) || 1
+    );
+    if (Number.isFinite(Number(fallbackRotation?.y))) {
+      entry.mesh.rotation.y = this.normalizeYawAngle(Number(fallbackRotation.y) || 0);
+    }
+    this.setMovableObjectVisibility(entry, fallbackVisible);
+    this.updateMovableObjectCollider(entry);
+    this.updateSecurityTestLabelForEntry(entry);
+    return true;
+  }
+
   collectObjectPositionsPayload() {
     const payload = {};
-    for (const entry of this.movableObjects) {
+    for (const entry of this.getVisibleHostCustomPaintBlockEntries()) {
       if (!entry?.mesh || !entry?.id) {
         continue;
       }
@@ -20288,6 +20316,19 @@ export class GameRuntime {
       };
     }
     return payload;
+  }
+
+  filterPersistedHostCustomBlockPositions(rawPositions = {}) {
+    const source = rawPositions && typeof rawPositions === "object" ? rawPositions : {};
+    const filtered = {};
+    for (const [rawId, rawEntry] of Object.entries(source)) {
+      const id = String(rawId ?? "").trim();
+      if (!HOST_CUSTOM_BLOCK_ID_PATTERN.test(id) || !rawEntry || typeof rawEntry !== "object") {
+        continue;
+      }
+      filtered[id] = rawEntry;
+    }
+    return filtered;
   }
 
   markObjectStateDirty() {
@@ -20332,7 +20373,7 @@ export class GameRuntime {
       }
       this.objectStateRevision = nextRevision;
     }
-    const source = rawPositions && typeof rawPositions === "object" ? rawPositions : {};
+    const source = this.filterPersistedHostCustomBlockPositions(rawPositions);
     const sourceKeys = Object.keys(source);
     const hasAnySourceEntries = sourceKeys.length > 0;
     for (const entry of this.movableObjects) {
@@ -20375,6 +20416,9 @@ export class GameRuntime {
         } else {
           visible = true;
         }
+      } else if (entry.isHostCustomPaintBlock === true) {
+        this.resetHostCustomPaintBlockEntryToDefault(entry);
+        continue;
       } else if (!hasAnySourceEntries) {
         // Full-empty state means explicit reset to map defaults.
         x = Number(fallback?.x);
@@ -20512,7 +20556,9 @@ export class GameRuntime {
       if (!saved || typeof saved !== "object") {
         return;
       }
-      this.applyObjectPositionsState(saved, { persistLocal: false });
+      this.applyObjectPositionsState(this.filterPersistedHostCustomBlockPositions(saved), {
+        persistLocal: false
+      });
     } catch {
       // ignore
     }

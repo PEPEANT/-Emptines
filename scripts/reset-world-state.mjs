@@ -12,7 +12,7 @@ function printHelp() {
 Options:
   --promos      Remove promo objects and promo-only painted surfaces (default)
   --surfaces    Remove all saved painted surfaces
-  --layout      Remove saved platforms, ropes, and object positions
+  --layout      Remove saved platforms, ropes, and persisted host custom blocks
   --media       Reset saved billboard/portal media
   --chat        Remove saved chat history
   --all         Clear promos, surfaces, layout, media, and chat
@@ -81,6 +81,7 @@ async function main() {
   const beforePromoObjects = normalizeSurfaceList(next.promoObjects);
   const beforePlatforms = normalizeSurfaceList(next.platforms);
   const beforeRopes = normalizeSurfaceList(next.ropes);
+  const beforeHostCustomBlocks = normalizeSurfaceList(next.hostCustomBlocks);
   const beforeObjectPositions = normalizeObject(next.objectPositions, {});
   const beforeChatHistory = normalizeSurfaceList(next.chatHistory);
   const now = Date.now();
@@ -93,6 +94,7 @@ async function main() {
   let promoObjects = beforePromoObjects.slice();
   let platforms = beforePlatforms.slice();
   let ropes = beforeRopes.slice();
+  let hostCustomBlocks = beforeHostCustomBlocks.slice();
   let objectPositions = { ...beforeObjectPositions };
   let chatHistory = beforeChatHistory.slice();
 
@@ -123,6 +125,7 @@ async function main() {
   if (clearLayout) {
     platforms = [];
     ropes = [];
+    hostCustomBlocks = [];
     objectPositions = {};
     next.platformRevision = now;
     next.ropeRevision = now;
@@ -158,6 +161,7 @@ async function main() {
   next.promoObjects = promoObjects;
   next.platforms = platforms;
   next.ropes = ropes;
+  next.hostCustomBlocks = hostCustomBlocks;
   next.objectPositions = objectPositions;
   next.chatHistory = chatHistory;
 
@@ -175,7 +179,7 @@ async function main() {
   }
   if (clearLayout) {
     console.log(
-      `[reset] layout cleared: platforms=${beforePlatforms.length}, ropes=${beforeRopes.length}, objectPositions=${Object.keys(beforeObjectPositions).length}`
+      `[reset] layout cleared: platforms=${beforePlatforms.length}, ropes=${beforeRopes.length}, hostCustomBlocks=${beforeHostCustomBlocks.length}, legacyObjectPositions=${Object.keys(beforeObjectPositions).length}`
     );
   }
   if (clearMedia) {

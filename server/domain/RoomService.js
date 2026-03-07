@@ -43,6 +43,7 @@ const MAX_EDITOR_LIMIT = 10_000;
 const MIN_EDITOR_SCALE = 0.25;
 const MAX_EDITOR_SCALE = 8;
 const OBJECT_POSITION_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,96}$/;
+const HOST_CUSTOM_BLOCK_ID_PATTERN = /^host_custom_block_\d+$/;
 const MAX_OBJECT_POSITIONS = 4000;
 const MAX_OBJECT_COORDINATE = 2500;
 const MIN_OBJECT_SCALE = 0.25;
@@ -421,6 +422,14 @@ function normalizeObjectPositionId(rawValue) {
   return value;
 }
 
+function normalizeHostCustomBlockId(rawValue) {
+  const value = normalizeObjectPositionId(rawValue);
+  if (!value || !HOST_CUSTOM_BLOCK_ID_PATTERN.test(value)) {
+    return "";
+  }
+  return value;
+}
+
 function normalizeObjectPositionEntry(rawValue) {
   if (!rawValue || typeof rawValue !== "object") {
     return null;
@@ -464,6 +473,68 @@ function normalizeObjectPositionEntry(rawValue) {
     ...(hasYaw ? { ry } : {}),
     visible
   };
+}
+
+function sortHostCustomBlockIds(leftId, rightId) {
+  const leftMatch = String(leftId ?? "").match(/(\d+)$/);
+  const rightMatch = String(rightId ?? "").match(/(\d+)$/);
+  const leftIndex = Number(leftMatch?.[1]);
+  const rightIndex = Number(rightMatch?.[1]);
+  if (Number.isFinite(leftIndex) && Number.isFinite(rightIndex) && leftIndex !== rightIndex) {
+    return leftIndex - rightIndex;
+  }
+  return String(leftId ?? "").localeCompare(String(rightId ?? ""));
+}
+
+function normalizePersistedHostCustomBlockPositions(rawValue) {
+  const source = rawValue && typeof rawValue === "object" ? rawValue : {};
+  const sanitized = {};
+  let count = 0;
+  for (const [rawId, rawEntry] of Object.entries(source)) {
+    if (count >= MAX_OBJECT_POSITIONS) {
+      break;
+    }
+    const id = normalizeHostCustomBlockId(rawId);
+    const normalized = normalizeObjectPositionEntry(rawEntry);
+    if (!id || !normalized || normalized.visible === false) {
+      continue;
+    }
+    sanitized[id] = normalized;
+    count += 1;
+  }
+  return sanitized;
+}
+
+function normalizePersistedHostCustomBlockList(rawValue) {
+  const list = Array.isArray(rawValue) ? rawValue : [];
+  const asPositions = {};
+  for (const entry of list) {
+    const id = normalizeHostCustomBlockId(entry?.id);
+    if (!id) {
+      continue;
+    }
+    asPositions[id] = entry;
+  }
+  return normalizePersistedHostCustomBlockPositions(asPositions);
+}
+
+function serializePersistedHostCustomBlockList(rawValue) {
+  const positions = normalizePersistedHostCustomBlockPositions(rawValue);
+  const list = [];
+  for (const id of Object.keys(positions).sort(sortHostCustomBlockIds)) {
+    const entry = positions[id];
+    list.push({
+      id,
+      x: entry.x,
+      y: entry.y,
+      z: entry.z,
+      ...(Number.isFinite(Number(entry.ry)) ? { ry: Number(entry.ry) } : {}),
+      sx: entry.sx,
+      sy: entry.sy,
+      sz: entry.sz
+    });
+  }
+  return list;
 }
 
 function migrateCityObjectPositionsToRearBand(rawPositions, savedMigrationVersion) {
@@ -989,14 +1060,17 @@ export class RoomService {
     const platforms = Array.isArray(parsed?.platforms) ? parsed.platforms : [];
     const ropes = Array.isArray(parsed?.ropes) ? parsed.ropes : [];
     const promoObjects = Array.isArray(parsed?.promoObjects) ? parsed.promoObjects : [];
-    const objectPositions =
-      parsed?.objectPositions && typeof parsed.objectPositions === "object"
-        ? parsed.objectPositions
-        : {};
-    const savedCityObjectRearMigrationVersion = normalizeMapLayoutVersion(
-      parsed?.cityObjectRearMigrationVersion,
-      ""
-    );
+    const hasHostCustomBlocksField =
+      parsed && typeof parsed === "object"
+        ? Object.prototype.hasOwnProperty.call(parsed, "hostCustomBlocks")
+        : false;
+    const hasLegacyObjectPositionsField =
+      parsed && typeof parsed === "object"
+        ? Object.prototype.hasOwnProperty.call(parsed, "objectPositions")
+        : false;
+    const persistedHostCustomBlocks = hasHostCustomBlocksField
+      ? normalizePersistedHostCustomBlockList(parsed?.hostCustomBlocks)
+      : normalizePersistedHostCustomBlockPositions(parsed?.objectPositions);
     const platformRevision = normalizeStateRevision(parsed?.platformRevision, 0);
     const ropeRevision = normalizeStateRevision(parsed?.ropeRevision, 0);
     const objectRevision = normalizeStateRevision(parsed?.objectRevision, 0);
@@ -1041,24 +1115,20 @@ export class RoomService {
         `[paint] Layout version mismatch (saved=${savedLayoutVersion || "none"}, runtime=${this.mapLayoutVersion}); applying compatible restore.`
       );
     }
-    const migratedObjectPositions = migrateCityObjectPositionsToRearBand(
-      objectPositions,
-      savedCityObjectRearMigrationVersion
-    );
     room.platformRevision = platformRevision;
     room.ropeRevision = ropeRevision;
     room.objectRevision = objectRevision;
-    this.setObjectPositions(room, migratedObjectPositions.positions, {
+    this.setObjectPositions(room, persistedHostCustomBlocks, {
       persist: false,
       bumpRevision: false
     });
     this.setPlatforms(room, platforms, { persist: false, bumpRevision: false });
     this.setRopes(room, ropes, { persist: false, bumpRevision: false });
     this.setPromoObjects(room, promoObjects, { persist: false });
-    if (migratedObjectPositions.changed) {
-      this.log?.log?.("[paint] Applied rear-band migration to city object positions.");
+    if (!hasHostCustomBlocksField && hasLegacyObjectPositionsField) {
+      this.log?.log?.("[paint] Migrating legacy objectPositions to hostCustomBlocks subset.");
     }
-    if (migratedObjectPositions.changed || layoutVersionNeedsRewrite) {
+    if ((!hasHostCustomBlocksField && hasLegacyObjectPositionsField) || layoutVersionNeedsRewrite) {
       this.scheduleSurfacePaintSave();
     }
     if (restored.size > 0) {
@@ -1144,10 +1214,9 @@ export class RoomService {
       ropeRevision: this.getRopeRevision(room),
       promoObjects: this.serializePromoObjects(room),
       surfacePolicies: this.serializeSurfacePolicies(room),
-      objectPositions: this.serializeObjectPositions(room),
+      hostCustomBlocks: serializePersistedHostCustomBlockList(this.serializeObjectPositions(room)),
       objectRevision: this.getObjectRevision(room),
-      objectEditor: this.serializeObjectEditor(room),
-      cityObjectRearMigrationVersion: CITY_OBJECT_REAR_MIGRATION_VERSION
+      objectEditor: this.serializeObjectEditor(room)
     };
     const tmpPath = `${this.surfacePaintStorePath}.tmp`;
     let persistError = "";
@@ -1682,24 +1751,7 @@ export class RoomService {
     if (!room || typeof room !== "object") {
       return {};
     }
-    const source =
-      room.objectPositions && typeof room.objectPositions === "object"
-        ? room.objectPositions
-        : {};
-    const sanitized = {};
-    let count = 0;
-    for (const [rawId, rawValue] of Object.entries(source)) {
-      if (count >= MAX_OBJECT_POSITIONS) {
-        break;
-      }
-      const id = normalizeObjectPositionId(rawId);
-      const normalized = normalizeObjectPositionEntry(rawValue);
-      if (!id || !normalized) {
-        continue;
-      }
-      sanitized[id] = normalized;
-      count += 1;
-    }
+    const sanitized = normalizePersistedHostCustomBlockPositions(room.objectPositions);
     room.objectPositions = sanitized;
     return sanitized;
   }
@@ -1715,21 +1767,7 @@ export class RoomService {
     if (!room || typeof room !== "object") {
       return { ok: false, error: "room not found" };
     }
-    const source = rawPositions && typeof rawPositions === "object" ? rawPositions : {};
-    const sanitized = {};
-    let count = 0;
-    for (const [rawId, rawValue] of Object.entries(source)) {
-      if (count >= MAX_OBJECT_POSITIONS) {
-        break;
-      }
-      const id = normalizeObjectPositionId(rawId);
-      const normalized = normalizeObjectPositionEntry(rawValue);
-      if (!id || !normalized) {
-        continue;
-      }
-      sanitized[id] = normalized;
-      count += 1;
-    }
+    const sanitized = normalizePersistedHostCustomBlockPositions(rawPositions);
     room.objectPositions = sanitized;
     if (bumpRevision) {
       room.objectRevision = nextStateRevision(room.objectRevision);
