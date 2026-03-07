@@ -1,8 +1,9 @@
 export const SERVICE_NAME = "reclaim-fps-chat";
 export const DEFAULT_ROOM_CODE = "GLOBAL";
-export const DEFAULT_PORTAL_TARGET_URL = "";
+export const DEFAULT_PORTAL_TARGET_URL =
+  "https://singularity-ox.onrender.com/?v=08d5432";
 export const DEFAULT_A_ZONE_PORTAL_TARGET_URL =
-  "https://reclaim-fps.onrender.com/";
+  "https://singularity-ox.onrender.com/?v=08d5432";
 export const DEFAULT_SURFACE_PAINT_STORE_PATH = "server/data/surface-paint.json";
 export const DEFAULT_RENDER_SURFACE_PAINT_STORE_PATH = "/var/data/surface-paint.json";
 export const DEFAULT_SURFACE_PAINT_SAVE_DEBOUNCE_MS = 300;

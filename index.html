@@ -81,11 +81,11 @@
     <div id="host-controls" class="hidden" aria-label="호스팅 컨트롤">
 
       <details class="host-section" open>
-        <summary class="host-section-head">포탈</summary>
+        <summary class="host-section-head">포탈 1 / 포탈 2</summary>
         <div class="host-section-body">
-          <button id="host-open-portal" type="button">공연장 포탈 열기</button>
+          <button id="host-open-portal" type="button">포탈 1 열기</button>
           <div id="host-schedule-controls">
-            <div class="host-control-label">공연장 시작 시간</div>
+            <div class="host-control-label">포탈 1 시작 시간</div>
             <div class="host-delay-row">
               <button class="host-delay-btn" type="button" data-delay-min="10">10분</button>
               <button class="host-delay-btn" type="button" data-delay-min="20">20분</button>
@@ -93,13 +93,13 @@
             </div>
             <div class="host-custom-row">
               <input id="host-delay-minutes" type="number" min="1" max="180" step="1" value="10" />
-              <select id="host-delay-unit" aria-label="공연장 시작 시간 단위">
+              <select id="host-delay-unit" aria-label="포탈 1 시작 시간 단위">
                 <option value="minute" selected>분</option>
                 <option value="hour">시간</option>
               </select>
               <button id="host-apply-delay" type="button">시작 시간 예약</button>
             </div>
-            <div class="host-control-label">포탈 링크</div>
+            <div class="host-control-label">포탈 1 링크</div>
             <div class="host-custom-row">
               <input
                 id="host-portal-target"
@@ -110,7 +110,7 @@
               />
               <button id="host-portal-target-apply" type="button">적용</button>
             </div>
-            <div class="host-control-label">FPS 전용 포탈 링크</div>
+            <div class="host-control-label">포탈 2 링크</div>
             <div class="host-custom-row">
               <input
                 id="host-a-zone-portal-target"

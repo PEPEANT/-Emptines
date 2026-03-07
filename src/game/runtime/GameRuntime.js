@@ -86,8 +86,8 @@ const MAX_LEFT_BILLBOARD_IMAGE_CHARS = 4_200_000;
 const MAX_MAIN_PORTAL_AD_IMAGE_CHARS = 4_200_000;
 const MAX_BILLBOARD_VIDEO_DATA_URL_CHARS = 30_000_000;
 const MAX_BILLBOARD_VIDEO_BYTES = 20 * 1024 * 1024;
-const DEFAULT_PORTAL_TARGET_URL = "";
-const A_ZONE_FIXED_PORTAL_TARGET_URL = "https://reclaim-fps.onrender.com/";
+const DEFAULT_PORTAL_TARGET_URL = "https://singularity-ox.onrender.com/?v=08d5432";
+const A_ZONE_FIXED_PORTAL_TARGET_URL = "https://singularity-ox.onrender.com/?v=08d5432";
 const HALL_FIXED_PORTAL_TARGET_URL =
   "https://performance-i3w5.onrender.com/performance/?host=0&room=event01&from=emptines";
 const ROOM_ZONE_IDS = Object.freeze(["lobby", "fps", "ox"]);
@@ -110,7 +110,7 @@ const PORTAL_MOVABLE_IDS = Object.freeze({
   fps: "portal_fps",
   hall: "portal_hall"
 });
-const A_ZONE_PORTAL_ENABLED = false;
+const A_ZONE_PORTAL_ENABLED = true;
 const HALL_VENUE_BACKDROP_ENABLED = false;
 const OBJECT_EDITOR_ROTATE_STEP_RAD = Math.PI / 36; // 5deg
 const OBJECT_EDITOR_ROTATE_SNAP_STEP_RAD = Math.PI / 12; // 15deg
@@ -2844,8 +2844,8 @@ export class GameRuntime {
     createAxisGuideSign({
       x: 11.2,
       z: 51.6,
-      line1: "프로젝트 UGC",
-      line2: "host-ready portal",
+      line1: "OX 퀴즈 대회",
+      line2: "portal 1",
       accent: 0xb1d7ff
     });
 
@@ -3098,8 +3098,8 @@ export class GameRuntime {
     const portalBillboard = this.createPortalTimeBillboard({
       dynamic: false,
       topAdImageUrl: PORTAL_TOP_AD_IMAGE_URL,
-      line1: "프로젝트 UGC : 호스트 지정형",
-      line2: "링크 설정 후 즉시 사용 가능",
+      line1: "OX 퀴즈 대회",
+      line2: "포탈 1 링크로 즉시 입장 가능",
       line3: "",
       rotationY: 0,
       palette: {
@@ -3201,8 +3201,8 @@ export class GameRuntime {
     const aZonePortalBillboard = this.createPortalTimeBillboard({
       dynamic: false,
       topAdImageUrl: A_ZONE_FIXED_PORTAL_IMAGE_URL,
-      line1: "FPS 포탈 : 상시 입장 가능",
-      line2: "언제든 포탈 진입 가능",
+      line1: "포탈 2",
+      line2: "기본 링크: OX 퀴즈 대회",
       line3: "",
       rotationY: 0,
       palette: {
@@ -9657,7 +9657,7 @@ export class GameRuntime {
     if (A_ZONE_PORTAL_ENABLED && !this.portalTransitioning && this.isPlayerInAZonePortalZone()) {
       this.triggerPortalTransfer(this.buildAZonePortalTransferUrl(), {
         immediate: true,
-        transitionText: "FPS 포탈 이동 중...",
+        transitionText: "포탈 2 이동 중...",
         portalHint: "fps"
       });
       return;
@@ -9667,7 +9667,7 @@ export class GameRuntime {
       if (destination) {
         this.triggerPortalTransfer(destination, {
           immediate: true,
-          transitionText: "프로젝트 UGC 이동 중...",
+          transitionText: "OX 퀴즈 대회 이동 중...",
           portalHint: "ox"
         });
       }
@@ -9836,15 +9836,15 @@ export class GameRuntime {
         this.portalPhaseClock = timedOpen ? Math.max(0, Number(schedule.remainingSec) || 0) : 0;
         if (this.hallPortalTargetUrl) {
           this.setFlowHeadline(
-            "공연장 포탈 개방",
+            "포탈 1 개방",
             timedOpen
               ? `입장 가능 (${Math.ceil(this.portalPhaseClock)}초 남음)`
               : "입장 가능 (호스트가 닫기 전까지 유지)"
           );
         } else {
           this.setFlowHeadline(
-            "공연장 포탈 개방 / 목적지 없음",
-            "공연장 포탈 목적지를 확인하세요."
+            "포탈 1 개방 / 목적지 없음",
+            "포탈 1 목적지를 확인하세요."
           );
         }
         return;
@@ -11229,13 +11229,13 @@ export class GameRuntime {
     this.hostControlsEl.classList.toggle("hidden", !visible || !this.hostControlsOpen);
     if (this.hostOpenPortalBtnEl) {
       this.hostOpenPortalBtnEl.classList.remove("hidden");
-      const nextLabel = portalOpenNow ? "공연장 포탈 닫기" : "공연장 포탈 열기";
+      const nextLabel = portalOpenNow ? "포탈 1 닫기" : "포탈 1 열기";
       if (this.hostOpenPortalBtnEl.textContent !== nextLabel) {
         this.hostOpenPortalBtnEl.textContent = nextLabel;
       }
       this.hostOpenPortalBtnEl.title = portalOpenNow
-        ? "공연장 포탈 즉시 닫기"
-        : "공연장 포탈 즉시 개방";
+        ? "포탈 1 즉시 닫기"
+        : "포탈 1 즉시 개방";
       this.hostOpenPortalBtnEl.disabled = controlsBusy;
     }
     const quickDelayRow = this.hostDelayButtons?.[0]?.closest?.(".host-delay-row");
@@ -13566,7 +13566,7 @@ export class GameRuntime {
     this.syncHostControls();
 
     if (announce && (next.mode === "open" || next.mode === "open_manual")) {
-      this.appendChatLine("", "방장이 공연장 포탈을 즉시 개방했습니다.", "system");
+      this.appendChatLine("", "방장이 포탈 1을 즉시 개방했습니다.", "system");
     }
   }
 
@@ -13607,7 +13607,7 @@ export class GameRuntime {
     }
     const computed = this.getPortalScheduleComputed();
     if (computed.mode === "open" || computed.mode === "open_manual") {
-      this.appendChatLine("", "공연장 포탈이 열려 있는 동안에는 예약을 변경할 수 없습니다. 먼저 닫아주세요.", "system");
+      this.appendChatLine("", "포탈 1이 열려 있는 동안에는 예약을 변경할 수 없습니다. 먼저 닫아주세요.", "system");
       return;
     }
     if (this.portalScheduleSetInFlight) {
@@ -13656,7 +13656,7 @@ export class GameRuntime {
     this.updatePortalVisual();
 
     if (announce) {
-      this.appendChatLine("", "방장이 공연장 포탈을 즉시 개방했습니다.", "system");
+      this.appendChatLine("", "방장이 포탈 1을 즉시 개방했습니다.", "system");
     }
   }
 
@@ -13681,7 +13681,7 @@ export class GameRuntime {
     this.updatePortalVisual();
 
     if (announce) {
-      this.appendChatLine("", "방장이 공연장 포탈을 닫았습니다.", "system");
+      this.appendChatLine("", "방장이 포탈 1을 닫았습니다.", "system");
     }
   }
 
@@ -13690,7 +13690,7 @@ export class GameRuntime {
     if (!this.socket || !this.networkConnected) {
       if (localHostMode) {
         this.handlePortalForceOpen({}, { announce: false });
-        this.appendChatLine("", "로컬 모드에서 공연장 포탈을 즉시 개방했습니다.", "system");
+        this.appendChatLine("", "로컬 모드에서 포탈 1을 즉시 개방했습니다.", "system");
         return;
       }
       this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
@@ -13712,13 +13712,13 @@ export class GameRuntime {
 
       if (!response?.ok) {
         const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
-        this.appendChatLine("", `공연장 포탈 개방 실패: ${reason}`, "system");
+        this.appendChatLine("", `포탈 1 개방 실패: ${reason}`, "system");
         return;
       }
 
       // Apply immediately for local host; room broadcast will update everyone else.
       this.handlePortalForceOpen(response, { announce: false });
-      this.appendChatLine("", "공연장 포탈을 즉시 개방했습니다. (직접 닫을 때까지 유지)", "system");
+      this.appendChatLine("", "포탈 1을 즉시 개방했습니다. (직접 닫을 때까지 유지)", "system");
     });
   }
 
@@ -13727,20 +13727,20 @@ export class GameRuntime {
     if (!this.socket || !this.networkConnected) {
       if (localHostMode) {
         this.handlePortalForceClose({}, { announce: false });
-        this.appendChatLine("", "로컬 모드에서 공연장 포탈을 닫았습니다.", "system");
+        this.appendChatLine("", "로컬 모드에서 포탈 1을 닫았습니다.", "system");
         return;
       }
       this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
       return;
     }
     if (!this.isRoomHost) {
-      this.appendChatLine("", "공연장 포탈 닫기는 방장만 가능합니다.", "system");
+      this.appendChatLine("", "포탈 1 닫기는 방장만 가능합니다.", "system");
       return;
     }
     const computed = this.getPortalScheduleComputed();
     const portalOpenNow = computed.mode === "open" || computed.mode === "open_manual";
     if (!portalOpenNow) {
-      this.appendChatLine("", "현재 열린 공연장 포탈이 없습니다.", "system");
+      this.appendChatLine("", "현재 열린 포탈 1이 없습니다.", "system");
       return;
     }
     if (this.portalCloseInFlight) {
@@ -13755,12 +13755,12 @@ export class GameRuntime {
 
       if (!response?.ok) {
         const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
-        this.appendChatLine("", `공연장 포탈 닫기 실패: ${reason}`, "system");
+        this.appendChatLine("", `포탈 1 닫기 실패: ${reason}`, "system");
         return;
       }
 
       this.handlePortalForceClose(response, { announce: false });
-      this.appendChatLine("", "공연장 포탈을 닫았습니다.", "system");
+      this.appendChatLine("", "포탈 1을 닫았습니다.", "system");
     });
   }
 
@@ -13893,13 +13893,13 @@ export class GameRuntime {
   requestPortalTargetUpdate(targetUrl, { announceSuccess = false, announceErrors = false } = {}) {
     if (!this.socket || !this.networkConnected) {
       if (announceErrors) {
-        this.appendChatLine("", "서버 연결 후 포탈 링크를 변경할 수 있습니다.", "system");
+        this.appendChatLine("", "서버 연결 후 포탈 1 링크를 변경할 수 있습니다.", "system");
       }
       return;
     }
     if (!this.isRoomHost) {
       if (announceErrors) {
-        this.appendChatLine("", "포탈 링크 변경은 방장만 가능합니다.", "system");
+        this.appendChatLine("", "포탈 1 링크 변경은 방장만 가능합니다.", "system");
       }
       return;
     }
@@ -13917,7 +13917,7 @@ export class GameRuntime {
 
     if (normalized === this.portalTargetUrl) {
       if (announceSuccess) {
-        this.appendChatLine("", `포탈 링크 유지: ${normalized}`, "system");
+        this.appendChatLine("", `포탈 1 링크 유지: ${normalized}`, "system");
       }
       if (normalized === this.hostPortalTargetCandidate) {
         this.hostPortalTargetSynced = true;
@@ -13932,7 +13932,7 @@ export class GameRuntime {
       if (!response?.ok) {
         if (announceErrors) {
           const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
-          this.appendChatLine("", `포탈 링크 변경 실패: ${reason}`, "system");
+          this.appendChatLine("", `포탈 1 링크 변경 실패: ${reason}`, "system");
         }
         return;
       }
@@ -13943,7 +13943,7 @@ export class GameRuntime {
         this.hostPortalTargetSynced = true;
       }
       if (announceSuccess) {
-        this.appendChatLine("", `포탈 링크 변경 완료: ${applied}`, "system");
+        this.appendChatLine("", `포탈 1 링크 변경 완료: ${applied}`, "system");
       }
     });
   }
@@ -13951,13 +13951,13 @@ export class GameRuntime {
   requestAZonePortalTargetUpdate(targetUrl, { announceSuccess = false, announceErrors = false } = {}) {
     if (!this.socket || !this.networkConnected) {
       if (announceErrors) {
-        this.appendChatLine("", "서버 연결 후 FPS 포탈 링크를 변경할 수 있습니다.", "system");
+        this.appendChatLine("", "서버 연결 후 포탈 2 링크를 변경할 수 있습니다.", "system");
       }
       return;
     }
     if (!this.isRoomHost) {
       if (announceErrors) {
-        this.appendChatLine("", "FPS 포탈 링크 변경은 방장만 가능합니다.", "system");
+        this.appendChatLine("", "포탈 2 링크 변경은 방장만 가능합니다.", "system");
       }
       return;
     }
@@ -13975,7 +13975,7 @@ export class GameRuntime {
 
     if (normalized === this.aZonePortalTargetUrl) {
       if (announceSuccess) {
-        this.appendChatLine("", `FPS 포탈 링크 유지: ${normalized}`, "system");
+        this.appendChatLine("", `포탈 2 링크 유지: ${normalized}`, "system");
       }
       if (normalized === this.hostAZonePortalTargetCandidate) {
         this.hostAZonePortalTargetSynced = true;
@@ -13998,7 +13998,7 @@ export class GameRuntime {
         return;
       }
       if (announceErrors) {
-        this.appendChatLine("", "FPS 포탈 링크 변경 응답 시간 초과", "system");
+        this.appendChatLine("", "포탈 2 링크 변경 응답 시간 초과", "system");
       }
     }, 4000);
     this.socket.emit("portal:a-zone-target:set", { targetUrl: normalized }, (response = {}) => {
@@ -14010,7 +14010,7 @@ export class GameRuntime {
       if (!response?.ok) {
         if (announceErrors) {
           const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
-          this.appendChatLine("", `FPS 포탈 링크 변경 실패: ${reason}`, "system");
+          this.appendChatLine("", `포탈 2 링크 변경 실패: ${reason}`, "system");
         }
         return;
       }
@@ -14021,7 +14021,7 @@ export class GameRuntime {
         this.hostAZonePortalTargetSynced = true;
       }
       if (announceSuccess) {
-        this.appendChatLine("", `FPS 포탈 링크 변경 완료: ${applied}`, "system");
+        this.appendChatLine("", `포탈 2 링크 변경 완료: ${applied}`, "system");
       }
     });
   }
