@@ -149,6 +149,8 @@ const HOST_CUSTOM_BLOCK_MIN_SIZE = 0.5;
 const HOST_CUSTOM_BLOCK_MAX_SIZE = 8;
 const HOST_CUSTOM_BLOCK_DEFAULT_SIZE = 2.5;
 const PROMO_OWNER_KEY_STORAGE_KEY = "promoOwnerKey_v1";
+const PORTAL_RETURN_STATE_STORAGE_KEY = "emptines_portal_return_state_v1";
+const PORTAL_RETURN_STATE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 const PROMO_MIN_SCALE = 0.35;
 const PROMO_MAX_SCALE = 2.85;
 const PROMO_DEFAULT_SCALE = 2.2;
@@ -11009,7 +11011,11 @@ export class GameRuntime {
       return null;
     }
 
-    // Unify all external return links to one central lobby spawn point.
+    const savedState = this.loadSavedReturnPortalSpawnState(normalizedHint);
+    if (savedState) {
+      return savedState;
+    }
+
     const spawnPosition = new THREE.Vector3(
       Number(this.citySpawn?.x) || 0,
       GAME_CONSTANTS.PLAYER_HEIGHT,
@@ -11027,6 +11033,111 @@ export class GameRuntime {
       yaw,
       pitch: -0.02
     };
+  }
+
+  loadSavedReturnPortalSpawnState(portalHint = "") {
+    const normalizedHint = this.normalizeReturnPortalHint(portalHint, "");
+    if (!normalizedHint || typeof window === "undefined") {
+      return null;
+    }
+
+    let raw = "";
+    try {
+      raw = String(window.localStorage?.getItem(PORTAL_RETURN_STATE_STORAGE_KEY) ?? "").trim();
+    } catch {
+      return null;
+    }
+    if (!raw) {
+      return null;
+    }
+
+    let parsed = null;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+
+    const savedHint = this.normalizeReturnPortalHint(parsed?.portalHint ?? "", normalizedHint);
+    if (savedHint !== normalizedHint) {
+      return null;
+    }
+
+    const savedAt = Math.max(0, Math.trunc(Number(parsed?.savedAt) || 0));
+    if (!savedAt || Date.now() - savedAt > PORTAL_RETURN_STATE_MAX_AGE_MS) {
+      return null;
+    }
+
+    const x = Number(parsed?.x);
+    const y = Number(parsed?.y);
+    const z = Number(parsed?.z);
+    const yaw = Number(parsed?.yaw);
+    const pitch = Number(parsed?.pitch);
+    if (
+      !Number.isFinite(x) ||
+      !Number.isFinite(y) ||
+      !Number.isFinite(z) ||
+      !Number.isFinite(yaw) ||
+      !Number.isFinite(pitch)
+    ) {
+      return null;
+    }
+
+    return {
+      position: new THREE.Vector3(
+        x,
+        Math.max(GAME_CONSTANTS.PLAYER_HEIGHT, y),
+        z
+      ),
+      yaw,
+      pitch: THREE.MathUtils.clamp(pitch, -1.52, 1.52)
+    };
+  }
+
+  persistReturnPortalSpawnState(portalHint = "") {
+    const normalizedHint = this.normalizeReturnPortalHint(portalHint, "");
+    if (!normalizedHint || typeof window === "undefined") {
+      return false;
+    }
+
+    const currentZone = this.normalizeRoomZone(
+      this.localRoomZone || this.requestedEntryZone || "lobby",
+      "lobby"
+    );
+    if (currentZone !== "lobby") {
+      return false;
+    }
+
+    const x = Number(this.playerPosition?.x);
+    const y = Number(this.playerPosition?.y);
+    const z = Number(this.playerPosition?.z);
+    const yaw = Number(this.yaw);
+    const pitch = Number(this.pitch);
+    if (
+      !Number.isFinite(x) ||
+      !Number.isFinite(y) ||
+      !Number.isFinite(z) ||
+      !Number.isFinite(yaw) ||
+      !Number.isFinite(pitch)
+    ) {
+      return false;
+    }
+
+    const payload = {
+      portalHint: normalizedHint,
+      x,
+      y,
+      z,
+      yaw,
+      pitch,
+      savedAt: Date.now()
+    };
+    try {
+      window.localStorage?.setItem(PORTAL_RETURN_STATE_STORAGE_KEY, JSON.stringify(payload));
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   normalizeRoomZone(rawValue, fallback = "lobby") {
@@ -11553,6 +11664,7 @@ export class GameRuntime {
         this.normalizeReturnPortalHint(options?.portalHint ?? options?.returnPortal, "") ||
         this.normalizeReturnPortalHint(targetUrl, "");
       const finalTargetUrl = this.appendPortalReturnContextToExternalUrl(targetUrl, portalHint);
+      this.persistReturnPortalSpawnState(portalHint);
 
       const previousStage = this.flowStage;
       const transitionText =

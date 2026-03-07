@@ -3028,13 +3028,21 @@ export class RoomService {
     }
 
     const zone = normalizeRoomZone(rawZone, "");
+    const returnPortalHint = normalizeReturnPortalHint(rawPortalHint, "");
     if (!zone) {
       return { ok: false, error: "invalid zone" };
     }
 
     const previousZone = normalizeRoomZone(player?.zone ?? "lobby", "lobby");
-    // External returns should converge on one canonical lobby spawn.
-    const nextState = getRoomZoneSpawnState(room, zone);
+    const shouldPreserveLobbyReturnState =
+      zone === "lobby" &&
+      previousZone === "lobby" &&
+      (returnPortalHint === "ox" || returnPortalHint === "fps" || returnPortalHint === "hall") &&
+      player?.state &&
+      typeof player.state === "object";
+    const nextState = shouldPreserveLobbyReturnState
+      ? sanitizePlayerState(player.state)
+      : getRoomZoneSpawnState(room, zone);
     const now = Date.now();
     const previousSeq = Math.max(0, Math.trunc(Number(player?.lastInputSeq) || 0));
 
