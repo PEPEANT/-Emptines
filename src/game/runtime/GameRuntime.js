@@ -88,8 +88,8 @@ const MAX_PORTAL_DISPLAY_TITLE_CHARS = 40;
 const MAX_PORTAL_DISPLAY_LINE_CHARS = 72;
 const MAX_BILLBOARD_VIDEO_DATA_URL_CHARS = 30_000_000;
 const MAX_BILLBOARD_VIDEO_BYTES = 20 * 1024 * 1024;
-const DEFAULT_PORTAL_TARGET_URL = "https://singularity-ox.onrender.com/?v=08d5432";
-const A_ZONE_FIXED_PORTAL_TARGET_URL = "https://singularity-ox.onrender.com/?v=08d5432";
+const DEFAULT_PORTAL_TARGET_URL = "https://singularity-ox.onrender.com/?v=0.2";
+const A_ZONE_FIXED_PORTAL_TARGET_URL = "https://singularity-ox.onrender.com/?v=0.2";
 const HALL_FIXED_PORTAL_TARGET_URL =
   "https://performance-i3w5.onrender.com/performance/?host=0&room=event01&from=emptines";
 const ROOM_ZONE_IDS = Object.freeze(["lobby", "fps", "ox"]);

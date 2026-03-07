@@ -5,7 +5,7 @@ const DEFAULTS = Object.freeze({
   lobbyUrl: "https://emptines-chat-2.onrender.com/?zone=lobby",
   healthUrl: "https://emptines-chat-2.onrender.com/health",
   realtimeSocketUrl: "https://emptines-chat-2.onrender.com",
-  oxUrl: "https://singularity-ox.onrender.com/?v=08d5432",
+  oxUrl: "https://singularity-ox.onrender.com/?v=0.2",
   fpsUrl: "https://reclaim-fps.onrender.com/"
 });
 
