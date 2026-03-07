@@ -32,6 +32,7 @@ const RIGHT_BILLBOARD_VIDEO_ID_LOOKUP = Object.freeze(
 );
 const MAX_LEFT_BILLBOARD_IMAGE_CHARS = 4_200_000;
 const MAX_MAIN_PORTAL_AD_IMAGE_CHARS = 4_200_000;
+const MAX_PORTAL_DISPLAY_TITLE_CHARS = 40;
 const MAX_BILLBOARD_VIDEO_DATA_URL_CHARS = 30_000_000;
 const SURFACE_PAINT_STORE_VERSION = 1;
 const SURFACE_PAINT_CORE_PAYLOAD_VERSION = 1;
@@ -87,6 +88,11 @@ const HOST_CONTROLLED_SURFACE_ID_PATTERN = /^bridge_panel_\d+:(?:px|nx|py|ny|pz|
 const CHAT_MESSAGE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,80}$/;
 const MAX_CHAT_MESSAGES = 5000;
 const MAX_CHAT_TEXT_CHARS = 200;
+const PORTAL_DISPLAY_KEYS = Object.freeze(["portal1", "portal2"]);
+const PORTAL_DISPLAY_DEFAULT_TITLES = Object.freeze({
+  portal1: "OX 퀴즈 대회",
+  portal2: "포탈 2"
+});
 const ROOM_ZONE_IDS = Object.freeze(["lobby", "fps", "ox"]);
 const ROOM_ZONE_PORTAL_OBJECT_ID_BY_ZONE = Object.freeze({
   fps: "portal_fps",
@@ -656,6 +662,22 @@ function createMainPortalAdState() {
   };
 }
 
+function createPortalDisplayState(defaultTitle = "") {
+  return {
+    title: normalizePortalDisplayTitle(defaultTitle, ""),
+    imageDataUrl: "",
+    updatedAt: Date.now()
+  };
+}
+
+function createPortalDisplaysState(rawValue = {}) {
+  const source = rawValue && typeof rawValue === "object" ? rawValue : {};
+  return {
+    portal1: normalizePortalDisplayState(source.portal1, PORTAL_DISPLAY_DEFAULT_TITLES.portal1),
+    portal2: normalizePortalDisplayState(source.portal2, PORTAL_DISPLAY_DEFAULT_TITLES.portal2)
+  };
+}
+
 function createSharedMusicState() {
   return {
     mode: "idle",
@@ -918,6 +940,34 @@ function normalizeMainPortalAdImageDataUrl(rawValue) {
   return value;
 }
 
+function normalizePortalDisplayKey(rawValue) {
+  const value = String(rawValue ?? "").trim().toLowerCase();
+  return PORTAL_DISPLAY_KEYS.includes(value) ? value : "";
+}
+
+function normalizePortalDisplayTitle(rawValue, fallback = "") {
+  const value = String(rawValue ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .slice(0, MAX_PORTAL_DISPLAY_TITLE_CHARS);
+  if (value) {
+    return value;
+  }
+  return String(fallback ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .slice(0, MAX_PORTAL_DISPLAY_TITLE_CHARS);
+}
+
+function normalizePortalDisplayState(rawValue, fallbackTitle = "") {
+  const source = rawValue && typeof rawValue === "object" ? rawValue : {};
+  return {
+    title: normalizePortalDisplayTitle(source.title, fallbackTitle),
+    imageDataUrl: normalizeMainPortalAdImageDataUrl(source.imageDataUrl),
+    updatedAt: Math.max(0, Math.trunc(Number(source.updatedAt) || Date.now()))
+  };
+}
+
 function normalizeBillboardVideoDataUrl(rawValue) {
   const value = String(rawValue ?? "").trim();
   if (!value || value.length > MAX_BILLBOARD_VIDEO_DATA_URL_CHARS) {
@@ -944,6 +994,7 @@ function createPersistentRoom(code, defaultPortalTargetUrl, defaultAZonePortalTa
     portalTarget: defaultPortalTargetUrl,
     aZonePortalTarget: defaultAZonePortalTargetUrl,
     portalSchedule: createPortalScheduleState(),
+    portalDisplays: createPortalDisplaysState(),
     mainPortalAd: createMainPortalAdState(),
     leftBillboard: createLeftBillboardState(),
     rightBillboard: createRightBillboardState(),
@@ -1099,6 +1150,7 @@ export class RoomService {
     const chatHistorySource = Array.isArray(parsed?.chatHistory) ? parsed.chatHistory : [];
     const savedLayoutVersion = normalizeMapLayoutVersion(parsed?.layoutVersion, "");
     const layoutVersionNeedsRewrite = savedLayoutVersion !== this.mapLayoutVersion;
+    const portalDisplays = createPortalDisplaysState(parsed?.portalDisplays);
     const mainPortalAd = this.serializeMainPortalAd({ mainPortalAd: parsed?.mainPortalAd });
     const leftBillboard = this.serializeLeftBillboard({ leftBillboard: parsed?.leftBillboard });
     const rightBillboard = this.serializeRightBillboard({ rightBillboard: parsed?.rightBillboard });
@@ -1127,6 +1179,7 @@ export class RoomService {
     const room = this.getDefaultRoom();
     room.surfacePaint = restored;
     room.chatHistory = restoredChatHistory;
+    room.portalDisplays = portalDisplays;
     room.mainPortalAd = mainPortalAd;
     room.leftBillboard = leftBillboard;
     room.rightBillboard = rightBillboard;
@@ -1238,6 +1291,7 @@ export class RoomService {
         surfaces: serializedSurfacePaint
       },
       chatHistory: this.serializeChatHistory(room),
+      portalDisplays: this.serializePortalDisplays(room),
       mainPortalAd: this.serializeMainPortalAd(room),
       leftBillboard: this.serializeLeftBillboard(room),
       rightBillboard: this.serializeRightBillboard(room),
@@ -1377,6 +1431,7 @@ export class RoomService {
       portalTarget: String(room.portalTarget ?? "").trim(),
       aZonePortalTarget: String(room.aZonePortalTarget ?? "").trim(),
       portalSchedule: this.serializePortalSchedule(room),
+      portalDisplays: this.serializePortalDisplays(room),
       mainPortalAd: this.serializeMainPortalAd(room),
       rightBillboard: this.serializeRightBillboard(room),
       securityTest: this.serializeSecurityTest(room),
@@ -1958,6 +2013,111 @@ export class RoomService {
     return {
       enabled: Boolean(state.enabled),
       updatedAt: Math.max(0, Math.trunc(Number(state.updatedAt) || Date.now()))
+    };
+  }
+
+  serializePortalDisplays(room) {
+    if (!room || typeof room !== "object") {
+      return createPortalDisplaysState();
+    }
+    room.portalDisplays = createPortalDisplaysState(room.portalDisplays);
+    return {
+      portal1: normalizePortalDisplayState(
+        room.portalDisplays.portal1,
+        PORTAL_DISPLAY_DEFAULT_TITLES.portal1
+      ),
+      portal2: normalizePortalDisplayState(
+        room.portalDisplays.portal2,
+        PORTAL_DISPLAY_DEFAULT_TITLES.portal2
+      )
+    };
+  }
+
+  emitPortalDisplayUpdate(room) {
+    this.io.to(room.code).emit("portal:display:update", this.serializePortalDisplays(room));
+  }
+
+  setPortalDisplay(room, rawPortalKey, payload = {}) {
+    if (!room) {
+      return { ok: false, error: "room not found" };
+    }
+    const portalKey = normalizePortalDisplayKey(rawPortalKey);
+    if (!portalKey) {
+      return { ok: false, error: "invalid portal key" };
+    }
+
+    const defaultTitle = PORTAL_DISPLAY_DEFAULT_TITLES[portalKey] ?? "";
+    const previousDisplays = this.serializePortalDisplays(room);
+    const previous = previousDisplays[portalKey];
+    const hasTitle = Object.prototype.hasOwnProperty.call(payload, "title")
+      || Object.prototype.hasOwnProperty.call(payload, "name");
+    const hasImageDataUrl = Object.prototype.hasOwnProperty.call(payload, "imageDataUrl")
+      || Object.prototype.hasOwnProperty.call(payload, "dataUrl");
+    const next = normalizePortalDisplayState(
+      {
+        title: hasTitle ? payload?.title ?? payload?.name ?? "" : previous.title,
+        imageDataUrl: hasImageDataUrl
+          ? payload?.imageDataUrl ?? payload?.dataUrl ?? ""
+          : previous.imageDataUrl,
+        updatedAt: Date.now()
+      },
+      defaultTitle
+    );
+
+    if (previous.title === next.title && previous.imageDataUrl === next.imageDataUrl) {
+      return {
+        ok: true,
+        changed: false,
+        portalKey,
+        state: previous,
+        portalDisplays: previousDisplays
+      };
+    }
+
+    room.portalDisplays = createPortalDisplaysState(room.portalDisplays);
+    room.portalDisplays[portalKey] = next;
+    this.scheduleSurfacePaintSave();
+    return {
+      ok: true,
+      changed: true,
+      portalKey,
+      state: next,
+      portalDisplays: this.serializePortalDisplays(room)
+    };
+  }
+
+  resetPortalDisplay(room, rawPortalKey) {
+    if (!room) {
+      return { ok: false, error: "room not found" };
+    }
+    const portalKey = normalizePortalDisplayKey(rawPortalKey);
+    if (!portalKey) {
+      return { ok: false, error: "invalid portal key" };
+    }
+    const defaultTitle = PORTAL_DISPLAY_DEFAULT_TITLES[portalKey] ?? "";
+    const previousDisplays = this.serializePortalDisplays(room);
+    const previous = previousDisplays[portalKey];
+    const next = createPortalDisplayState(defaultTitle);
+
+    if (previous.title === next.title && previous.imageDataUrl === next.imageDataUrl) {
+      return {
+        ok: true,
+        changed: false,
+        portalKey,
+        state: previous,
+        portalDisplays: previousDisplays
+      };
+    }
+
+    room.portalDisplays = createPortalDisplaysState(room.portalDisplays);
+    room.portalDisplays[portalKey] = next;
+    this.scheduleSurfacePaintSave();
+    return {
+      ok: true,
+      changed: true,
+      portalKey,
+      state: next,
+      portalDisplays: this.serializePortalDisplays(room)
     };
   }
 

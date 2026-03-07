@@ -84,6 +84,7 @@ const RIGHT_BILLBOARD_VIDEO_ID_LOOKUP = Object.freeze(
 );
 const MAX_LEFT_BILLBOARD_IMAGE_CHARS = 4_200_000;
 const MAX_MAIN_PORTAL_AD_IMAGE_CHARS = 4_200_000;
+const MAX_PORTAL_DISPLAY_TITLE_CHARS = 40;
 const MAX_BILLBOARD_VIDEO_DATA_URL_CHARS = 30_000_000;
 const MAX_BILLBOARD_VIDEO_BYTES = 20 * 1024 * 1024;
 const DEFAULT_PORTAL_TARGET_URL = "https://singularity-ox.onrender.com/?v=08d5432";
@@ -98,6 +99,20 @@ const ROOM_ZONE_LABELS = Object.freeze({
 });
 const A_ZONE_FIXED_PORTAL_IMAGE_URL = new URL("../../../png/REC_FPS.png", import.meta.url).href;
 const HALL_FIXED_PORTAL_IMAGE_URL = new URL("../../../png/PER.png", import.meta.url).href;
+const PORTAL_DISPLAY_DEFAULTS = Object.freeze({
+  portal1: Object.freeze({
+    title: "OX 퀴즈 대회",
+    line2: "포탈 1 링크는 패널에서 변경",
+    line3: "",
+    imageUrl: PORTAL_TOP_AD_IMAGE_URL
+  }),
+  portal2: Object.freeze({
+    title: "포탈 2",
+    line2: "포탈 2 링크는 패널에서 변경",
+    line3: "",
+    imageUrl: A_ZONE_FIXED_PORTAL_IMAGE_URL
+  })
+});
 const BOX_FACE_KEYS = ["px", "nx", "py", "ny", "pz", "nz"];
 const HOST_CONTROLLED_BRIDGE_SURFACE_ID_PATTERN = /^bridge_panel_\d+:(?:px|nx|py|ny|pz|nz)$/;
 const NPC_GREETING_SESSION_KEY = "emptines_npc_greeting_seen_v1";
@@ -467,6 +482,22 @@ export class GameRuntime {
       imageDataUrl: "",
       updatedAt: Date.now()
     };
+    this.portalDisplayStates = {
+      portal1: this.normalizePortalDisplayState("portal1"),
+      portal2: this.normalizePortalDisplayState("portal2")
+    };
+    this.portalDisplayHandles = {
+      portal1: this.createPortalDisplayHandle("portal1"),
+      portal2: this.createPortalDisplayHandle("portal2")
+    };
+    this.portalDisplaySetInFlight = {
+      portal1: false,
+      portal2: false
+    };
+    this.hostPortalDisplayPendingImageDataUrls = {
+      portal1: "",
+      portal2: ""
+    };
     this.mainPortalAdSetInFlight = false;
     this.hostMainPortalAdPendingDataUrl = "";
     this.portalTopAdBaseTexture = null;
@@ -678,6 +709,14 @@ export class GameRuntime {
     this.hostPortalTargetApplyBtnEl = document.getElementById("host-portal-target-apply");
     this.hostAZonePortalTargetInputEl = document.getElementById("host-a-zone-portal-target");
     this.hostAZonePortalTargetApplyBtnEl = document.getElementById("host-a-zone-portal-target-apply");
+    this.hostPortal1NameInputEl = document.getElementById("host-portal-1-name");
+    this.hostPortal1ImageFileInputEl = document.getElementById("host-portal-1-image-file");
+    this.hostPortal1ApplyBtnEl = document.getElementById("host-portal-1-apply");
+    this.hostPortal1ResetBtnEl = document.getElementById("host-portal-1-reset");
+    this.hostPortal2NameInputEl = document.getElementById("host-portal-2-name");
+    this.hostPortal2ImageFileInputEl = document.getElementById("host-portal-2-image-file");
+    this.hostPortal2ApplyBtnEl = document.getElementById("host-portal-2-apply");
+    this.hostPortal2ResetBtnEl = document.getElementById("host-portal-2-reset");
     this.hostMainPortalAdFileInputEl = document.getElementById("host-main-portal-ad-file");
     this.hostMainPortalAdApplyBtnEl = document.getElementById("host-main-portal-ad-apply");
     this.hostMainPortalAdResetBtnEl = document.getElementById("host-main-portal-ad-reset");
@@ -1306,6 +1345,8 @@ export class GameRuntime {
       this.portalTopAdCustomTexture.dispose?.();
       this.portalTopAdCustomTexture = null;
     }
+    this.disposePortalDisplayCustomTexture("portal1");
+    this.disposePortalDisplayCustomTexture("portal2");
     const spawnPortalVeilTexturesToDispose = new Set();
     if (this.spawnPortalVeilTexture) {
       spawnPortalVeilTexturesToDispose.add(this.spawnPortalVeilTexture);
@@ -1337,6 +1378,10 @@ export class GameRuntime {
     this.portalTopAdScreenMaterial = null;
     this.portalTopAdUpdateGeometry = null;
     this.portalTopAdLoadNonce = 0;
+    this.portalDisplayHandles = {
+      portal1: this.createPortalDisplayHandle("portal1"),
+      portal2: this.createPortalDisplayHandle("portal2")
+    };
     this.portalBillboardPalette = {
       bgFrom: "rgba(27, 11, 29, 0.56)",
       bgTo: "rgba(46, 14, 45, 0.64)",
@@ -3097,11 +3142,14 @@ export class GameRuntime {
     portalGroup.add(portalCore, portalCoreGlow);
     const portalBillboard = this.createPortalTimeBillboard({
       dynamic: false,
-      topAdImageUrl: PORTAL_TOP_AD_IMAGE_URL,
-      line1: "OX 퀴즈 대회",
-      line2: "포탈 1 링크로 즉시 입장 가능",
-      line3: "",
+      topAdImageUrl: PORTAL_DISPLAY_DEFAULTS.portal1.imageUrl,
+      line1: PORTAL_DISPLAY_DEFAULTS.portal1.title,
+      line2: PORTAL_DISPLAY_DEFAULTS.portal1.line2,
+      line3: PORTAL_DISPLAY_DEFAULTS.portal1.line3,
       rotationY: 0,
+      onBillboardReady: (payload = {}) => {
+        this.registerPortalDisplayHandle("portal1", payload);
+      },
       palette: {
         bgFrom: "rgba(6, 16, 28, 0.50)",
         bgTo: "rgba(8, 24, 39, 0.58)",
@@ -3200,11 +3248,14 @@ export class GameRuntime {
 
     const aZonePortalBillboard = this.createPortalTimeBillboard({
       dynamic: false,
-      topAdImageUrl: A_ZONE_FIXED_PORTAL_IMAGE_URL,
-      line1: "포탈 2",
-      line2: "기본 링크: OX 퀴즈 대회",
-      line3: "",
+      topAdImageUrl: PORTAL_DISPLAY_DEFAULTS.portal2.imageUrl,
+      line1: PORTAL_DISPLAY_DEFAULTS.portal2.title,
+      line2: PORTAL_DISPLAY_DEFAULTS.portal2.line2,
+      line3: PORTAL_DISPLAY_DEFAULTS.portal2.line3,
       rotationY: 0,
+      onBillboardReady: (payload = {}) => {
+        this.registerPortalDisplayHandle("portal2", payload);
+      },
       palette: {
         bgFrom: "rgba(6, 16, 28, 0.50)",
         bgTo: "rgba(8, 24, 39, 0.58)",
@@ -3897,6 +3948,249 @@ export class GameRuntime {
     return "";
   }
 
+  normalizePortalDisplayKey(rawPortalKey) {
+    const key = String(rawPortalKey ?? "").trim().toLowerCase();
+    return key === "portal1" || key === "portal2" ? key : "";
+  }
+
+  getPortalDisplayDefaults(rawPortalKey) {
+    const portalKey = this.normalizePortalDisplayKey(rawPortalKey);
+    if (portalKey && PORTAL_DISPLAY_DEFAULTS[portalKey]) {
+      return PORTAL_DISPLAY_DEFAULTS[portalKey];
+    }
+    return PORTAL_DISPLAY_DEFAULTS.portal1;
+  }
+
+  createPortalDisplayHandle(rawPortalKey) {
+    const defaults = this.getPortalDisplayDefaults(rawPortalKey);
+    return {
+      portalKey: this.normalizePortalDisplayKey(rawPortalKey) || "portal1",
+      defaultTitle: defaults.title,
+      defaultLine2: defaults.line2,
+      defaultLine3: defaults.line3,
+      defaultImageUrl: defaults.imageUrl,
+      baseTexture: null,
+      material: null,
+      updateGeometry: null,
+      redrawLines: null,
+      customTexture: null,
+      loadNonce: 0,
+      lineCache: {
+        line1: "",
+        line2: "",
+        line3: ""
+      }
+    };
+  }
+
+  normalizePortalDisplayTitle(rawTitle, fallback = "") {
+    const value = String(rawTitle ?? "")
+      .trim()
+      .replace(/\s+/g, " ")
+      .slice(0, MAX_PORTAL_DISPLAY_TITLE_CHARS);
+    if (value) {
+      return value;
+    }
+    return String(fallback ?? "")
+      .trim()
+      .replace(/\s+/g, " ")
+      .slice(0, MAX_PORTAL_DISPLAY_TITLE_CHARS);
+  }
+
+  normalizePortalDisplayImageDataUrl(rawImageDataUrl) {
+    const value = String(rawImageDataUrl ?? "").trim();
+    if (!value || value.length > MAX_MAIN_PORTAL_AD_IMAGE_CHARS) {
+      return "";
+    }
+    if (!value.startsWith("data:image/")) {
+      return "";
+    }
+    return value;
+  }
+
+  normalizePortalDisplayState(rawPortalKey, rawState = {}) {
+    const defaults = this.getPortalDisplayDefaults(rawPortalKey);
+    return {
+      title: this.normalizePortalDisplayTitle(rawState?.title ?? rawState?.name ?? "", defaults.title),
+      imageDataUrl: this.normalizePortalDisplayImageDataUrl(
+        rawState?.imageDataUrl ?? rawState?.dataUrl ?? ""
+      ),
+      updatedAt: Math.max(0, Math.trunc(Number(rawState?.updatedAt) || Date.now()))
+    };
+  }
+
+  getPortalDisplayState(rawPortalKey) {
+    const portalKey = this.normalizePortalDisplayKey(rawPortalKey);
+    if (!portalKey) {
+      return this.normalizePortalDisplayState("portal1");
+    }
+    return this.normalizePortalDisplayState(portalKey, this.portalDisplayStates?.[portalKey]);
+  }
+
+  disposePortalDisplayCustomTexture(rawPortalKey) {
+    const portalKey = this.normalizePortalDisplayKey(rawPortalKey);
+    if (!portalKey) {
+      return;
+    }
+    const handle = this.portalDisplayHandles?.[portalKey];
+    if (!handle?.customTexture) {
+      return;
+    }
+    handle.customTexture.dispose?.();
+    handle.customTexture = null;
+  }
+
+  registerPortalDisplayHandle(rawPortalKey, payload = {}) {
+    const portalKey = this.normalizePortalDisplayKey(rawPortalKey);
+    if (!portalKey) {
+      return;
+    }
+    const defaults = this.getPortalDisplayDefaults(portalKey);
+    const previousHandle = this.portalDisplayHandles?.[portalKey];
+    const nextHandle = previousHandle ?? this.createPortalDisplayHandle(portalKey);
+    nextHandle.defaultTitle = defaults.title;
+    nextHandle.defaultLine2 = defaults.line2;
+    nextHandle.defaultLine3 = defaults.line3;
+    nextHandle.defaultImageUrl = defaults.imageUrl;
+    nextHandle.baseTexture = payload?.topAdBaseTexture ?? nextHandle.baseTexture ?? null;
+    nextHandle.material = payload?.topAdMaterial ?? nextHandle.material ?? null;
+    nextHandle.updateGeometry =
+      typeof payload?.updateTopAdGeometry === "function"
+        ? payload.updateTopAdGeometry
+        : nextHandle.updateGeometry;
+    nextHandle.redrawLines =
+      typeof payload?.redrawLines === "function" ? payload.redrawLines : nextHandle.redrawLines;
+    this.portalDisplayHandles[portalKey] = nextHandle;
+    this.applyPortalDisplayState(portalKey, this.portalDisplayStates?.[portalKey] ?? {}, {
+      force: true
+    });
+  }
+
+  updatePortalDisplayGeometryFromTexture(rawPortalKey, texture) {
+    const portalKey = this.normalizePortalDisplayKey(rawPortalKey);
+    if (!portalKey) {
+      return;
+    }
+    const handle = this.portalDisplayHandles?.[portalKey];
+    if (!handle?.updateGeometry || !texture?.image) {
+      return;
+    }
+    const width = Number(texture.image.width) || 0;
+    const height = Number(texture.image.height) || 0;
+    if (width > 0 && height > 0) {
+      handle.updateGeometry(width / height);
+    }
+  }
+
+  applyPortalDisplayTexture(rawPortalKey, rawImageDataUrl) {
+    const portalKey = this.normalizePortalDisplayKey(rawPortalKey);
+    if (!portalKey) {
+      return;
+    }
+    const handle = this.portalDisplayHandles?.[portalKey];
+    if (!handle?.material) {
+      return;
+    }
+
+    const imageDataUrl = this.normalizePortalDisplayImageDataUrl(rawImageDataUrl);
+    handle.loadNonce = Math.max(0, Math.trunc(Number(handle.loadNonce) || 0)) + 1;
+    const loadNonce = handle.loadNonce;
+
+    if (!imageDataUrl) {
+      this.disposePortalDisplayCustomTexture(portalKey);
+      handle.material.map = handle.baseTexture ?? null;
+      handle.material.needsUpdate = true;
+      this.updatePortalDisplayGeometryFromTexture(portalKey, handle.baseTexture);
+      return;
+    }
+
+    const texture = this.textureLoader.load(
+      imageDataUrl,
+      (loadedTexture) => {
+        if (loadNonce !== handle.loadNonce) {
+          texture.dispose();
+          return;
+        }
+        loadedTexture.colorSpace = THREE.SRGBColorSpace;
+        loadedTexture.minFilter = THREE.LinearMipmapLinearFilter;
+        loadedTexture.magFilter = THREE.LinearFilter;
+        loadedTexture.generateMipmaps = true;
+        const maxAnisotropy = Math.max(1, this.renderer?.capabilities?.getMaxAnisotropy?.() || 1);
+        loadedTexture.anisotropy = this.mobileEnabled
+          ? Math.min(2, maxAnisotropy)
+          : Math.min(8, maxAnisotropy);
+        loadedTexture.needsUpdate = true;
+        if (handle.customTexture && handle.customTexture !== loadedTexture) {
+          handle.customTexture.dispose?.();
+        }
+        handle.customTexture = loadedTexture;
+        handle.material.map = loadedTexture;
+        handle.material.needsUpdate = true;
+        this.updatePortalDisplayGeometryFromTexture(portalKey, loadedTexture);
+      },
+      undefined,
+      () => {
+        if (loadNonce !== handle.loadNonce) {
+          texture.dispose();
+          return;
+        }
+        texture.dispose();
+        this.applyPortalDisplayTexture(portalKey, "");
+      }
+    );
+  }
+
+  applyPortalDisplayLines(rawPortalKey, rawState = {}, { force = false } = {}) {
+    const portalKey = this.normalizePortalDisplayKey(rawPortalKey);
+    if (!portalKey) {
+      return;
+    }
+    const handle = this.portalDisplayHandles?.[portalKey];
+    if (!handle?.redrawLines) {
+      return;
+    }
+    const state = this.normalizePortalDisplayState(portalKey, rawState);
+    const line1 = state.title;
+    const line2 = handle.defaultLine2;
+    const line3 = handle.defaultLine3;
+    if (
+      !force &&
+      handle.lineCache.line1 === line1 &&
+      handle.lineCache.line2 === line2 &&
+      handle.lineCache.line3 === line3
+    ) {
+      return;
+    }
+    handle.redrawLines({ line1, line2, line3 });
+    handle.lineCache = { line1, line2, line3 };
+  }
+
+  applyPortalDisplayState(rawPortalKey, rawState = {}, { force = false } = {}) {
+    const portalKey = this.normalizePortalDisplayKey(rawPortalKey);
+    if (!portalKey) {
+      return false;
+    }
+    const previous = this.getPortalDisplayState(portalKey);
+    const next = this.normalizePortalDisplayState(portalKey, rawState);
+    if (
+      !force &&
+      previous.title === next.title &&
+      previous.imageDataUrl === next.imageDataUrl
+    ) {
+      return false;
+    }
+    this.portalDisplayStates[portalKey] = next;
+    this.applyPortalDisplayLines(portalKey, next, { force: true });
+    this.applyPortalDisplayTexture(portalKey, next.imageDataUrl);
+    return true;
+  }
+
+  applyPortalDisplayCollection(rawCollection = {}, { force = false } = {}) {
+    const collection = rawCollection && typeof rawCollection === "object" ? rawCollection : {};
+    this.applyPortalDisplayState("portal1", collection.portal1 ?? {}, { force });
+    this.applyPortalDisplayState("portal2", collection.portal2 ?? {}, { force });
+  }
+
   normalizeMainPortalAdState(rawState = {}) {
     const imageDataUrl = String(rawState?.imageDataUrl ?? rawState?.dataUrl ?? "").trim();
     const hasValidImage =
@@ -4442,6 +4736,153 @@ export class GameRuntime {
     if (this.isRoomHost || this.canUseOfflineHostMode()) {
       this.requestRightBillboardReset({ announceErrors: false });
     }
+  }
+
+  getPortalDisplayLabel(rawPortalKey) {
+    const portalKey = this.normalizePortalDisplayKey(rawPortalKey);
+    if (portalKey === "portal2") {
+      return "포탈 2";
+    }
+    return "포탈 1";
+  }
+
+  handleHostPortalDisplayFileSelected(rawPortalKey, file) {
+    const portalKey = this.normalizePortalDisplayKey(rawPortalKey);
+    if (!portalKey) {
+      return;
+    }
+    if (!file) {
+      this.hostPortalDisplayPendingImageDataUrls[portalKey] = "";
+      return;
+    }
+    if (file.type && !String(file.type).toLowerCase().startsWith("image/")) {
+      this.hostPortalDisplayPendingImageDataUrls[portalKey] = "";
+      this.appendChatLine("", `${this.getPortalDisplayLabel(portalKey)} 이미지는 이미지 파일만 업로드할 수 있습니다.`, "system");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = this.normalizePortalDisplayImageDataUrl(event?.target?.result ?? "");
+      if (!dataUrl) {
+        this.hostPortalDisplayPendingImageDataUrls[portalKey] = "";
+        this.appendChatLine("", `${this.getPortalDisplayLabel(portalKey)}용 유효한 이미지 파일을 다시 선택하세요.`, "system");
+        return;
+      }
+      this.hostPortalDisplayPendingImageDataUrls[portalKey] = dataUrl;
+      this.appendChatLine("", `${this.getPortalDisplayLabel(portalKey)} 이미지가 준비되었습니다. 저장을 누르면 즉시 반영됩니다.`, "system");
+    };
+    reader.onerror = () => {
+      this.hostPortalDisplayPendingImageDataUrls[portalKey] = "";
+      this.appendChatLine("", `${this.getPortalDisplayLabel(portalKey)} 이미지 파일을 읽지 못했습니다.`, "system");
+    };
+    reader.readAsDataURL(file);
+  }
+
+  requestPortalDisplaySet(rawPortalKey, payload = {}, { announceErrors = true } = {}) {
+    const portalKey = this.normalizePortalDisplayKey(rawPortalKey);
+    if (!portalKey) {
+      return;
+    }
+    const current = this.getPortalDisplayState(portalKey);
+    const hasTitle = Object.prototype.hasOwnProperty.call(payload ?? {}, "title");
+    const hasImageDataUrl = Object.prototype.hasOwnProperty.call(payload ?? {}, "imageDataUrl");
+    const next = this.normalizePortalDisplayState(portalKey, {
+      title: hasTitle ? payload?.title : current.title,
+      imageDataUrl: hasImageDataUrl ? payload?.imageDataUrl : current.imageDataUrl,
+      updatedAt: Date.now()
+    });
+    const localHostMode = this.canUseOfflineHostMode();
+    const label = this.getPortalDisplayLabel(portalKey);
+
+    if (!this.socket || !this.networkConnected) {
+      if (localHostMode) {
+        this.hostPortalDisplayPendingImageDataUrls[portalKey] = "";
+        this.applyPortalDisplayState(portalKey, next, { force: true });
+      } else if (announceErrors) {
+        this.appendChatLine("", `서버 연결 후 ${label} 표시를 저장할 수 있습니다.`, "system");
+      }
+      return;
+    }
+    if (!this.isRoomHost) {
+      if (announceErrors) {
+        this.appendChatLine("", `${label} 표시 변경은 방장만 가능합니다.`, "system");
+      }
+      return;
+    }
+    if (this.portalDisplaySetInFlight?.[portalKey]) {
+      return;
+    }
+
+    this.portalDisplaySetInFlight[portalKey] = true;
+    this.syncHostControls();
+    this.socket.emit(
+      "portal:display:set",
+      {
+        portalKey,
+        title: next.title,
+        ...(hasImageDataUrl ? { imageDataUrl: next.imageDataUrl } : {})
+      },
+      (response = {}) => {
+        this.portalDisplaySetInFlight[portalKey] = false;
+        this.syncHostControls();
+        if (!response?.ok) {
+          if (announceErrors) {
+            const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
+            this.appendChatLine("", `${label} 저장 실패: ${reason}`, "system");
+          }
+          return;
+        }
+        this.hostPortalDisplayPendingImageDataUrls[portalKey] = "";
+        this.applyPortalDisplayState(portalKey, response?.state ?? next, { force: true });
+        this.appendChatLine("", `${label} 표시 저장 완료`, "system");
+      }
+    );
+  }
+
+  requestPortalDisplayReset(rawPortalKey, { announceErrors = true } = {}) {
+    const portalKey = this.normalizePortalDisplayKey(rawPortalKey);
+    if (!portalKey) {
+      return;
+    }
+    const localHostMode = this.canUseOfflineHostMode();
+    const label = this.getPortalDisplayLabel(portalKey);
+    if (!this.socket || !this.networkConnected) {
+      if (localHostMode) {
+        this.hostPortalDisplayPendingImageDataUrls[portalKey] = "";
+        this.applyPortalDisplayState(portalKey, this.normalizePortalDisplayState(portalKey), {
+          force: true
+        });
+      } else if (announceErrors) {
+        this.appendChatLine("", `서버 연결 후 ${label} 표시를 초기화할 수 있습니다.`, "system");
+      }
+      return;
+    }
+    if (!this.isRoomHost) {
+      if (announceErrors) {
+        this.appendChatLine("", `${label} 표시 초기화는 방장만 가능합니다.`, "system");
+      }
+      return;
+    }
+    if (this.portalDisplaySetInFlight?.[portalKey]) {
+      return;
+    }
+
+    this.portalDisplaySetInFlight[portalKey] = true;
+    this.syncHostControls();
+    this.socket.emit("portal:display:reset", { portalKey }, (response = {}) => {
+      this.portalDisplaySetInFlight[portalKey] = false;
+      this.syncHostControls();
+      if (!response?.ok) {
+        if (announceErrors) {
+          const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
+          this.appendChatLine("", `${label} 초기화 실패: ${reason}`, "system");
+        }
+        return;
+      }
+      this.hostPortalDisplayPendingImageDataUrls[portalKey] = "";
+      this.applyPortalDisplayState(portalKey, response?.state ?? {}, { force: true });
+      this.appendChatLine("", `${label} 표시를 기본값으로 되돌렸습니다.`, "system");
+    });
   }
 
   handleHostMainPortalAdFileSelected(file) {
@@ -8031,6 +8472,8 @@ export class GameRuntime {
   createPortalTimeBillboard(options = {}) {
     const dynamic = Boolean(options?.dynamic);
     const onTopAdReady = typeof options?.onTopAdReady === "function" ? options.onTopAdReady : null;
+    const onBillboardReady =
+      typeof options?.onBillboardReady === "function" ? options.onBillboardReady : null;
     const topAdImageUrl = String(options?.topAdImageUrl ?? PORTAL_TOP_AD_IMAGE_URL).trim()
       || PORTAL_TOP_AD_IMAGE_URL;
     const line1 = String(options?.line1 ?? "상시 입장 가능").trim() || "상시 입장 가능";
@@ -8201,6 +8644,37 @@ export class GameRuntime {
       });
     }
 
+    const resolvedPalette = dynamic
+      ? {
+          bgFrom: String(palette?.bgFrom ?? "rgba(27, 11, 29, 0.56)"),
+          bgTo: String(palette?.bgTo ?? "rgba(46, 14, 45, 0.64)"),
+          border: String(palette?.border ?? "rgba(255, 148, 226, 0.82)"),
+          stripe: String(palette?.stripe ?? "rgba(208, 102, 178, 0.16)"),
+          shadow: String(palette?.shadow ?? "rgba(255, 156, 228, 0.72)"),
+          line1: String(palette?.line1 ?? "#ffe7f8"),
+          line2: String(palette?.line2 ?? "#ffc7ee"),
+          line3: String(palette?.line3 ?? "#f6b8e7")
+        }
+      : {
+          bgFrom: String(palette?.bgFrom ?? "rgba(6, 16, 28, 0.50)"),
+          bgTo: String(palette?.bgTo ?? "rgba(8, 24, 39, 0.58)"),
+          border: String(palette?.border ?? "rgba(122, 191, 235, 0.72)"),
+          stripe: String(palette?.stripe ?? "rgba(88, 150, 198, 0.12)"),
+          shadow: String(palette?.shadow ?? "rgba(90, 199, 255, 0.65)"),
+          line1: String(palette?.line1 ?? "#d8f2ff"),
+          line2: String(palette?.line2 ?? "#9de7ff"),
+          line3: String(palette?.line3 ?? "#8bd6f5")
+        };
+    const redrawLines = ({ line1: nextLine1 = "", line2: nextLine2 = "", line3: nextLine3 = "" } = {}) => {
+      this.drawPortalBillboardLines(context, canvas, {
+        line1: nextLine1,
+        line2: nextLine2,
+        line3: nextLine3,
+        palette: resolvedPalette
+      });
+      texture.needsUpdate = true;
+    };
+
     if (dynamic) {
       this.portalBillboardCanvas = canvas;
       this.portalBillboardContext = context;
@@ -8211,34 +8685,18 @@ export class GameRuntime {
         line2: "",
         line3: ""
       };
-      this.portalBillboardPalette = {
-        bgFrom: String(palette?.bgFrom ?? "rgba(27, 11, 29, 0.56)"),
-        bgTo: String(palette?.bgTo ?? "rgba(46, 14, 45, 0.64)"),
-        border: String(palette?.border ?? "rgba(255, 148, 226, 0.82)"),
-        stripe: String(palette?.stripe ?? "rgba(208, 102, 178, 0.16)"),
-        shadow: String(palette?.shadow ?? "rgba(255, 156, 228, 0.72)"),
-        line1: String(palette?.line1 ?? "#ffe7f8"),
-        line2: String(palette?.line2 ?? "#ffc7ee"),
-        line3: String(palette?.line3 ?? "#f6b8e7")
-      };
+      this.portalBillboardPalette = resolvedPalette;
       this.updatePortalTimeBillboard(1, true);
     } else {
-      this.drawPortalBillboardLines(context, canvas, {
-        line1,
-        line2,
-        line3,
-        palette: {
-          bgFrom: String(palette?.bgFrom ?? "rgba(6, 16, 28, 0.50)"),
-          bgTo: String(palette?.bgTo ?? "rgba(8, 24, 39, 0.58)"),
-          border: String(palette?.border ?? "rgba(122, 191, 235, 0.72)"),
-          stripe: String(palette?.stripe ?? "rgba(88, 150, 198, 0.12)"),
-          shadow: String(palette?.shadow ?? "rgba(90, 199, 255, 0.65)"),
-          line1: String(palette?.line1 ?? "#d8f2ff"),
-          line2: String(palette?.line2 ?? "#9de7ff"),
-          line3: String(palette?.line3 ?? "#8bd6f5")
-        }
+      redrawLines({ line1, line2, line3 });
+    }
+    if (onBillboardReady) {
+      onBillboardReady({
+        topAdBaseTexture: topAdTexture,
+        topAdMaterial: topAdScreen.material,
+        updateTopAdGeometry: updateTopAdGeometry,
+        redrawLines
       });
-      texture.needsUpdate = true;
     }
     return board;
   }
@@ -11213,6 +11671,8 @@ export class GameRuntime {
       this.portalScheduleSetInFlight ||
       this.portalTargetSetInFlight ||
       this.aZonePortalTargetSetInFlight ||
+      Boolean(this.portalDisplaySetInFlight?.portal1) ||
+      Boolean(this.portalDisplaySetInFlight?.portal2) ||
       this.mainPortalAdSetInFlight ||
       this.leftBillboardSetInFlight ||
       this.rightBillboardResetInFlight ||
@@ -11289,6 +11749,44 @@ export class GameRuntime {
         this.hostAZonePortalTargetApplyBtnEl.classList.toggle("hidden", !A_ZONE_PORTAL_ENABLED);
       }
       this.hostAZonePortalTargetApplyBtnEl.disabled = controlsBusy;
+    }
+    const portal1DisplayState = this.getPortalDisplayState("portal1");
+    const portal2DisplayState = this.getPortalDisplayState("portal2");
+    if (this.hostPortal1NameInputEl) {
+      this.hostPortal1NameInputEl.disabled = controlsBusy;
+      if (document.activeElement !== this.hostPortal1NameInputEl) {
+        const nextValue = String(portal1DisplayState.title ?? "").trim();
+        if (this.hostPortal1NameInputEl.value !== nextValue) {
+          this.hostPortal1NameInputEl.value = nextValue;
+        }
+      }
+    }
+    if (this.hostPortal1ImageFileInputEl) {
+      this.hostPortal1ImageFileInputEl.disabled = controlsBusy;
+    }
+    if (this.hostPortal1ApplyBtnEl) {
+      this.hostPortal1ApplyBtnEl.disabled = controlsBusy;
+    }
+    if (this.hostPortal1ResetBtnEl) {
+      this.hostPortal1ResetBtnEl.disabled = controlsBusy;
+    }
+    if (this.hostPortal2NameInputEl) {
+      this.hostPortal2NameInputEl.disabled = controlsBusy;
+      if (document.activeElement !== this.hostPortal2NameInputEl) {
+        const nextValue = String(portal2DisplayState.title ?? "").trim();
+        if (this.hostPortal2NameInputEl.value !== nextValue) {
+          this.hostPortal2NameInputEl.value = nextValue;
+        }
+      }
+    }
+    if (this.hostPortal2ImageFileInputEl) {
+      this.hostPortal2ImageFileInputEl.disabled = controlsBusy;
+    }
+    if (this.hostPortal2ApplyBtnEl) {
+      this.hostPortal2ApplyBtnEl.disabled = controlsBusy;
+    }
+    if (this.hostPortal2ResetBtnEl) {
+      this.hostPortal2ResetBtnEl.disabled = controlsBusy;
     }
     if (this.hostMainPortalAdFileInputEl) {
       this.hostMainPortalAdFileInputEl.disabled = controlsBusy;
@@ -15915,6 +16413,57 @@ export class GameRuntime {
         this.hostAZonePortalTargetApplyBtnEl?.click?.();
       });
     }
+    const bindPortalDisplayControls = (
+      portalKey,
+      inputEl,
+      fileInputEl,
+      applyBtnEl,
+      resetBtnEl
+    ) => {
+      fileInputEl?.addEventListener("change", () => {
+        const file = fileInputEl?.files?.[0] ?? null;
+        this.handleHostPortalDisplayFileSelected(portalKey, file);
+        fileInputEl.value = "";
+      });
+      applyBtnEl?.addEventListener("click", () => {
+        const title = String(inputEl?.value ?? "").trim();
+        const pendingImageDataUrl = String(
+          this.hostPortalDisplayPendingImageDataUrls?.[portalKey] ?? ""
+        ).trim();
+        this.requestPortalDisplaySet(
+          portalKey,
+          {
+            title,
+            ...(pendingImageDataUrl ? { imageDataUrl: pendingImageDataUrl } : {})
+          },
+          { announceErrors: true }
+        );
+      });
+      resetBtnEl?.addEventListener("click", () => {
+        this.requestPortalDisplayReset(portalKey, { announceErrors: true });
+      });
+      inputEl?.addEventListener("keydown", (event) => {
+        if (event.code !== "Enter") {
+          return;
+        }
+        event.preventDefault();
+        applyBtnEl?.click?.();
+      });
+    };
+    bindPortalDisplayControls(
+      "portal1",
+      this.hostPortal1NameInputEl,
+      this.hostPortal1ImageFileInputEl,
+      this.hostPortal1ApplyBtnEl,
+      this.hostPortal1ResetBtnEl
+    );
+    bindPortalDisplayControls(
+      "portal2",
+      this.hostPortal2NameInputEl,
+      this.hostPortal2ImageFileInputEl,
+      this.hostPortal2ApplyBtnEl,
+      this.hostPortal2ResetBtnEl
+    );
     if (this.hostMainPortalAdFileInputEl) {
       this.hostMainPortalAdFileInputEl.addEventListener("change", () => {
         const file = this.hostMainPortalAdFileInputEl?.files?.[0] ?? null;
@@ -16565,6 +17114,30 @@ export class GameRuntime {
       this.hostAZonePortalTargetApplyBtnEl = document.getElementById(
         "host-a-zone-portal-target-apply"
       );
+    }
+    if (!this.hostPortal1NameInputEl) {
+      this.hostPortal1NameInputEl = document.getElementById("host-portal-1-name");
+    }
+    if (!this.hostPortal1ImageFileInputEl) {
+      this.hostPortal1ImageFileInputEl = document.getElementById("host-portal-1-image-file");
+    }
+    if (!this.hostPortal1ApplyBtnEl) {
+      this.hostPortal1ApplyBtnEl = document.getElementById("host-portal-1-apply");
+    }
+    if (!this.hostPortal1ResetBtnEl) {
+      this.hostPortal1ResetBtnEl = document.getElementById("host-portal-1-reset");
+    }
+    if (!this.hostPortal2NameInputEl) {
+      this.hostPortal2NameInputEl = document.getElementById("host-portal-2-name");
+    }
+    if (!this.hostPortal2ImageFileInputEl) {
+      this.hostPortal2ImageFileInputEl = document.getElementById("host-portal-2-image-file");
+    }
+    if (!this.hostPortal2ApplyBtnEl) {
+      this.hostPortal2ApplyBtnEl = document.getElementById("host-portal-2-apply");
+    }
+    if (!this.hostPortal2ResetBtnEl) {
+      this.hostPortal2ResetBtnEl = document.getElementById("host-portal-2-reset");
     }
     if (!this.hostMainPortalAdFileInputEl) {
       this.hostMainPortalAdFileInputEl = document.getElementById("host-main-portal-ad-file");
@@ -17227,6 +17800,8 @@ export class GameRuntime {
       this.leftBillboardSetInFlight = false;
       this.rightBillboardResetInFlight = false;
       this.billboardVideoSetInFlight = false;
+      this.portalDisplaySetInFlight.portal1 = false;
+      this.portalDisplaySetInFlight.portal2 = false;
       this.mainPortalAdSetInFlight = false;
       this.hostMusicSetInFlight = false;
       this.applySharedMusicState({ mode: "idle" }, { announce: false });
@@ -17301,6 +17876,8 @@ export class GameRuntime {
       this.leftBillboardSetInFlight = false;
       this.rightBillboardResetInFlight = false;
       this.billboardVideoSetInFlight = false;
+      this.portalDisplaySetInFlight.portal1 = false;
+      this.portalDisplaySetInFlight.portal2 = false;
       this.mainPortalAdSetInFlight = false;
       this.hostMusicSetInFlight = false;
       this.remoteSyncClock = 0;
@@ -17422,6 +17999,8 @@ export class GameRuntime {
       this.leftBillboardSetInFlight = false;
       this.rightBillboardResetInFlight = false;
       this.billboardVideoSetInFlight = false;
+      this.portalDisplaySetInFlight.portal1 = false;
+      this.portalDisplaySetInFlight.portal2 = false;
       this.mainPortalAdSetInFlight = false;
       this.hostMusicSetInFlight = false;
       this.securityTestSetInFlight = false;
@@ -17556,6 +18135,10 @@ export class GameRuntime {
 
     socket.on("portal:a-zone-target:update", (payload = {}) => {
       this.applyAZonePortalTargetUpdate(payload?.targetUrl ?? payload?.url ?? "");
+    });
+
+    socket.on("portal:display:update", (payload = {}) => {
+      this.applyPortalDisplayCollection(payload ?? {}, { force: true });
     });
 
     socket.on("portal:ad:update", (payload = {}) => {
@@ -17858,6 +18441,9 @@ export class GameRuntime {
     }
     if (room?.portalSchedule && typeof room.portalSchedule === "object") {
       this.applyPortalScheduleUpdate(room.portalSchedule, { announce: false });
+    }
+    if (room?.portalDisplays && typeof room.portalDisplays === "object") {
+      this.applyPortalDisplayCollection(room.portalDisplays);
     }
     if (room?.mainPortalAd && typeof room.mainPortalAd === "object") {
       this.applyMainPortalAdState(room.mainPortalAd);

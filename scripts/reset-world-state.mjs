@@ -145,6 +145,18 @@ async function main() {
   }
 
   if (clearMedia) {
+    next.portalDisplays = {
+      portal1: {
+        title: "OX 퀴즈 대회",
+        imageDataUrl: "",
+        updatedAt: now
+      },
+      portal2: {
+        title: "포탈 2",
+        imageDataUrl: "",
+        updatedAt: now
+      }
+    };
     next.mainPortalAd = {
       mode: "ad",
       imageDataUrl: "",

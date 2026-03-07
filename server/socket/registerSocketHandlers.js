@@ -611,6 +611,14 @@ export function registerSocketHandlers({
       socket.emit("portal:ad:update", roomService.serializeMainPortalAd(room));
     };
 
+    const emitPortalDisplayState = () => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        return;
+      }
+      socket.emit("portal:display:update", roomService.serializePortalDisplays(room));
+    };
+
     const emitPlatformState = () => {
       const room = roomService.getRoomBySocket(socket);
       if (!room) return;
@@ -723,6 +731,7 @@ export function registerSocketHandlers({
         emitSurfacePaintState();
         emitSharedMusicState();
         emitLeftBillboardState();
+        emitPortalDisplayState();
         emitMainPortalAdState();
         emitPortalOpenCatchup();
         emitPromoState();
@@ -788,6 +797,7 @@ export function registerSocketHandlers({
     emitSurfacePaintState();
     emitSharedMusicState();
     emitLeftBillboardState();
+    emitPortalDisplayState();
     emitMainPortalAdState();
     emitPortalOpenCatchup();
     emitPlatformState();
@@ -1228,6 +1238,90 @@ export function registerSocketHandlers({
         ok: true,
         changed: Boolean(result.changed),
         targetUrl: result.targetUrl
+      });
+    });
+
+    socket.on("portal:display:set", (payload = {}, ackFn) => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        ack(ackFn, { ok: false, error: "room not found" });
+        return;
+      }
+      if (!roomService.isHost(room, socket.id)) {
+        ack(ackFn, { ok: false, error: "host only" });
+        return;
+      }
+      const persistenceError = getPersistentStateBlockReason(config, "portal display");
+      if (persistenceError) {
+        ack(ackFn, { ok: false, error: persistenceError });
+        return;
+      }
+
+      const nextPayload = {};
+      if (
+        Object.prototype.hasOwnProperty.call(payload, "title") ||
+        Object.prototype.hasOwnProperty.call(payload, "name")
+      ) {
+        nextPayload.title = payload?.title ?? payload?.name ?? "";
+      }
+      if (
+        Object.prototype.hasOwnProperty.call(payload, "imageDataUrl") ||
+        Object.prototype.hasOwnProperty.call(payload, "dataUrl")
+      ) {
+        nextPayload.imageDataUrl = payload?.imageDataUrl ?? payload?.dataUrl ?? "";
+      }
+
+      const result = roomService.setPortalDisplay(
+        room,
+        payload?.portalKey ?? payload?.key ?? "",
+        nextPayload
+      );
+      if (!result.ok) {
+        ack(ackFn, result);
+        return;
+      }
+      if (result.changed) {
+        roomService.emitPortalDisplayUpdate(room);
+      }
+      ack(ackFn, {
+        ok: true,
+        changed: Boolean(result.changed),
+        portalKey: result.portalKey,
+        state: result.state,
+        portalDisplays: result.portalDisplays
+      });
+    });
+
+    socket.on("portal:display:reset", (payload = {}, ackFn) => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        ack(ackFn, { ok: false, error: "room not found" });
+        return;
+      }
+      if (!roomService.isHost(room, socket.id)) {
+        ack(ackFn, { ok: false, error: "host only" });
+        return;
+      }
+      const persistenceError = getPersistentStateBlockReason(config, "portal display");
+      if (persistenceError) {
+        ack(ackFn, { ok: false, error: persistenceError });
+        return;
+      }
+
+      const result = roomService.resetPortalDisplay(room, payload?.portalKey ?? payload?.key ?? "");
+      if (!result.ok) {
+        ack(ackFn, result);
+        return;
+      }
+      if (result.changed) {
+        roomService.emitPortalDisplayUpdate(room);
+      }
+      ack(ackFn, {
+        ok: true,
+        changed: Boolean(result.changed),
+        portalKey: result.portalKey,
+        state: result.state,
+        portalDisplays: result.portalDisplays
       });
     });
 
