@@ -649,7 +649,8 @@ export function registerSocketHandlers({
         promoMode: String(config?.promoMode ?? "").trim().toLowerCase(),
         surfacePaintMode: String(config?.surfacePaintMode ?? "").trim().toLowerCase(),
         persistentStateAvailable: config?.persistentStateAvailable !== false,
-        persistentStateReason: String(config?.persistentStateReason ?? "").trim()
+        persistentStateReason: String(config?.persistentStateReason ?? "").trim(),
+        coreMemory: roomService?.getPersistenceStatus?.()?.coreMemory ?? null
       });
     };
 

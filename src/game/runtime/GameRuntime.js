@@ -383,7 +383,8 @@ export class GameRuntime {
       promoMode: "",
       surfacePaintMode: "",
       persistentStateAvailable: null,
-      persistentStateReason: ""
+      persistentStateReason: "",
+      coreMemory: null
     };
     this.surfacePaintPolicyState = {
       bridgePanelsNz: {
@@ -11723,6 +11724,20 @@ export class GameRuntime {
     return `${featureLabel} 저장을 현재 사용할 수 없습니다. 운영자 확인이 필요합니다.`;
   }
 
+  getCoreMemoryUnavailableMessage(featureLabel = "회색 오브젝트") {
+    const coreReason = String(this.runtimePolicyState?.coreMemory?.reason ?? "").trim();
+    const fallbackReason = String(this.runtimePolicyState?.persistentStateReason ?? "").trim();
+    const reason = coreReason || fallbackReason;
+    const lowerReason = reason.toLowerCase();
+    if (lowerReason.includes("eacces") || lowerReason.includes("permission denied")) {
+      return `${featureLabel} 코어 저장용 디스크를 사용할 수 없습니다. 운영자 확인이 필요합니다.`;
+    }
+    if (lowerReason.includes("path missing") || lowerReason.includes("storage path missing")) {
+      return `${featureLabel} 코어 저장 경로가 설정되지 않았습니다. 운영자 확인이 필요합니다.`;
+    }
+    return `${featureLabel} 코어 저장을 현재 사용할 수 없습니다. 운영자 확인이 필요합니다.`;
+  }
+
   applyRuntimePolicyState(payload = {}) {
     const nextPromoMode = this.normalizeRuntimeFeatureMode(
       payload?.promoMode,
@@ -11739,11 +11754,41 @@ export class GameRuntime {
     const nextPersistentStateReason = String(
       payload?.persistentStateReason ?? this.runtimePolicyState?.persistentStateReason ?? ""
     ).trim();
+    const nextCoreMemory =
+      payload?.coreMemory && typeof payload.coreMemory === "object"
+        ? {
+            available:
+              typeof payload.coreMemory.available === "boolean"
+                ? payload.coreMemory.available
+                : null,
+            reason: String(payload.coreMemory.reason ?? "").trim(),
+            count: Math.max(0, Math.trunc(Number(payload.coreMemory.count) || 0)),
+            storageKey: String(payload.coreMemory.storageKey ?? "").trim(),
+            durabilityTier: String(payload.coreMemory.durabilityTier ?? "").trim(),
+            authoredType: String(payload.coreMemory.authoredType ?? "").trim(),
+            payloadVersion: Math.max(
+              0,
+              Math.trunc(Number(payload.coreMemory.payloadVersion) || 0)
+            ),
+            schemaVersion: Math.max(
+              0,
+              Math.trunc(Number(payload.coreMemory.schemaVersion) || 0)
+            ),
+            lastPersistAt: Math.max(
+              0,
+              Math.trunc(Number(payload.coreMemory.lastPersistAt) || 0)
+            ),
+            lastPersistError: String(payload.coreMemory.lastPersistError ?? "").trim(),
+            queued: Boolean(payload.coreMemory.queued),
+            inFlight: Boolean(payload.coreMemory.inFlight)
+          }
+        : this.runtimePolicyState?.coreMemory ?? null;
     this.runtimePolicyState = {
       promoMode: nextPromoMode,
       surfacePaintMode: nextSurfacePaintMode,
       persistentStateAvailable: nextPersistentStateAvailable,
-      persistentStateReason: nextPersistentStateReason
+      persistentStateReason: nextPersistentStateReason,
+      coreMemory: nextCoreMemory
     };
     this.syncPromoPanelUi();
     this.updateSurfacePainterSaveAvailability();
@@ -17254,7 +17299,8 @@ export class GameRuntime {
         promoMode: "",
         surfacePaintMode: "",
         persistentStateAvailable: null,
-        persistentStateReason: ""
+        persistentStateReason: "",
+        coreMemory: null
       };
       this.clearPromoPlacementPreview({ syncUi: false });
       this.clearHostCustomBlockPlacementPreview({ syncUi: false });
@@ -17372,7 +17418,8 @@ export class GameRuntime {
         promoMode: "",
         surfacePaintMode: "",
         persistentStateAvailable: null,
-        persistentStateReason: ""
+        persistentStateReason: "",
+        coreMemory: null
       };
       this.clearPromoPlacementPreview({ syncUi: false });
       this.clearHostCustomBlockPlacementPreview({ syncUi: false });
@@ -17449,7 +17496,8 @@ export class GameRuntime {
         promoMode: "",
         surfacePaintMode: "",
         persistentStateAvailable: null,
-        persistentStateReason: ""
+        persistentStateReason: "",
+        coreMemory: null
       };
       this.clearPromoPlacementPreview({ syncUi: false });
       this.clearHostCustomBlockPlacementPreview({ syncUi: false });
@@ -20501,6 +20549,21 @@ export class GameRuntime {
         this.objectStateAutosaveClock = 0;
         if (announceErrors) {
           this.appendChatLine("", "오브젝트 저장은 방장만 가능합니다.", "system");
+        }
+        this.requestObjectState();
+        return;
+      }
+      const coreMemoryAvailable =
+        typeof this.runtimePolicyState?.coreMemory?.available === "boolean"
+          ? this.runtimePolicyState.coreMemory.available
+          : this.runtimePolicyState?.persistentStateAvailable;
+      if (coreMemoryAvailable === false) {
+        this.objectStateSavePending = false;
+        this.objectStateSavePendingForceFlush = false;
+        this.objectStateDirty = false;
+        this.objectStateAutosaveClock = 0;
+        if (announceErrors) {
+          this.appendChatLine("", this.getCoreMemoryUnavailableMessage("회색 오브젝트"), "system");
         }
         this.requestObjectState();
         return;

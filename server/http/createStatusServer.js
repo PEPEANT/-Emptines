@@ -161,6 +161,7 @@ export function createStatusServer({
   getOnlineCount,
   getRoomStats,
   getMetrics,
+  getPersistenceStatus,
   staticClientDir = "dist"
 }) {
   const resolvedStaticDir = String(staticClientDir ?? "").trim()
@@ -180,6 +181,7 @@ export function createStatusServer({
     if (pathname === "/health") {
       const stats = getRoomStats();
       const metrics = typeof getMetrics === "function" ? getMetrics() : null;
+      const persistence = typeof getPersistenceStatus === "function" ? getPersistenceStatus() : null;
       writeJson(res, 200, {
         ok: true,
         service: serviceName,
@@ -188,6 +190,7 @@ export function createStatusServer({
         globalPlayers: Number(stats?.globalPlayers) || 0,
         globalCapacity: Number(stats?.globalCapacity) || maxRoomPlayers,
         metrics,
+        persistence,
         deploy,
         now: Date.now()
       });
@@ -195,12 +198,14 @@ export function createStatusServer({
     }
 
     if (pathname === "/status") {
+      const persistence = typeof getPersistenceStatus === "function" ? getPersistenceStatus() : null;
       writeJson(res, 200, {
         ok: true,
         message: "Emptines realtime sync server is running",
         room: defaultRoomCode,
         capacity: maxRoomPlayers,
         health: "/health",
+        persistence,
         deploy
       });
       return;
@@ -252,12 +257,14 @@ export function createStatusServer({
     }
 
     if (pathname === "/") {
+      const persistence = typeof getPersistenceStatus === "function" ? getPersistenceStatus() : null;
       writeJson(res, 200, {
         ok: true,
         message: "Emptines realtime sync server is running",
         room: defaultRoomCode,
         capacity: maxRoomPlayers,
         health: "/health",
+        persistence,
         deploy
       });
       return;

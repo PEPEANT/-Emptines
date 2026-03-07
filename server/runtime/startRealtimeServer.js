@@ -17,6 +17,34 @@ function buildFallbackRoomStats(maxRoomPlayers) {
   };
 }
 
+function buildFallbackPersistenceStatus(config) {
+  const available = config?.persistentStateAvailable !== false;
+  const reason = String(config?.persistentStateReason ?? "").trim();
+  const storePath = String(config?.surfacePaintStorePath ?? "").trim() || null;
+  return {
+    storePath,
+    available,
+    queued: false,
+    inFlight: false,
+    lastPersistAt: null,
+    lastPersistError: null,
+    coreMemory: {
+      schemaVersion: 1,
+      authoredType: "gray_block",
+      payloadVersion: 1,
+      durabilityTier: "core",
+      storageKey: "hostCustomBlocks",
+      available,
+      reason,
+      count: 0,
+      lastPersistAt: null,
+      lastPersistError: null,
+      queued: false,
+      inFlight: false
+    }
+  };
+}
+
 function validatePersistentStateStorePath(storePath) {
   const normalizedPath = String(storePath ?? "").trim();
   if (!normalizedPath) {
@@ -78,7 +106,9 @@ export function startRealtimeServer(options = {}) {
     staticClientDir: config.staticClientDir,
     getOnlineCount: () => playerCounter.get(),
     getRoomStats: () => roomService?.getHealthSnapshot() ?? buildFallbackRoomStats(config.maxRoomPlayers),
-    getMetrics: () => worldRuntime?.getMetrics() ?? null
+    getMetrics: () => worldRuntime?.getMetrics() ?? null,
+    getPersistenceStatus: () =>
+      roomService?.getPersistenceStatus?.() ?? buildFallbackPersistenceStatus(config)
   });
 
   const io = new Server(httpServer, {
@@ -171,12 +201,28 @@ export function startRealtimeServer(options = {}) {
   });
 
   httpServer.listen(config.port, () => {
+    const persistenceStatus =
+      roomService?.getPersistenceStatus?.() ?? buildFallbackPersistenceStatus(config);
+    const coreMemoryStatus = persistenceStatus?.coreMemory ?? null;
     log.log(`Chat server running on http://localhost:${config.port}`);
     log.log(`Persistent room: ${config.defaultRoomCode} (capacity ${config.maxRoomPlayers})`);
     log.log(`[paint] store path: ${config.surfacePaintStorePath || "(disabled)"}`);
     log.log(`[paint] map layout version: ${config.mapLayoutVersion}`);
     if (!config.persistentStateAvailable) {
       log.warn(`[paint] persistent state unavailable: ${config.persistentStateReason}`);
+    }
+    log.log(
+      `[core] gray_block persistence: ${
+        coreMemoryStatus?.available ? "enabled" : "disabled"
+      } key=hostCustomBlocks count=${Math.max(0, Math.trunc(Number(coreMemoryStatus?.count) || 0))}`
+    );
+    if (!coreMemoryStatus?.available) {
+      log.warn(
+        `[core] gray_block persistence unavailable: ${
+          String(coreMemoryStatus?.reason ?? config.persistentStateReason ?? "unknown").trim() ||
+          "unknown"
+        }`
+      );
     }
     log.log(`[policy] surface paint mode: ${config.surfacePaintMode}`);
     log.log(`[policy] promo mode: ${config.promoMode}`);

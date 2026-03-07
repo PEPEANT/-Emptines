@@ -44,6 +44,7 @@ const MIN_EDITOR_SCALE = 0.25;
 const MAX_EDITOR_SCALE = 8;
 const OBJECT_POSITION_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,96}$/;
 const HOST_CUSTOM_BLOCK_ID_PATTERN = /^host_custom_block_\d+$/;
+const CORE_MEMORY_SCHEMA_VERSION = 1;
 const MAX_OBJECT_POSITIONS = 4000;
 const MAX_OBJECT_COORDINATE = 2500;
 const MIN_OBJECT_SCALE = 0.25;
@@ -1282,6 +1283,37 @@ export class RoomService {
       rooms: this.rooms.size,
       globalPlayers: globalRoom.players.size,
       globalCapacity: this.maxRoomPlayers
+    };
+  }
+
+  getPersistenceStatus() {
+    const room = this.getDefaultRoom();
+    const hostCustomBlocks = this.serializeObjectPositions(room);
+    const storePath = this.surfacePaintStorePath || null;
+    const available = Boolean(storePath);
+    const lastPersistAt = Math.max(0, Math.trunc(Number(this.surfacePaintLastPersistAt) || 0));
+    const lastPersistError = String(this.surfacePaintLastPersistError ?? "").trim();
+    return {
+      storePath,
+      available,
+      queued: Boolean(this.surfacePaintSaveQueued),
+      inFlight: Boolean(this.surfacePaintSaveInFlight),
+      lastPersistAt: lastPersistAt > 0 ? lastPersistAt : null,
+      lastPersistError: lastPersistError || null,
+      coreMemory: {
+        schemaVersion: CORE_MEMORY_SCHEMA_VERSION,
+        authoredType: "gray_block",
+        payloadVersion: 1,
+        durabilityTier: "core",
+        storageKey: "hostCustomBlocks",
+        available,
+        reason: available ? "" : "persistent storage path missing",
+        count: Object.keys(hostCustomBlocks).length,
+        lastPersistAt: lastPersistAt > 0 ? lastPersistAt : null,
+        lastPersistError: lastPersistError || null,
+        queued: Boolean(this.surfacePaintSaveQueued),
+        inFlight: Boolean(this.surfacePaintSaveInFlight)
+      }
     };
   }
 
