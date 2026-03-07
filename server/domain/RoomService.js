@@ -88,10 +88,31 @@ const HOST_CONTROLLED_SURFACE_ID_PATTERN = /^bridge_panel_\d+:(?:px|nx|py|ny|pz|
 const CHAT_MESSAGE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,80}$/;
 const MAX_CHAT_MESSAGES = 5000;
 const MAX_CHAT_TEXT_CHARS = 200;
-const PORTAL_DISPLAY_KEYS = Object.freeze(["portal1", "portal2"]);
+const MAX_PORTAL_DISPLAY_LINE_CHARS = 72;
+const PORTAL_DISPLAY_KEYS = Object.freeze(["portal1", "portal2", "hall"]);
 const PORTAL_DISPLAY_DEFAULT_TITLES = Object.freeze({
   portal1: "OX 퀴즈 대회",
-  portal2: "포탈 2"
+  portal2: "포탈 2",
+  hall: "공연장"
+});
+const PORTAL_DISPLAY_DEFAULT_MODES = Object.freeze({
+  portal1: "text",
+  portal2: "text",
+  hall: "time"
+});
+const PORTAL_DISPLAY_DEFAULT_LINES = Object.freeze({
+  portal1: Object.freeze({
+    line2: "포탈 1 링크는 패널에서 변경",
+    line3: ""
+  }),
+  portal2: Object.freeze({
+    line2: "포탈 2 링크는 패널에서 변경",
+    line3: ""
+  }),
+  hall: Object.freeze({
+    line2: "",
+    line3: ""
+  })
 });
 const ROOM_ZONE_IDS = Object.freeze(["lobby", "fps", "ox"]);
 const ROOM_ZONE_PORTAL_OBJECT_ID_BY_ZONE = Object.freeze({
@@ -701,19 +722,23 @@ function createMainPortalAdState() {
   };
 }
 
-function createPortalDisplayState(defaultTitle = "") {
-  return {
-    title: normalizePortalDisplayTitle(defaultTitle, ""),
-    imageDataUrl: "",
-    updatedAt: Date.now()
-  };
+function createPortalDisplayState(rawPortalKey, rawValue = {}) {
+  const defaults = getPortalDisplayDefaults(rawPortalKey);
+  return normalizePortalDisplayState(
+    {
+      ...rawValue,
+      updatedAt: Number(rawValue?.updatedAt) || Date.now()
+    },
+    defaults
+  );
 }
 
 function createPortalDisplaysState(rawValue = {}) {
   const source = rawValue && typeof rawValue === "object" ? rawValue : {};
   return {
-    portal1: normalizePortalDisplayState(source.portal1, PORTAL_DISPLAY_DEFAULT_TITLES.portal1),
-    portal2: normalizePortalDisplayState(source.portal2, PORTAL_DISPLAY_DEFAULT_TITLES.portal2)
+    portal1: createPortalDisplayState("portal1", source.portal1),
+    portal2: createPortalDisplayState("portal2", source.portal2),
+    hall: createPortalDisplayState("hall", source.hall)
   };
 }
 
@@ -998,12 +1023,52 @@ function normalizePortalDisplayTitle(rawValue, fallback = "") {
     .slice(0, MAX_PORTAL_DISPLAY_TITLE_CHARS);
 }
 
-function normalizePortalDisplayState(rawValue, fallbackTitle = "") {
+function normalizePortalDisplayLine(rawValue, fallback = "") {
+  const value = String(rawValue ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .slice(0, MAX_PORTAL_DISPLAY_LINE_CHARS);
+  if (value) {
+    return value;
+  }
+  return String(fallback ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .slice(0, MAX_PORTAL_DISPLAY_LINE_CHARS);
+}
+
+function normalizePortalDisplayMode(rawValue, fallback = "text") {
+  const value = String(rawValue ?? "")
+    .trim()
+    .toLowerCase();
+  if (value === "time") {
+    return "time";
+  }
+  if (value === "text") {
+    return "text";
+  }
+  return fallback === "time" ? "time" : "text";
+}
+
+function normalizePortalDisplayState(rawValue, defaults = {}) {
   const source = rawValue && typeof rawValue === "object" ? rawValue : {};
   return {
-    title: normalizePortalDisplayTitle(source.title, fallbackTitle),
+    mode: normalizePortalDisplayMode(source.mode, defaults.mode),
+    title: normalizePortalDisplayTitle(source.title, defaults.title),
+    line2: normalizePortalDisplayLine(source.line2, defaults.line2),
+    line3: normalizePortalDisplayLine(source.line3, defaults.line3),
     imageDataUrl: normalizeMainPortalAdImageDataUrl(source.imageDataUrl),
     updatedAt: Math.max(0, Math.trunc(Number(source.updatedAt) || Date.now()))
+  };
+}
+
+function getPortalDisplayDefaults(portalKey) {
+  const normalizedKey = normalizePortalDisplayKey(portalKey);
+  return {
+    title: PORTAL_DISPLAY_DEFAULT_TITLES[normalizedKey] ?? "Hall",
+    mode: PORTAL_DISPLAY_DEFAULT_MODES[normalizedKey] ?? "text",
+    line2: PORTAL_DISPLAY_DEFAULT_LINES[normalizedKey]?.line2 ?? "",
+    line3: PORTAL_DISPLAY_DEFAULT_LINES[normalizedKey]?.line3 ?? ""
   };
 }
 
@@ -2073,14 +2138,9 @@ export class RoomService {
     }
     room.portalDisplays = createPortalDisplaysState(room.portalDisplays);
     return {
-      portal1: normalizePortalDisplayState(
-        room.portalDisplays.portal1,
-        PORTAL_DISPLAY_DEFAULT_TITLES.portal1
-      ),
-      portal2: normalizePortalDisplayState(
-        room.portalDisplays.portal2,
-        PORTAL_DISPLAY_DEFAULT_TITLES.portal2
-      )
+      portal1: createPortalDisplayState("portal1", room.portalDisplays.portal1),
+      portal2: createPortalDisplayState("portal2", room.portalDisplays.portal2),
+      hall: createPortalDisplayState("hall", room.portalDisplays.hall)
     };
   }
 
@@ -2097,25 +2157,37 @@ export class RoomService {
       return { ok: false, error: "invalid portal key" };
     }
 
-    const defaultTitle = PORTAL_DISPLAY_DEFAULT_TITLES[portalKey] ?? "";
+    const defaults = getPortalDisplayDefaults(portalKey);
     const previousDisplays = this.serializePortalDisplays(room);
     const previous = previousDisplays[portalKey];
     const hasTitle = Object.prototype.hasOwnProperty.call(payload, "title")
       || Object.prototype.hasOwnProperty.call(payload, "name");
+    const hasMode = Object.prototype.hasOwnProperty.call(payload, "mode");
+    const hasLine2 = Object.prototype.hasOwnProperty.call(payload, "line2");
+    const hasLine3 = Object.prototype.hasOwnProperty.call(payload, "line3");
     const hasImageDataUrl = Object.prototype.hasOwnProperty.call(payload, "imageDataUrl")
       || Object.prototype.hasOwnProperty.call(payload, "dataUrl");
     const next = normalizePortalDisplayState(
       {
+        mode: hasMode ? payload?.mode ?? "" : previous.mode,
         title: hasTitle ? payload?.title ?? payload?.name ?? "" : previous.title,
+        line2: hasLine2 ? payload?.line2 ?? "" : previous.line2,
+        line3: hasLine3 ? payload?.line3 ?? "" : previous.line3,
         imageDataUrl: hasImageDataUrl
           ? payload?.imageDataUrl ?? payload?.dataUrl ?? ""
           : previous.imageDataUrl,
         updatedAt: Date.now()
       },
-      defaultTitle
+      defaults
     );
 
-    if (previous.title === next.title && previous.imageDataUrl === next.imageDataUrl) {
+    if (
+      previous.mode === next.mode &&
+      previous.title === next.title &&
+      previous.line2 === next.line2 &&
+      previous.line3 === next.line3 &&
+      previous.imageDataUrl === next.imageDataUrl
+    ) {
       return {
         ok: true,
         changed: false,
@@ -2145,12 +2217,17 @@ export class RoomService {
     if (!portalKey) {
       return { ok: false, error: "invalid portal key" };
     }
-    const defaultTitle = PORTAL_DISPLAY_DEFAULT_TITLES[portalKey] ?? "";
     const previousDisplays = this.serializePortalDisplays(room);
     const previous = previousDisplays[portalKey];
-    const next = createPortalDisplayState(defaultTitle);
+    const next = createPortalDisplayState(portalKey);
 
-    if (previous.title === next.title && previous.imageDataUrl === next.imageDataUrl) {
+    if (
+      previous.mode === next.mode &&
+      previous.title === next.title &&
+      previous.line2 === next.line2 &&
+      previous.line3 === next.line3 &&
+      previous.imageDataUrl === next.imageDataUrl
+    ) {
       return {
         ok: true,
         changed: false,

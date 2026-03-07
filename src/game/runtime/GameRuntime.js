@@ -85,6 +85,7 @@ const RIGHT_BILLBOARD_VIDEO_ID_LOOKUP = Object.freeze(
 const MAX_LEFT_BILLBOARD_IMAGE_CHARS = 4_200_000;
 const MAX_MAIN_PORTAL_AD_IMAGE_CHARS = 4_200_000;
 const MAX_PORTAL_DISPLAY_TITLE_CHARS = 40;
+const MAX_PORTAL_DISPLAY_LINE_CHARS = 72;
 const MAX_BILLBOARD_VIDEO_DATA_URL_CHARS = 30_000_000;
 const MAX_BILLBOARD_VIDEO_BYTES = 20 * 1024 * 1024;
 const DEFAULT_PORTAL_TARGET_URL = "https://singularity-ox.onrender.com/?v=08d5432";
@@ -101,16 +102,25 @@ const A_ZONE_FIXED_PORTAL_IMAGE_URL = new URL("../../../png/REC_FPS.png", import
 const HALL_FIXED_PORTAL_IMAGE_URL = new URL("../../../png/PER.png", import.meta.url).href;
 const PORTAL_DISPLAY_DEFAULTS = Object.freeze({
   portal1: Object.freeze({
+    mode: "text",
     title: "OX 퀴즈 대회",
     line2: "포탈 1 링크는 패널에서 변경",
     line3: "",
     imageUrl: PORTAL_TOP_AD_IMAGE_URL
   }),
   portal2: Object.freeze({
+    mode: "text",
     title: "포탈 2",
     line2: "포탈 2 링크는 패널에서 변경",
     line3: "",
     imageUrl: A_ZONE_FIXED_PORTAL_IMAGE_URL
+  }),
+  hall: Object.freeze({
+    mode: "time",
+    title: "공연장",
+    line2: "",
+    line3: "",
+    imageUrl: HALL_FIXED_PORTAL_IMAGE_URL
   })
 });
 const BOX_FACE_KEYS = ["px", "nx", "py", "ny", "pz", "nz"];
@@ -485,19 +495,23 @@ export class GameRuntime {
     };
     this.portalDisplayStates = {
       portal1: this.normalizePortalDisplayState("portal1"),
-      portal2: this.normalizePortalDisplayState("portal2")
+      portal2: this.normalizePortalDisplayState("portal2"),
+      hall: this.normalizePortalDisplayState("hall")
     };
     this.portalDisplayHandles = {
       portal1: this.createPortalDisplayHandle("portal1"),
-      portal2: this.createPortalDisplayHandle("portal2")
+      portal2: this.createPortalDisplayHandle("portal2"),
+      hall: this.createPortalDisplayHandle("hall")
     };
     this.portalDisplaySetInFlight = {
       portal1: false,
-      portal2: false
+      portal2: false,
+      hall: false
     };
     this.hostPortalDisplayPendingImageDataUrls = {
       portal1: "",
-      portal2: ""
+      portal2: "",
+      hall: ""
     };
     this.mainPortalAdSetInFlight = false;
     this.hostMainPortalAdPendingDataUrl = "";
@@ -711,6 +725,9 @@ export class GameRuntime {
     this.hostAZonePortalTargetInputEl = document.getElementById("host-a-zone-portal-target");
     this.hostAZonePortalTargetApplyBtnEl = document.getElementById("host-a-zone-portal-target-apply");
     this.hostPortal1NameInputEl = document.getElementById("host-portal-1-name");
+    this.hostPortal1ModeSelectEl = document.getElementById("host-portal-1-mode");
+    this.hostPortal1Line2InputEl = document.getElementById("host-portal-1-line2");
+    this.hostPortal1Line3InputEl = document.getElementById("host-portal-1-line3");
     this.hostPortal1ImageFileInputEl = document.getElementById("host-portal-1-image-file");
     this.hostPortal1ApplyBtnEl = document.getElementById("host-portal-1-apply");
     this.hostPortal1ResetBtnEl = document.getElementById("host-portal-1-reset");
@@ -721,6 +738,12 @@ export class GameRuntime {
     this.hostMainPortalAdFileInputEl = document.getElementById("host-main-portal-ad-file");
     this.hostMainPortalAdApplyBtnEl = document.getElementById("host-main-portal-ad-apply");
     this.hostMainPortalAdResetBtnEl = document.getElementById("host-main-portal-ad-reset");
+    this.hostHallPortalModeSelectEl = document.getElementById("host-hall-portal-mode");
+    this.hostHallPortalTitleInputEl = document.getElementById("host-hall-portal-title");
+    this.hostHallPortalLine2InputEl = document.getElementById("host-hall-portal-line2");
+    this.hostHallPortalLine3InputEl = document.getElementById("host-hall-portal-line3");
+    this.hostHallPortalApplyBtnEl = document.getElementById("host-hall-portal-apply");
+    this.hostHallPortalResetBtnEl = document.getElementById("host-hall-portal-reset");
     this.hostLeftImageFileInputEl = document.getElementById("host-left-image-file");
     this.hostResetLeftImageBtnEl = document.getElementById("host-left-image-reset");
     this.hostMusicFileInputEl = document.getElementById("host-music-file");
@@ -1348,6 +1371,7 @@ export class GameRuntime {
     }
     this.disposePortalDisplayCustomTexture("portal1");
     this.disposePortalDisplayCustomTexture("portal2");
+    this.disposePortalDisplayCustomTexture("hall");
     const spawnPortalVeilTexturesToDispose = new Set();
     if (this.spawnPortalVeilTexture) {
       spawnPortalVeilTexturesToDispose.add(this.spawnPortalVeilTexture);
@@ -1381,7 +1405,8 @@ export class GameRuntime {
     this.portalTopAdLoadNonce = 0;
     this.portalDisplayHandles = {
       portal1: this.createPortalDisplayHandle("portal1"),
-      portal2: this.createPortalDisplayHandle("portal2")
+      portal2: this.createPortalDisplayHandle("portal2"),
+      hall: this.createPortalDisplayHandle("hall")
     };
     this.portalBillboardPalette = {
       bgFrom: "rgba(27, 11, 29, 0.56)",
@@ -3353,6 +3378,9 @@ export class GameRuntime {
       topAdPanelYOffset: 1.65,
       topAdScale: 1.36,
       rotationY: 0,
+      onBillboardReady: (payload = {}) => {
+        this.registerPortalDisplayHandle("hall", payload);
+      },
       onTopAdReady: (payload = {}) => {
         this.portalTopAdBaseTexture = payload?.texture ?? null;
         this.portalTopAdScreenMaterial = payload?.material ?? null;
@@ -3951,7 +3979,7 @@ export class GameRuntime {
 
   normalizePortalDisplayKey(rawPortalKey) {
     const key = String(rawPortalKey ?? "").trim().toLowerCase();
-    return key === "portal1" || key === "portal2" ? key : "";
+    return key === "portal1" || key === "portal2" || key === "hall" ? key : "";
   }
 
   getPortalDisplayDefaults(rawPortalKey) {
@@ -3998,6 +4026,31 @@ export class GameRuntime {
       .slice(0, MAX_PORTAL_DISPLAY_TITLE_CHARS);
   }
 
+  normalizePortalDisplayLine(rawLine, fallback = "") {
+    const value = String(rawLine ?? "")
+      .trim()
+      .replace(/\s+/g, " ")
+      .slice(0, MAX_PORTAL_DISPLAY_LINE_CHARS);
+    if (value) {
+      return value;
+    }
+    return String(fallback ?? "")
+      .trim()
+      .replace(/\s+/g, " ")
+      .slice(0, MAX_PORTAL_DISPLAY_LINE_CHARS);
+  }
+
+  normalizePortalDisplayMode(rawMode, fallback = "text") {
+    const value = String(rawMode ?? "").trim().toLowerCase();
+    if (value === "time") {
+      return "time";
+    }
+    if (value === "text") {
+      return "text";
+    }
+    return fallback === "time" ? "time" : "text";
+  }
+
   normalizePortalDisplayImageDataUrl(rawImageDataUrl) {
     const value = String(rawImageDataUrl ?? "").trim();
     if (!value || value.length > MAX_MAIN_PORTAL_AD_IMAGE_CHARS) {
@@ -4012,7 +4065,10 @@ export class GameRuntime {
   normalizePortalDisplayState(rawPortalKey, rawState = {}) {
     const defaults = this.getPortalDisplayDefaults(rawPortalKey);
     return {
+      mode: this.normalizePortalDisplayMode(rawState?.mode, defaults.mode),
       title: this.normalizePortalDisplayTitle(rawState?.title ?? rawState?.name ?? "", defaults.title),
+      line2: this.normalizePortalDisplayLine(rawState?.line2 ?? "", defaults.line2),
+      line3: this.normalizePortalDisplayLine(rawState?.line3 ?? "", defaults.line3),
       imageDataUrl: this.normalizePortalDisplayImageDataUrl(
         rawState?.imageDataUrl ?? rawState?.dataUrl ?? ""
       ),
@@ -4146,14 +4202,21 @@ export class GameRuntime {
     if (!portalKey) {
       return;
     }
+    if (portalKey === "hall") {
+      this.updatePortalTimeBillboard(0, true);
+      return;
+    }
     const handle = this.portalDisplayHandles?.[portalKey];
     if (!handle?.redrawLines) {
       return;
     }
     const state = this.normalizePortalDisplayState(portalKey, rawState);
     const line1 = state.title;
-    const line2 = handle.defaultLine2;
-    const line3 = handle.defaultLine3;
+    const line2 =
+      state.mode === "time"
+        ? `현재시간 : ${this.formatPortalClockTimeText(Date.now())}`
+        : state.line2;
+    const line3 = state.mode === "time" ? "" : state.line3;
     if (
       !force &&
       handle.lineCache.line1 === line1 &&
@@ -4175,7 +4238,10 @@ export class GameRuntime {
     const next = this.normalizePortalDisplayState(portalKey, rawState);
     if (
       !force &&
+      previous.mode === next.mode &&
       previous.title === next.title &&
+      previous.line2 === next.line2 &&
+      previous.line3 === next.line3 &&
       previous.imageDataUrl === next.imageDataUrl
     ) {
       return false;
@@ -4190,6 +4256,7 @@ export class GameRuntime {
     const collection = rawCollection && typeof rawCollection === "object" ? rawCollection : {};
     this.applyPortalDisplayState("portal1", collection.portal1 ?? {}, { force });
     this.applyPortalDisplayState("portal2", collection.portal2 ?? {}, { force });
+    this.applyPortalDisplayState("hall", collection.hall ?? {}, { force });
   }
 
   normalizeMainPortalAdState(rawState = {}) {
@@ -4741,6 +4808,9 @@ export class GameRuntime {
 
   getPortalDisplayLabel(rawPortalKey) {
     const portalKey = this.normalizePortalDisplayKey(rawPortalKey);
+    if (portalKey === "hall") {
+      return "공연장 포탈";
+    }
     if (portalKey === "portal2") {
       return "포탈 2";
     }
@@ -4786,9 +4856,15 @@ export class GameRuntime {
     }
     const current = this.getPortalDisplayState(portalKey);
     const hasTitle = Object.prototype.hasOwnProperty.call(payload ?? {}, "title");
+    const hasMode = Object.prototype.hasOwnProperty.call(payload ?? {}, "mode");
+    const hasLine2 = Object.prototype.hasOwnProperty.call(payload ?? {}, "line2");
+    const hasLine3 = Object.prototype.hasOwnProperty.call(payload ?? {}, "line3");
     const hasImageDataUrl = Object.prototype.hasOwnProperty.call(payload ?? {}, "imageDataUrl");
     const next = this.normalizePortalDisplayState(portalKey, {
+      mode: hasMode ? payload?.mode : current.mode,
       title: hasTitle ? payload?.title : current.title,
+      line2: hasLine2 ? payload?.line2 : current.line2,
+      line3: hasLine3 ? payload?.line3 : current.line3,
       imageDataUrl: hasImageDataUrl ? payload?.imageDataUrl : current.imageDataUrl,
       updatedAt: Date.now()
     });
@@ -4820,7 +4896,10 @@ export class GameRuntime {
       "portal:display:set",
       {
         portalKey,
+        mode: next.mode,
         title: next.title,
+        line2: next.line2,
+        line3: next.line3,
         ...(hasImageDataUrl ? { imageDataUrl: next.imageDataUrl } : {})
       },
       (response = {}) => {
@@ -10538,6 +10617,32 @@ export class GameRuntime {
     }
     this.portalBillboardUpdateClock = 0;
 
+    this.applyPortalDisplayLines("portal1", this.portalDisplayStates?.portal1 ?? {}, { force });
+
+    const hallDisplayState = this.getPortalDisplayState("hall");
+    if (hallDisplayState.mode !== "time") {
+      const line1 = hallDisplayState.title;
+      const line2 = hallDisplayState.line2;
+      const line3 = hallDisplayState.line3;
+      if (
+        !force &&
+        this.portalBillboardCache.line1 === line1 &&
+        this.portalBillboardCache.line2 === line2 &&
+        this.portalBillboardCache.line3 === line3
+      ) {
+        return;
+      }
+      this.drawPortalBillboardLines(this.portalBillboardContext, this.portalBillboardCanvas, {
+        line1,
+        line2,
+        line3,
+        palette: this.portalBillboardPalette
+      });
+      this.portalBillboardTexture.needsUpdate = true;
+      this.portalBillboardCache = { line1, line2, line3 };
+      return;
+    }
+
     const nowMs = Date.now();
     const schedule = this.getPortalScheduleComputed(nowMs);
     const remainingSec = Math.max(0, Math.trunc(Number(schedule.remainingSec) || 0));
@@ -11867,6 +11972,30 @@ export class GameRuntime {
         }
       }
     }
+    if (this.hostPortal1ModeSelectEl) {
+      this.hostPortal1ModeSelectEl.disabled = controlsBusy;
+      if (this.hostPortal1ModeSelectEl.value !== portal1DisplayState.mode) {
+        this.hostPortal1ModeSelectEl.value = portal1DisplayState.mode;
+      }
+    }
+    if (this.hostPortal1Line2InputEl) {
+      this.hostPortal1Line2InputEl.disabled = controlsBusy;
+      if (document.activeElement !== this.hostPortal1Line2InputEl) {
+        const nextValue = String(portal1DisplayState.line2 ?? "").trim();
+        if (this.hostPortal1Line2InputEl.value !== nextValue) {
+          this.hostPortal1Line2InputEl.value = nextValue;
+        }
+      }
+    }
+    if (this.hostPortal1Line3InputEl) {
+      this.hostPortal1Line3InputEl.disabled = controlsBusy;
+      if (document.activeElement !== this.hostPortal1Line3InputEl) {
+        const nextValue = String(portal1DisplayState.line3 ?? "").trim();
+        if (this.hostPortal1Line3InputEl.value !== nextValue) {
+          this.hostPortal1Line3InputEl.value = nextValue;
+        }
+      }
+    }
     if (this.hostPortal1ImageFileInputEl) {
       this.hostPortal1ImageFileInputEl.disabled = controlsBusy;
     }
@@ -11906,6 +12035,46 @@ export class GameRuntime {
     }
     if (this.hostMainPortalAdResetBtnEl) {
       this.hostMainPortalAdResetBtnEl.disabled = controlsBusy;
+    }
+    const hallDisplayState = this.getPortalDisplayState("hall");
+    if (this.hostHallPortalModeSelectEl) {
+      this.hostHallPortalModeSelectEl.disabled = controlsBusy;
+      if (this.hostHallPortalModeSelectEl.value !== hallDisplayState.mode) {
+        this.hostHallPortalModeSelectEl.value = hallDisplayState.mode;
+      }
+    }
+    if (this.hostHallPortalTitleInputEl) {
+      this.hostHallPortalTitleInputEl.disabled = controlsBusy;
+      if (document.activeElement !== this.hostHallPortalTitleInputEl) {
+        const nextValue = String(hallDisplayState.title ?? "").trim();
+        if (this.hostHallPortalTitleInputEl.value !== nextValue) {
+          this.hostHallPortalTitleInputEl.value = nextValue;
+        }
+      }
+    }
+    if (this.hostHallPortalLine2InputEl) {
+      this.hostHallPortalLine2InputEl.disabled = controlsBusy;
+      if (document.activeElement !== this.hostHallPortalLine2InputEl) {
+        const nextValue = String(hallDisplayState.line2 ?? "").trim();
+        if (this.hostHallPortalLine2InputEl.value !== nextValue) {
+          this.hostHallPortalLine2InputEl.value = nextValue;
+        }
+      }
+    }
+    if (this.hostHallPortalLine3InputEl) {
+      this.hostHallPortalLine3InputEl.disabled = controlsBusy;
+      if (document.activeElement !== this.hostHallPortalLine3InputEl) {
+        const nextValue = String(hallDisplayState.line3 ?? "").trim();
+        if (this.hostHallPortalLine3InputEl.value !== nextValue) {
+          this.hostHallPortalLine3InputEl.value = nextValue;
+        }
+      }
+    }
+    if (this.hostHallPortalApplyBtnEl) {
+      this.hostHallPortalApplyBtnEl.disabled = controlsBusy;
+    }
+    if (this.hostHallPortalResetBtnEl) {
+      this.hostHallPortalResetBtnEl.disabled = controlsBusy;
     }
     if (this.hostRightVideoSelectEl) {
       this.hostRightVideoSelectEl.disabled = controlsBusy;
@@ -16523,27 +16692,36 @@ export class GameRuntime {
         this.hostAZonePortalTargetApplyBtnEl?.click?.();
       });
     }
-    const bindPortalDisplayControls = (
+    const bindPortalDisplayControls = ({
       portalKey,
-      inputEl,
+      titleInputEl,
+      modeSelectEl,
+      line2InputEl,
+      line3InputEl,
       fileInputEl,
       applyBtnEl,
       resetBtnEl
-    ) => {
+    }) => {
       fileInputEl?.addEventListener("change", () => {
         const file = fileInputEl?.files?.[0] ?? null;
         this.handleHostPortalDisplayFileSelected(portalKey, file);
         fileInputEl.value = "";
       });
       applyBtnEl?.addEventListener("click", () => {
-        const title = String(inputEl?.value ?? "").trim();
+        const title = String(titleInputEl?.value ?? "").trim();
+        const mode = String(modeSelectEl?.value ?? "text").trim().toLowerCase();
+        const line2 = String(line2InputEl?.value ?? "").trim();
+        const line3 = String(line3InputEl?.value ?? "").trim();
         const pendingImageDataUrl = String(
           this.hostPortalDisplayPendingImageDataUrls?.[portalKey] ?? ""
         ).trim();
         this.requestPortalDisplaySet(
           portalKey,
           {
+            mode,
             title,
+            line2,
+            line3,
             ...(pendingImageDataUrl ? { imageDataUrl: pendingImageDataUrl } : {})
           },
           { announceErrors: true }
@@ -16552,28 +16730,49 @@ export class GameRuntime {
       resetBtnEl?.addEventListener("click", () => {
         this.requestPortalDisplayReset(portalKey, { announceErrors: true });
       });
-      inputEl?.addEventListener("keydown", (event) => {
-        if (event.code !== "Enter") {
-          return;
-        }
-        event.preventDefault();
-        applyBtnEl?.click?.();
-      });
+      const bindEnterToApply = (element) => {
+        element?.addEventListener("keydown", (event) => {
+          if (event.code !== "Enter") {
+            return;
+          }
+          event.preventDefault();
+          applyBtnEl?.click?.();
+        });
+      };
+      bindEnterToApply(titleInputEl);
+      bindEnterToApply(line2InputEl);
+      bindEnterToApply(line3InputEl);
     };
-    bindPortalDisplayControls(
-      "portal1",
-      this.hostPortal1NameInputEl,
-      this.hostPortal1ImageFileInputEl,
-      this.hostPortal1ApplyBtnEl,
-      this.hostPortal1ResetBtnEl
-    );
-    bindPortalDisplayControls(
-      "portal2",
-      this.hostPortal2NameInputEl,
-      this.hostPortal2ImageFileInputEl,
-      this.hostPortal2ApplyBtnEl,
-      this.hostPortal2ResetBtnEl
-    );
+    bindPortalDisplayControls({
+      portalKey: "portal1",
+      titleInputEl: this.hostPortal1NameInputEl,
+      modeSelectEl: this.hostPortal1ModeSelectEl,
+      line2InputEl: this.hostPortal1Line2InputEl,
+      line3InputEl: this.hostPortal1Line3InputEl,
+      fileInputEl: this.hostPortal1ImageFileInputEl,
+      applyBtnEl: this.hostPortal1ApplyBtnEl,
+      resetBtnEl: this.hostPortal1ResetBtnEl
+    });
+    bindPortalDisplayControls({
+      portalKey: "portal2",
+      titleInputEl: this.hostPortal2NameInputEl,
+      modeSelectEl: null,
+      line2InputEl: null,
+      line3InputEl: null,
+      fileInputEl: this.hostPortal2ImageFileInputEl,
+      applyBtnEl: this.hostPortal2ApplyBtnEl,
+      resetBtnEl: this.hostPortal2ResetBtnEl
+    });
+    bindPortalDisplayControls({
+      portalKey: "hall",
+      titleInputEl: this.hostHallPortalTitleInputEl,
+      modeSelectEl: this.hostHallPortalModeSelectEl,
+      line2InputEl: this.hostHallPortalLine2InputEl,
+      line3InputEl: this.hostHallPortalLine3InputEl,
+      fileInputEl: null,
+      applyBtnEl: this.hostHallPortalApplyBtnEl,
+      resetBtnEl: this.hostHallPortalResetBtnEl
+    });
     if (this.hostMainPortalAdFileInputEl) {
       this.hostMainPortalAdFileInputEl.addEventListener("change", () => {
         const file = this.hostMainPortalAdFileInputEl?.files?.[0] ?? null;
@@ -17228,6 +17427,15 @@ export class GameRuntime {
     if (!this.hostPortal1NameInputEl) {
       this.hostPortal1NameInputEl = document.getElementById("host-portal-1-name");
     }
+    if (!this.hostPortal1ModeSelectEl) {
+      this.hostPortal1ModeSelectEl = document.getElementById("host-portal-1-mode");
+    }
+    if (!this.hostPortal1Line2InputEl) {
+      this.hostPortal1Line2InputEl = document.getElementById("host-portal-1-line2");
+    }
+    if (!this.hostPortal1Line3InputEl) {
+      this.hostPortal1Line3InputEl = document.getElementById("host-portal-1-line3");
+    }
     if (!this.hostPortal1ImageFileInputEl) {
       this.hostPortal1ImageFileInputEl = document.getElementById("host-portal-1-image-file");
     }
@@ -17257,6 +17465,24 @@ export class GameRuntime {
     }
     if (!this.hostMainPortalAdResetBtnEl) {
       this.hostMainPortalAdResetBtnEl = document.getElementById("host-main-portal-ad-reset");
+    }
+    if (!this.hostHallPortalModeSelectEl) {
+      this.hostHallPortalModeSelectEl = document.getElementById("host-hall-portal-mode");
+    }
+    if (!this.hostHallPortalTitleInputEl) {
+      this.hostHallPortalTitleInputEl = document.getElementById("host-hall-portal-title");
+    }
+    if (!this.hostHallPortalLine2InputEl) {
+      this.hostHallPortalLine2InputEl = document.getElementById("host-hall-portal-line2");
+    }
+    if (!this.hostHallPortalLine3InputEl) {
+      this.hostHallPortalLine3InputEl = document.getElementById("host-hall-portal-line3");
+    }
+    if (!this.hostHallPortalApplyBtnEl) {
+      this.hostHallPortalApplyBtnEl = document.getElementById("host-hall-portal-apply");
+    }
+    if (!this.hostHallPortalResetBtnEl) {
+      this.hostHallPortalResetBtnEl = document.getElementById("host-hall-portal-reset");
     }
     if (!this.hostRightVideoSelectEl) {
       this.hostRightVideoSelectEl = document.getElementById("host-right-video");
@@ -17912,6 +18138,7 @@ export class GameRuntime {
       this.billboardVideoSetInFlight = false;
       this.portalDisplaySetInFlight.portal1 = false;
       this.portalDisplaySetInFlight.portal2 = false;
+      this.portalDisplaySetInFlight.hall = false;
       this.mainPortalAdSetInFlight = false;
       this.hostMusicSetInFlight = false;
       this.applySharedMusicState({ mode: "idle" }, { announce: false });
@@ -17988,6 +18215,7 @@ export class GameRuntime {
       this.billboardVideoSetInFlight = false;
       this.portalDisplaySetInFlight.portal1 = false;
       this.portalDisplaySetInFlight.portal2 = false;
+      this.portalDisplaySetInFlight.hall = false;
       this.mainPortalAdSetInFlight = false;
       this.hostMusicSetInFlight = false;
       this.remoteSyncClock = 0;
@@ -18111,6 +18339,7 @@ export class GameRuntime {
       this.billboardVideoSetInFlight = false;
       this.portalDisplaySetInFlight.portal1 = false;
       this.portalDisplaySetInFlight.portal2 = false;
+      this.portalDisplaySetInFlight.hall = false;
       this.mainPortalAdSetInFlight = false;
       this.hostMusicSetInFlight = false;
       this.securityTestSetInFlight = false;

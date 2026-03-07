@@ -1270,6 +1270,15 @@ export function registerSocketHandlers({
       ) {
         nextPayload.imageDataUrl = payload?.imageDataUrl ?? payload?.dataUrl ?? "";
       }
+      if (Object.prototype.hasOwnProperty.call(payload, "mode")) {
+        nextPayload.mode = payload?.mode ?? "";
+      }
+      if (Object.prototype.hasOwnProperty.call(payload, "line2")) {
+        nextPayload.line2 = payload?.line2 ?? "";
+      }
+      if (Object.prototype.hasOwnProperty.call(payload, "line3")) {
+        nextPayload.line3 = payload?.line3 ?? "";
+      }
 
       const result = roomService.setPortalDisplay(
         room,
