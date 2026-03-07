@@ -1150,6 +1150,14 @@ export class RoomService {
     const chatHistorySource = Array.isArray(parsed?.chatHistory) ? parsed.chatHistory : [];
     const savedLayoutVersion = normalizeMapLayoutVersion(parsed?.layoutVersion, "");
     const layoutVersionNeedsRewrite = savedLayoutVersion !== this.mapLayoutVersion;
+    const portalTarget = normalizeRoomPortalTarget(
+      parsed?.portalTarget,
+      this.defaultPortalTargetUrl
+    );
+    const aZonePortalTarget = normalizeRoomPortalTarget(
+      parsed?.aZonePortalTarget,
+      this.defaultAZonePortalTargetUrl
+    );
     const portalDisplays = createPortalDisplaysState(parsed?.portalDisplays);
     const mainPortalAd = this.serializeMainPortalAd({ mainPortalAd: parsed?.mainPortalAd });
     const leftBillboard = this.serializeLeftBillboard({ leftBillboard: parsed?.leftBillboard });
@@ -1177,6 +1185,8 @@ export class RoomService {
     restoredChatHistory.sort((a, b) => a.createdAt - b.createdAt);
 
     const room = this.getDefaultRoom();
+    room.portalTarget = portalTarget;
+    room.aZonePortalTarget = aZonePortalTarget;
     room.surfacePaint = restored;
     room.chatHistory = restoredChatHistory;
     room.portalDisplays = portalDisplays;
@@ -1286,6 +1296,8 @@ export class RoomService {
       savedAt: Date.now(),
       defaultRoomCode: this.defaultRoomCode,
       layoutVersion: this.mapLayoutVersion,
+      portalTarget: String(room.portalTarget ?? "").trim(),
+      aZonePortalTarget: String(room.aZonePortalTarget ?? "").trim(),
       surfacePaintCore: {
         payloadVersion: SURFACE_PAINT_CORE_PAYLOAD_VERSION,
         surfaces: serializedSurfacePaint
@@ -2674,6 +2686,7 @@ export class RoomService {
     }
 
     room.portalTarget = normalized;
+    this.scheduleSurfacePaintSave();
     return { ok: true, changed: true, targetUrl: room.portalTarget };
   }
 
@@ -2692,6 +2705,7 @@ export class RoomService {
     }
 
     room.aZonePortalTarget = normalized;
+    this.scheduleSurfacePaintSave();
     return { ok: true, changed: true, targetUrl: room.aZonePortalTarget };
   }
 
