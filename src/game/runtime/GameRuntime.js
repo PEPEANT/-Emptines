@@ -11012,8 +11012,13 @@ export class GameRuntime {
     }
 
     const savedState = this.loadSavedReturnPortalSpawnState(normalizedHint);
-    if (savedState) {
+    if (savedState && !this.isReturnPortalStateUnsafe(savedState, normalizedHint)) {
       return savedState;
+    }
+
+    const safePortalState = this.buildSafeReturnPortalSpawnState(normalizedHint);
+    if (safePortalState) {
+      return safePortalState;
     }
 
     const spawnPosition = new THREE.Vector3(
@@ -11031,6 +11036,97 @@ export class GameRuntime {
     return {
       position: spawnPosition,
       yaw,
+      pitch: -0.02
+    };
+  }
+
+  getReturnPortalSafetyConfig(portalHint = "") {
+    const normalizedHint = this.normalizeReturnPortalHint(portalHint, "");
+    if (!normalizedHint) {
+      return null;
+    }
+
+    let center = null;
+    let radius = 0;
+    if (normalizedHint === "ox") {
+      center = this.portalFloorPosition;
+      radius = Math.max(5.4, (Number(this.portalRadius) || 4.4) * 0.78 + 1.6);
+    } else if (normalizedHint === "fps") {
+      center = this.aZonePortalFloorPosition;
+      radius = Math.max(5.4, (Number(this.aZonePortalRadius) || 4.2) * 0.78 + 1.6);
+    } else if (normalizedHint === "hall") {
+      center = this.hallPortalFloorPosition;
+      radius = Math.max(5.2, (Number(this.hallPortalRadius) || 4.0) * 0.78 + 1.6);
+    }
+
+    const centerX = Number(center?.x);
+    const centerZ = Number(center?.z);
+    if (!Number.isFinite(centerX) || !Number.isFinite(centerZ)) {
+      return null;
+    }
+
+    return {
+      portalHint: normalizedHint,
+      centerX,
+      centerZ,
+      unsafeRadius: radius
+    };
+  }
+
+  isReturnPortalStateUnsafe(rawState = null, portalHint = "") {
+    const config = this.getReturnPortalSafetyConfig(portalHint);
+    if (!config) {
+      return false;
+    }
+
+    const x =
+      Number(rawState?.position?.x ?? rawState?.x);
+    const z =
+      Number(rawState?.position?.z ?? rawState?.z);
+    if (!Number.isFinite(x) || !Number.isFinite(z)) {
+      return false;
+    }
+
+    const dx = x - config.centerX;
+    const dz = z - config.centerZ;
+    return dx * dx + dz * dz <= config.unsafeRadius * config.unsafeRadius;
+  }
+
+  buildSafeReturnPortalSpawnState(portalHint = "") {
+    const config = this.getReturnPortalSafetyConfig(portalHint);
+    if (!config) {
+      return null;
+    }
+
+    const fallbackX = Number(this.citySpawn?.x) || 0;
+    const fallbackY = GAME_CONSTANTS.PLAYER_HEIGHT;
+    const fallbackZ = Number(this.citySpawn?.z) || -8;
+    const direction = new THREE.Vector3(
+      fallbackX - config.centerX,
+      0,
+      fallbackZ - config.centerZ
+    );
+    if (direction.lengthSq() <= 0.0001) {
+      direction.set(0, 0, -1);
+    } else {
+      direction.normalize();
+    }
+
+    const spawnDistance = Math.max(config.unsafeRadius + 1.8, 8.2);
+    const spawnPosition = new THREE.Vector3(
+      config.centerX + direction.x * spawnDistance,
+      fallbackY,
+      config.centerZ + direction.z * spawnDistance
+    );
+    const lookTarget = new THREE.Vector3(
+      Number(this.cityLookTarget?.x) || fallbackX,
+      fallbackY,
+      Number(this.cityLookTarget?.z) || fallbackZ + 52
+    );
+
+    return {
+      position: spawnPosition,
+      yaw: this.getLookYaw(spawnPosition, lookTarget),
       pitch: -0.02
     };
   }
@@ -11123,13 +11219,22 @@ export class GameRuntime {
       return false;
     }
 
+    let payloadState = {
+      position: new THREE.Vector3(x, Math.max(GAME_CONSTANTS.PLAYER_HEIGHT, y), z),
+      yaw,
+      pitch: THREE.MathUtils.clamp(pitch, -1.52, 1.52)
+    };
+    if (this.isReturnPortalStateUnsafe(payloadState, normalizedHint)) {
+      payloadState = this.buildSafeReturnPortalSpawnState(normalizedHint) ?? payloadState;
+    }
+
     const payload = {
       portalHint: normalizedHint,
-      x,
-      y,
-      z,
-      yaw,
-      pitch,
+      x: Number(payloadState.position?.x) || x,
+      y: Number(payloadState.position?.y) || Math.max(GAME_CONSTANTS.PLAYER_HEIGHT, y),
+      z: Number(payloadState.position?.z) || z,
+      yaw: Number(payloadState.yaw) || yaw,
+      pitch: Number(payloadState.pitch) || THREE.MathUtils.clamp(pitch, -1.52, 1.52),
       savedAt: Date.now()
     };
     try {

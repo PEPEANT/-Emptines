@@ -146,6 +146,25 @@ const ROOM_ZONE_STATE_BY_ID = Object.freeze({
     pitch: -0.02
   })
 });
+const RETURN_PORTAL_UNSAFE_RADIUS_BY_HINT = Object.freeze({
+  fps: 6.4,
+  ox: 6.4,
+  hall: 6.2
+});
+const RETURN_PORTAL_FALLBACK_CENTER_BY_HINT = Object.freeze({
+  fps: Object.freeze({
+    x: ROOM_ZONE_STATE_BY_ID.fps.x,
+    z: ROOM_ZONE_STATE_BY_ID.fps.z
+  }),
+  ox: Object.freeze({
+    x: ROOM_ZONE_STATE_BY_ID.ox.x,
+    z: ROOM_ZONE_STATE_BY_ID.ox.z
+  }),
+  hall: Object.freeze({
+    x: 0,
+    z: 22
+  })
+});
 
 function normalizeYawAngle(rawValue, fallback = 0) {
   const value = Number(rawValue);
@@ -321,6 +340,88 @@ function getPortalAnchoredZoneSpawnState(room, zone, baseState) {
     z: spawnZ,
     yaw: normalizeYawAngle(lookYaw, 0),
     pitch: Number.isFinite(pitch) ? pitch : -0.02
+  });
+}
+
+function getReturnPortalSafetyConfig(room, rawPortalHint) {
+  const portalHint = normalizeReturnPortalHint(rawPortalHint, "");
+  if (!portalHint) {
+    return null;
+  }
+
+  const fallbackCenter = RETURN_PORTAL_FALLBACK_CENTER_BY_HINT[portalHint] ?? null;
+  let centerX = Number(fallbackCenter?.x);
+  let centerZ = Number(fallbackCenter?.z);
+  const portalObjectId = ROOM_ZONE_PORTAL_OBJECT_ID_BY_ZONE[portalHint];
+  const source =
+    room?.objectPositions && typeof room.objectPositions === "object"
+      ? room.objectPositions
+      : null;
+  if (portalObjectId && source) {
+    const portalEntry = normalizeObjectPositionEntry(source[portalObjectId]);
+    const portalX = Number(portalEntry?.x);
+    const portalZ = Number(portalEntry?.z);
+    if (Number.isFinite(portalX) && Number.isFinite(portalZ)) {
+      centerX = portalX;
+      centerZ = portalZ;
+    }
+  }
+
+  if (!Number.isFinite(centerX) || !Number.isFinite(centerZ)) {
+    return null;
+  }
+
+  return {
+    portalHint,
+    centerX,
+    centerZ,
+    unsafeRadius: Math.max(
+      4.8,
+      Number(RETURN_PORTAL_UNSAFE_RADIUS_BY_HINT[portalHint]) || ROOM_ZONE_PORTAL_ENTRY_DISTANCE
+    )
+  };
+}
+
+function isReturnPortalStateUnsafe(room, rawPortalHint, rawState) {
+  const config = getReturnPortalSafetyConfig(room, rawPortalHint);
+  if (!config || !rawState || typeof rawState !== "object") {
+    return false;
+  }
+  const state = sanitizePlayerState(rawState);
+  const dx = Number(state.x) - config.centerX;
+  const dz = Number(state.z) - config.centerZ;
+  return dx * dx + dz * dz <= config.unsafeRadius * config.unsafeRadius;
+}
+
+function buildSafeReturnPortalSpawnState(room, rawPortalHint) {
+  const config = getReturnPortalSafetyConfig(room, rawPortalHint);
+  const lobbyBase = ROOM_ZONE_STATE_BY_ID.lobby;
+  if (!config) {
+    return sanitizePlayerState(lobbyBase);
+  }
+
+  let directionX = Number(lobbyBase.x) - config.centerX;
+  let directionZ = Number(lobbyBase.z) - config.centerZ;
+  const directionLength = Math.hypot(directionX, directionZ);
+  if (directionLength <= 0.0001) {
+    directionX = 0;
+    directionZ = -1;
+  } else {
+    directionX /= directionLength;
+    directionZ /= directionLength;
+  }
+
+  const spawnDistance = Math.max(config.unsafeRadius + 1.8, ROOM_ZONE_PORTAL_ENTRY_DISTANCE + 1.8);
+  const spawnX = config.centerX + directionX * spawnDistance;
+  const spawnZ = config.centerZ + directionZ * spawnDistance;
+  const yaw = Math.atan2(Number(lobbyBase.x) - spawnX, Number(lobbyBase.z) - spawnZ);
+
+  return sanitizePlayerState({
+    x: spawnX,
+    y: Number(lobbyBase.y) || 1.72,
+    z: spawnZ,
+    yaw: normalizeYawAngle(yaw, 0),
+    pitch: Number(lobbyBase.pitch) || -0.02
   });
 }
 
@@ -3041,7 +3142,9 @@ export class RoomService {
       player?.state &&
       typeof player.state === "object";
     const nextState = shouldPreserveLobbyReturnState
-      ? sanitizePlayerState(player.state)
+      ? isReturnPortalStateUnsafe(room, returnPortalHint, player.state)
+        ? buildSafeReturnPortalSpawnState(room, returnPortalHint)
+        : sanitizePlayerState(player.state)
       : getRoomZoneSpawnState(room, zone);
     const now = Date.now();
     const previousSeq = Math.max(0, Math.trunc(Number(player?.lastInputSeq) || 0));
