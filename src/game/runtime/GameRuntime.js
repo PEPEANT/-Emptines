@@ -10941,6 +10941,32 @@ export class GameRuntime {
     return "";
   }
 
+  normalizeRoomZoneHint(rawValue, fallback = "") {
+    const strict = this.normalizeRoomZone(rawValue, "");
+    if (strict) {
+      return strict;
+    }
+    const value = String(rawValue ?? "")
+      .trim()
+      .toLowerCase();
+    if (value.startsWith("lobby")) {
+      return "lobby";
+    }
+    if (value.startsWith("fps")) {
+      return "fps";
+    }
+    if (value.startsWith("ox")) {
+      return "ox";
+    }
+    const fallbackValue = String(fallback ?? "")
+      .trim()
+      .toLowerCase();
+    if (fallbackValue === "lobby" || fallbackValue === "fps" || fallbackValue === "ox") {
+      return fallbackValue;
+    }
+    return "";
+  }
+
   getRoomZoneLabel(rawZone) {
     const zone = this.normalizeRoomZone(rawZone, "lobby") || "lobby";
     return ROOM_ZONE_LABELS[zone] ?? ROOM_ZONE_LABELS.lobby;
@@ -10954,14 +10980,14 @@ export class GameRuntime {
     }
 
     const text = rawText.toLowerCase();
-    const directZone = this.normalizeRoomZone(text.replace(/^zone:/, ""), "");
+    const directZone = this.normalizeRoomZoneHint(text.replace(/^zone:/, ""), "");
     if (directZone) {
       return directZone;
     }
 
     try {
       const parsed = new URL(rawText, window.location.href);
-      const zoneFromQuery = this.normalizeRoomZone(
+      const zoneFromQuery = this.normalizeRoomZoneHint(
         parsed.searchParams.get("zone") ?? parsed.searchParams.get("z") ?? "",
         ""
       );
@@ -11015,6 +11041,16 @@ export class GameRuntime {
     const protocol = String(parsed.protocol ?? "").toLowerCase();
     if (protocol !== "http:" && protocol !== "https:") {
       return String(fallback ?? "").trim();
+    }
+
+    const zoneHint = this.normalizeRoomZoneHint(
+      parsed.searchParams.get("zone") ?? parsed.searchParams.get("z") ?? "",
+      ""
+    );
+    if (typeof window !== "undefined" && parsed.origin === window.location.origin && zoneHint) {
+      const canonical = new URL("/", window.location.href);
+      canonical.searchParams.set("zone", zoneHint);
+      return canonical.toString();
     }
 
     return parsed.toString();

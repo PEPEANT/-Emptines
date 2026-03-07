@@ -167,6 +167,19 @@ function normalizeRoomPortalTarget(rawValue, fallback = "") {
     return String(fallback ?? "").trim();
   }
 
+  const zoneHint = normalizeRoomZoneHint(
+    parsed.searchParams.get("zone") ?? parsed.searchParams.get("z") ?? "",
+    ""
+  );
+  const pathname = String(parsed.pathname ?? "").trim();
+  if (zoneHint && (!pathname || pathname === "/")) {
+    parsed.pathname = "/";
+    parsed.search = "";
+    parsed.hash = "";
+    parsed.searchParams.set("zone", zoneHint);
+    return parsed.toString();
+  }
+
   return parsed.toString();
 }
 
@@ -182,6 +195,32 @@ function normalizeRoomZone(rawValue, fallback = "lobby") {
     .trim()
     .toLowerCase();
   if (ROOM_ZONE_IDS.includes(fallbackValue)) {
+    return fallbackValue;
+  }
+  return "";
+}
+
+function normalizeRoomZoneHint(rawValue, fallback = "") {
+  const strict = normalizeRoomZone(rawValue, "");
+  if (strict) {
+    return strict;
+  }
+  const value = String(rawValue ?? "")
+    .trim()
+    .toLowerCase();
+  if (value.startsWith("lobby")) {
+    return "lobby";
+  }
+  if (value.startsWith("fps")) {
+    return "fps";
+  }
+  if (value.startsWith("ox")) {
+    return "ox";
+  }
+  const fallbackValue = String(fallback ?? "")
+    .trim()
+    .toLowerCase();
+  if (fallbackValue === "lobby" || fallbackValue === "fps" || fallbackValue === "ox") {
     return fallbackValue;
   }
   return "";
@@ -2917,20 +2956,8 @@ export class RoomService {
     }
 
     const previousZone = normalizeRoomZone(player?.zone ?? "lobby", "lobby");
-    let nextState = getRoomZoneSpawnState(room, zone);
-    if (zone === "lobby") {
-      const portalHint = normalizeReturnPortalHint(rawPortalHint, "");
-      if (portalHint === "fps" || portalHint === "ox" || portalHint === "hall") {
-        const portalAnchoredState = getPortalAnchoredZoneSpawnState(
-          room,
-          portalHint,
-          ROOM_ZONE_STATE_BY_ID.lobby
-        );
-        if (portalAnchoredState) {
-          nextState = portalAnchoredState;
-        }
-      }
-    }
+    // External returns should converge on one canonical lobby spawn.
+    const nextState = getRoomZoneSpawnState(room, zone);
     const now = Date.now();
     const previousSeq = Math.max(0, Math.trunc(Number(player?.lastInputSeq) || 0));
 
