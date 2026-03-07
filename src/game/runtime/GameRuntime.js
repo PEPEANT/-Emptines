@@ -461,6 +461,7 @@ export class GameRuntime {
     this.socketEndpointValidationError = "";
     this.socketEndpointLinkRequired = false;
     this.surfacePainterEraserEnabled = false;
+    this.surfacePainterFillModeEnabled = false;
     this.surfacePainterCanvasLoadNonce = 0;
     this.surfacePainterCanvasBgColor = "#ffffff";
     this.surfacePaintProbeWorldPosition = new THREE.Vector3();
@@ -7249,30 +7250,11 @@ export class GameRuntime {
     this.surfacePainterCanvasBgColor = nextColor;
   }
 
-  fillSurfacePainterWithBrushColor() {
-    if (!this.surfacePainterOpen || !this.surfacePainterCanvasEl) {
+  toggleSurfacePainterFillMode() {
+    if (!this.surfacePainterOpen) {
       return;
     }
-    if (!this.surfacePainterContext) {
-      this.surfacePainterContext = this.surfacePainterCanvasEl.getContext("2d");
-    }
-    const context = this.surfacePainterContext;
-    if (!context) {
-      return;
-    }
-    const canvas = this.surfacePainterCanvasEl;
-    const fillColor = this.normalizeSurfacePainterColor(
-      this.surfacePainterColorInputEl?.value,
-      "#111111"
-    );
-    this.surfacePainterCanvasLoadNonce += 1;
-    context.save();
-    context.globalCompositeOperation = "source-over";
-    context.globalAlpha = 1;
-    context.fillStyle = fillColor;
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.restore();
-    this.surfacePainterCanvasBgColor = fillColor;
+    this.setSurfacePainterFillModeEnabled(!this.surfacePainterFillModeEnabled);
   }
 
   getSurfacePainterPngFilename(surfaceId = "") {
@@ -7459,9 +7441,7 @@ export class GameRuntime {
     this.updateSurfacePainterSaveAvailability();
     this.updateSurfacePainterActionsUi();
     this.setSurfacePainterEraserEnabled(false);
-    if (this.surfacePainterTitleEl) {
-      this.surfacePainterTitleEl.textContent = this.getSurfacePainterTitle(normalizedId);
-    }
+    this.setSurfacePainterFillModeEnabled(false);
 
     this.keys.clear();
     this.resetMobileControlInputState();
@@ -7507,6 +7487,7 @@ export class GameRuntime {
     this.surfacePainterTargetId = "";
     this.surfacePainterCanvasLoadNonce += 1;
     this.surfacePainterActionsCollapsed = false;
+    this.setSurfacePainterFillModeEnabled(false);
     this.resetMobileControlInputState();
     this.surfacePainterEl?.classList.add("hidden");
     this.updateSurfacePainterSaveAvailability();
@@ -7536,6 +7517,17 @@ export class GameRuntime {
       return String(this.surfacePainterBgColorInputEl?.value ?? "#ffffff");
     }
     return String(this.surfacePainterColorInputEl?.value ?? "#111111");
+  }
+
+  setSurfacePainterFillModeEnabled(enabled) {
+    this.surfacePainterFillModeEnabled = Boolean(enabled);
+    if (this.surfacePainterFillBtnEl) {
+      this.surfacePainterFillBtnEl.classList.toggle("active", this.surfacePainterFillModeEnabled);
+      this.surfacePainterFillBtnEl.setAttribute(
+        "aria-pressed",
+        this.surfacePainterFillModeEnabled ? "true" : "false"
+      );
+    }
   }
 
   setSurfacePainterEraserEnabled(enabled) {
@@ -7600,10 +7592,14 @@ export class GameRuntime {
     if (!this.surfacePainterOpen || !this.surfacePainterCanvasEl) {
       return;
     }
-    // User started editing; ignore any late async image draw callbacks.
-    this.surfacePainterCanvasLoadNonce += 1;
     const point = this.getSurfacePainterCanvasPoint(clientX, clientY);
     if (!point) {
+      return;
+    }
+    // User started editing; ignore any late async image draw callbacks.
+    this.surfacePainterCanvasLoadNonce += 1;
+    if (this.surfacePainterFillModeEnabled) {
+      this.fillSurfacePainterRegionAtPoint(point.x, point.y);
       return;
     }
 
@@ -7768,6 +7764,80 @@ export class GameRuntime {
       if (previousImage !== imageDataUrl) {
         this.applySurfacePaintTexture(surfaceId, imageDataUrl);
       }
+    }
+  }
+
+  doesSurfacePainterPixelMatch(data, offset, targetColor, tolerance = 18) {
+    return (
+      Math.abs(data[offset] - targetColor.r) <= tolerance &&
+      Math.abs(data[offset + 1] - targetColor.g) <= tolerance &&
+      Math.abs(data[offset + 2] - targetColor.b) <= tolerance &&
+      Math.abs(data[offset + 3] - targetColor.a) <= tolerance
+    );
+  }
+
+  fillSurfacePainterRegionAtPoint(canvasX, canvasY) {
+    if (!this.surfacePainterOpen || !this.surfacePainterCanvasEl) {
+      return false;
+    }
+    if (!this.surfacePainterContext) {
+      this.surfacePainterContext = this.surfacePainterCanvasEl.getContext("2d");
+    }
+    const context = this.surfacePainterContext;
+    const canvas = this.surfacePainterCanvasEl;
+    if (!context || !canvas) {
+      return false;
+    }
+
+    const startX = THREE.MathUtils.clamp(Math.floor(Number(canvasX) || 0), 0, canvas.width - 1);
+    const startY = THREE.MathUtils.clamp(Math.floor(Number(canvasY) || 0), 0, canvas.height - 1);
+    const fillRgb = this.getSurfacePainterColorRgb(this.getSurfacePainterBrushColor(), "#111111");
+    try {
+      const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+      const startOffset = (startY * canvas.width + startX) * 4;
+      const tolerance = 18;
+      const targetColor = {
+        r: data[startOffset],
+        g: data[startOffset + 1],
+        b: data[startOffset + 2],
+        a: data[startOffset + 3]
+      };
+      const replacementColor = {
+        r: fillRgb.r,
+        g: fillRgb.g,
+        b: fillRgb.b,
+        a: 255
+      };
+      if (this.doesSurfacePainterPixelMatch(data, startOffset, replacementColor, tolerance)) {
+        return false;
+      }
+
+      const stack = [startX, startY];
+      while (stack.length > 0) {
+        const y = stack.pop();
+        const x = stack.pop();
+        if (!Number.isFinite(x) || !Number.isFinite(y)) {
+          continue;
+        }
+        if (x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) {
+          continue;
+        }
+        const offset = (y * canvas.width + x) * 4;
+        if (!this.doesSurfacePainterPixelMatch(data, offset, targetColor, tolerance)) {
+          continue;
+        }
+        data[offset] = replacementColor.r;
+        data[offset + 1] = replacementColor.g;
+        data[offset + 2] = replacementColor.b;
+        data[offset + 3] = replacementColor.a;
+        stack.push(x - 1, y, x + 1, y, x, y - 1, x, y + 1);
+      }
+
+      context.putImageData(imageData, 0, 0);
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -16720,7 +16790,7 @@ export class GameRuntime {
       this.toggleSurfacePainterPromoAllowOthersDraw();
     });
     this.surfacePainterFillBtnEl?.addEventListener("click", () => {
-      this.fillSurfacePainterWithBrushColor();
+      this.toggleSurfacePainterFillMode();
     });
     this.surfacePainterBgColorInputEl?.addEventListener("input", () => {
       this.applySurfacePainterBackgroundColor();
