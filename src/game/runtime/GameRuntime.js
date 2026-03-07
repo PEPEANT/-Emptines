@@ -125,12 +125,7 @@ const PORTAL_MOVABLE_IDS = Object.freeze({
   fps: "portal_fps",
   hall: "portal_hall"
 });
-const PORTAL_POSITION_KEY_BY_MOVABLE_ID = Object.freeze({
-  [PORTAL_MOVABLE_IDS.ox]: "portal1",
-  [PORTAL_MOVABLE_IDS.fps]: "portal2",
-  [PORTAL_MOVABLE_IDS.hall]: "hall"
-});
-const A_ZONE_PORTAL_ENABLED = true;
+const A_ZONE_PORTAL_ENABLED = false;
 const HALL_VENUE_BACKDROP_ENABLED = false;
 const OBJECT_EDITOR_ROTATE_STEP_RAD = Math.PI / 36; // 5deg
 const OBJECT_EDITOR_ROTATE_SNAP_STEP_RAD = Math.PI / 12; // 15deg
@@ -610,12 +605,6 @@ export class GameRuntime {
     this.isRoomHost = false;
     this.portalTargetSetInFlight = false;
     this.aZonePortalTargetSetInFlight = false;
-    this.portalPositionSaveInFlight = false;
-    this.portalPositionSavePending = false;
-    this.portalPositionSavePendingForceFlush = false;
-    this.portalPositionStateDirty = false;
-    this.portalPositionAutosaveClock = 0;
-    this.portalPositionAutosaveInterval = this.mobileEnabled ? 0.34 : 0.24;
     this.hostPortalTargetCandidate = this.resolveRequestedPortalTargetCandidate();
     this.hostPortalTargetSynced = false;
     this.hostAZonePortalTargetCandidate = "";
@@ -3555,19 +3544,19 @@ export class GameRuntime {
       portalGroup,
       PORTAL_MOVABLE_IDS.ox,
       oxPortalAnchorColliderIndex,
-      { disableColliderSync: true }
+      { disableColliderSync: true, editorLocked: true }
     );
     const fpsPortalAnchorEntry = this.registerMovableObject(
       aZonePortalGroup,
       PORTAL_MOVABLE_IDS.fps,
       fpsPortalAnchorColliderIndex,
-      { disableColliderSync: true }
+      { disableColliderSync: true, editorLocked: true }
     );
     const hallPortalAnchorEntry = this.registerMovableObject(
       hallPortalGroup,
       PORTAL_MOVABLE_IDS.hall,
       hallPortalAnchorColliderIndex,
-      { disableColliderSync: true }
+      { disableColliderSync: true, editorLocked: true }
     );
 
     this.hubFlowGroup = group;
@@ -11888,6 +11877,7 @@ export class GameRuntime {
       this.hostPortal1ResetBtnEl.disabled = controlsBusy;
     }
     if (this.hostPortal2NameInputEl) {
+      this.hostPortal2NameInputEl.closest?.(".host-row")?.classList.toggle("hidden", !A_ZONE_PORTAL_ENABLED);
       this.hostPortal2NameInputEl.disabled = controlsBusy;
       if (document.activeElement !== this.hostPortal2NameInputEl) {
         const nextValue = String(portal2DisplayState.title ?? "").trim();
@@ -11897,12 +11887,15 @@ export class GameRuntime {
       }
     }
     if (this.hostPortal2ImageFileInputEl) {
+      this.hostPortal2ImageFileInputEl.closest?.(".host-row")?.classList.toggle("hidden", !A_ZONE_PORTAL_ENABLED);
       this.hostPortal2ImageFileInputEl.disabled = controlsBusy;
     }
     if (this.hostPortal2ApplyBtnEl) {
+      this.hostPortal2ApplyBtnEl.closest?.(".host-actions")?.classList.toggle("hidden", !A_ZONE_PORTAL_ENABLED);
       this.hostPortal2ApplyBtnEl.disabled = controlsBusy;
     }
     if (this.hostPortal2ResetBtnEl) {
+      this.hostPortal2ResetBtnEl.closest?.(".host-actions")?.classList.toggle("hidden", !A_ZONE_PORTAL_ENABLED);
       this.hostPortal2ResetBtnEl.disabled = controlsBusy;
     }
     if (this.hostMainPortalAdFileInputEl) {
@@ -15950,7 +15943,7 @@ export class GameRuntime {
       const wasObjDragging = this.objEditorDragging;
       this.objEditorDragging = false;
       if (wasObjDragging) {
-        this.flushSelectedMovablePersistence({ announceErrors: false, forceFlush: true });
+        this.saveObjectPositions({ announceErrors: false, forceFlush: true });
       }
       this.chalkDrawingActive = false;
       this.chalkLastStamp = null;
@@ -17914,11 +17907,6 @@ export class GameRuntime {
       this.objectStateRevision = 0;
       this.objectStateDirty = false;
       this.objectStateAutosaveClock = 0;
-      this.portalPositionSaveInFlight = false;
-      this.portalPositionSavePending = false;
-      this.portalPositionSavePendingForceFlush = false;
-      this.portalPositionStateDirty = false;
-      this.portalPositionAutosaveClock = 0;
       this.leftBillboardSetInFlight = false;
       this.rightBillboardResetInFlight = false;
       this.billboardVideoSetInFlight = false;
@@ -17995,11 +17983,6 @@ export class GameRuntime {
       this.objectStateRevision = 0;
       this.objectStateDirty = false;
       this.objectStateAutosaveClock = 0;
-      this.portalPositionSaveInFlight = false;
-      this.portalPositionSavePending = false;
-      this.portalPositionSavePendingForceFlush = false;
-      this.portalPositionStateDirty = false;
-      this.portalPositionAutosaveClock = 0;
       this.leftBillboardSetInFlight = false;
       this.rightBillboardResetInFlight = false;
       this.billboardVideoSetInFlight = false;
@@ -18123,11 +18106,6 @@ export class GameRuntime {
       this.objectStateRevision = 0;
       this.objectStateDirty = false;
       this.objectStateAutosaveClock = 0;
-      this.portalPositionSaveInFlight = false;
-      this.portalPositionSavePending = false;
-      this.portalPositionSavePendingForceFlush = false;
-      this.portalPositionStateDirty = false;
-      this.portalPositionAutosaveClock = 0;
       this.leftBillboardSetInFlight = false;
       this.rightBillboardResetInFlight = false;
       this.billboardVideoSetInFlight = false;
@@ -18267,10 +18245,6 @@ export class GameRuntime {
 
     socket.on("portal:a-zone-target:update", (payload = {}) => {
       this.applyAZonePortalTargetUpdate(payload?.targetUrl ?? payload?.url ?? "");
-    });
-
-    socket.on("portal:positions:update", (payload = {}) => {
-      this.applyPortalPositionsState(payload?.positions ?? payload);
     });
 
     socket.on("portal:display:update", (payload = {}) => {
@@ -18602,9 +18576,6 @@ export class GameRuntime {
     }
     if (room?.surfacePolicies && typeof room.surfacePolicies === "object") {
       this.applySurfacePaintPolicyState(room.surfacePolicies);
-    }
-    if (room?.portalPositions && typeof room.portalPositions === "object") {
-      this.applyPortalPositionsState(room.portalPositions);
     }
     if (Array.isArray(room?.promoObjects)) {
       this.applyPromoState(room.promoObjects);
@@ -19087,7 +19058,6 @@ export class GameRuntime {
     this.updatePlatformStateAutosave(safeDelta);
     this.updateRopeStateAutosave(safeDelta);
     this.updateObjectStateAutosave(safeDelta);
-    this.updatePortalPositionAutosave(safeDelta);
     this.updateRopeProximity(safeDelta);
     this.updatePromoPlacementPreview();
     this.updateHostCustomBlockPlacementPreview();
@@ -20671,6 +20641,7 @@ export class GameRuntime {
       defaultRotation: mesh.rotation.clone(),
       defaultVisible: mesh.visible !== false,
       disableColliderSync: Boolean(options?.disableColliderSync),
+      editorLocked: Boolean(options?.editorLocked),
       isHostCustomPaintBlock: false,
       _savedHighlightMaterials: null,
       _savedEmissive: null,
@@ -20782,7 +20753,7 @@ export class GameRuntime {
     }
     const meshes = [];
     for (const entry of this.movableObjects) {
-      if (entry?.mesh) {
+      if (entry?.mesh && entry?.editorLocked !== true) {
         meshes.push(entry.mesh);
       }
     }
@@ -20814,7 +20785,7 @@ export class GameRuntime {
     this.objEditorRaycaster.setFromCamera(this.objEditorMouseNdc, this.camera);
     const meshes = [];
     for (const entry of this.movableObjects) {
-      if (entry?.mesh?.visible) {
+      if (entry?.mesh?.visible && entry?.editorLocked !== true) {
         meshes.push(entry.mesh);
       }
     }
@@ -21007,8 +20978,6 @@ export class GameRuntime {
     if (Math.abs(mesh.position.x - previousX) > 0.0005 || Math.abs(mesh.position.z - previousZ) > 0.0005) {
       if (entry.isHostCustomPaintBlock === true) {
         this.markObjectStateDirty();
-      } else if (this.isPersistedPortalEntry(entry)) {
-        this.markPortalPositionStateDirty();
       }
     }
     this.updateMovableObjectCollider(entry);
@@ -21030,17 +20999,11 @@ export class GameRuntime {
     this.updateSecurityTestLabelForEntry(entry);
     this.syncPortalAnchorsFromMovableObjects();
     this.updateObjEditorInfoEl(entry);
-    if (Math.abs(entry.mesh.position.y - previousY) > 0.0005) {
-      if (entry.isHostCustomPaintBlock === true) {
-        this.markObjectStateDirty();
-      } else if (this.isPersistedPortalEntry(entry)) {
-        this.markPortalPositionStateDirty();
-      }
+    if (Math.abs(entry.mesh.position.y - previousY) > 0.0005 && entry.isHostCustomPaintBlock === true) {
+      this.markObjectStateDirty();
     }
     if (entry.isHostCustomPaintBlock === true) {
       this.saveObjectPositions();
-    } else if (this.isPersistedPortalEntry(entry)) {
-      this.savePortalPositions();
     }
     return true;
   }
@@ -21081,9 +21044,6 @@ export class GameRuntime {
     if (entry.isHostCustomPaintBlock === true) {
       this.markObjectStateDirty();
       this.saveObjectPositions();
-    } else if (this.isPersistedPortalEntry(entry)) {
-      this.markPortalPositionStateDirty();
-      this.savePortalPositions();
     }
     return true;
   }
@@ -21113,172 +21073,6 @@ export class GameRuntime {
     this.updateMovableObjectCollider(entry);
     this.updateSecurityTestLabelForEntry(entry);
     return true;
-  }
-
-  getPortalPositionKeyForEntry(entry) {
-    const id = String(entry?.id ?? "").trim();
-    return PORTAL_POSITION_KEY_BY_MOVABLE_ID[id] ?? "";
-  }
-
-  isPersistedPortalEntry(entry) {
-    return Boolean(this.getPortalPositionKeyForEntry(entry));
-  }
-
-  collectPortalPositionsPayload() {
-    const payload = {};
-    for (const entry of this.movableObjects) {
-      const portalKey = this.getPortalPositionKeyForEntry(entry);
-      if (!portalKey || !entry?.mesh) {
-        continue;
-      }
-      const pos = entry.mesh.position;
-      payload[portalKey] = {
-        x: Math.round((Number(pos.x) || 0) * 1000) / 1000,
-        y: Math.round((Number(pos.y) || 0) * 1000) / 1000,
-        z: Math.round((Number(pos.z) || 0) * 1000) / 1000,
-        ry: Math.round(this.normalizeYawAngle(Number(entry.mesh.rotation?.y) || 0) * 1000) / 1000
-      };
-    }
-    return payload;
-  }
-
-  markPortalPositionStateDirty() {
-    this.portalPositionStateDirty = true;
-    const interval = Math.max(0.16, Number(this.portalPositionAutosaveInterval) || 0.24);
-    this.portalPositionAutosaveClock = Math.min(interval, this.portalPositionAutosaveClock + interval * 0.6);
-  }
-
-  updatePortalPositionAutosave(delta = 0) {
-    if (!this.portalPositionStateDirty) {
-      return;
-    }
-    if (!(this.socket && this.networkConnected) || !this.hasHostPrivilege()) {
-      return;
-    }
-    this.portalPositionAutosaveClock += Math.max(0, Number(delta) || 0);
-    const interval = Math.max(0.16, Number(this.portalPositionAutosaveInterval) || 0.24);
-    if (this.portalPositionAutosaveClock < interval) {
-      return;
-    }
-    this.portalPositionAutosaveClock = 0;
-    this.savePortalPositions({ announceErrors: false });
-  }
-
-  applyPortalPositionsState(rawPositions = {}) {
-    const source = rawPositions && typeof rawPositions === "object" ? rawPositions : {};
-    const selectedPortalKey = this.getPortalPositionKeyForEntry(this.objEditorSelected);
-    if (
-      this.portalPositionStateDirty &&
-      (this.objEditorDragging || this.portalPositionSaveInFlight || this.portalPositionSavePending) &&
-      selectedPortalKey
-    ) {
-      return;
-    }
-    for (const entry of this.movableObjects) {
-      const portalKey = this.getPortalPositionKeyForEntry(entry);
-      if (!portalKey || !entry?.mesh) {
-        continue;
-      }
-      const next = source[portalKey];
-      if (!next || typeof next !== "object") {
-        continue;
-      }
-      const x = Number(next.x);
-      const y = Number(next.y);
-      const z = Number(next.z);
-      const ry = Number(next.ry);
-      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
-        continue;
-      }
-      entry.mesh.position.set(x, y, z);
-      if (Number.isFinite(ry)) {
-        entry.mesh.rotation.y = this.normalizeYawAngle(ry);
-      }
-      this.updateMovableObjectCollider(entry);
-      this.updateSecurityTestLabelForEntry(entry);
-    }
-    this.syncPortalAnchorsFromMovableObjects({ force: true });
-    if (!this.portalPositionSaveInFlight && !this.portalPositionSavePending && !this.objEditorDragging) {
-      this.portalPositionStateDirty = false;
-      this.portalPositionAutosaveClock = 0;
-    }
-    this.updateObjEditorInfoEl(this.objEditorSelected);
-  }
-
-  savePortalPositions({ announceErrors = true, forceFlush = false } = {}) {
-    const payload = this.collectPortalPositionsPayload();
-    if (this.socket && this.networkConnected) {
-      if (this.portalPositionSaveInFlight) {
-        this.portalPositionSavePending = true;
-        this.portalPositionStateDirty = true;
-        this.portalPositionSavePendingForceFlush =
-          this.portalPositionSavePendingForceFlush || Boolean(forceFlush);
-        return;
-      }
-      if (!this.hasHostPrivilege()) {
-        this.portalPositionSavePending = false;
-        this.portalPositionSavePendingForceFlush = false;
-        this.portalPositionStateDirty = false;
-        this.portalPositionAutosaveClock = 0;
-        if (announceErrors) {
-          this.appendChatLine("", "포탈 위치 저장은 방장만 가능합니다.", "system");
-        }
-        return;
-      }
-      if (this.runtimePolicyState?.persistentStateAvailable === false) {
-        this.portalPositionSavePending = false;
-        this.portalPositionSavePendingForceFlush = false;
-        this.portalPositionStateDirty = false;
-        this.portalPositionAutosaveClock = 0;
-        if (announceErrors) {
-          this.appendChatLine("", this.getPersistentStateUnavailableMessage("포탈 위치"), "system");
-        }
-        return;
-      }
-      this.portalPositionSaveInFlight = true;
-      this.portalPositionStateDirty = true;
-      this.portalPositionAutosaveClock = 0;
-      this.socket.emit(
-        "portal:positions:set",
-        { positions: payload, forceFlush: Boolean(forceFlush) },
-        (res = {}) => {
-          this.portalPositionSaveInFlight = false;
-          if (!res?.ok) {
-            this.portalPositionSavePending = false;
-            this.portalPositionSavePendingForceFlush = false;
-            this.portalPositionAutosaveClock = 0;
-            if (announceErrors) {
-              const reason = String(res?.error ?? "").trim() || "unknown";
-              this.appendChatLine("", `포탈 위치 저장 실패: ${reason}`, "system");
-            }
-            return;
-          }
-          if (res?.positions && typeof res.positions === "object") {
-            this.applyPortalPositionsState(res.positions);
-          }
-          if (this.portalPositionSavePending) {
-            const nextForceFlush = this.portalPositionSavePendingForceFlush;
-            this.portalPositionSavePending = false;
-            this.portalPositionSavePendingForceFlush = false;
-            this.savePortalPositions({ announceErrors: false, forceFlush: nextForceFlush });
-            return;
-          }
-          this.portalPositionSavePendingForceFlush = false;
-          this.portalPositionStateDirty = false;
-          this.portalPositionAutosaveClock = 0;
-        }
-      );
-    }
-  }
-
-  flushSelectedMovablePersistence({ announceErrors = false, forceFlush = true } = {}) {
-    const selectedEntry = this.objEditorSelected;
-    if (this.objectStateDirty || selectedEntry?.isHostCustomPaintBlock === true) {
-      this.saveObjectPositions({ announceErrors, forceFlush });
-    }
-    if (this.portalPositionStateDirty || this.isPersistedPortalEntry(selectedEntry)) {
-      this.savePortalPositions({ announceErrors, forceFlush });
-    }
   }
 
   collectObjectPositionsPayload() {
@@ -21616,7 +21410,7 @@ export class GameRuntime {
       this.objEditorActive = false;
       this.objEditorBarEl?.classList.add("hidden");
       if (exitingObjEditor) {
-        this.flushSelectedMovablePersistence({ announceErrors: false, forceFlush: true });
+        this.saveObjectPositions({ announceErrors: false, forceFlush: true });
       }
       this.clearObjEditorSelection();
       if (exitingObjEditor && !this.pointerLocked) {
@@ -22545,7 +22339,7 @@ export class GameRuntime {
     this.objEditorDragging = false;
     this.objEditorBarEl?.classList.add("hidden");
     if (wasObjMode) {
-      this.flushSelectedMovablePersistence({ announceErrors: false, forceFlush: true });
+      this.saveObjectPositions({ announceErrors: false, forceFlush: true });
     }
     this.clearObjEditorSelection();
 

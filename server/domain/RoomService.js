@@ -89,7 +89,6 @@ const CHAT_MESSAGE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,80}$/;
 const MAX_CHAT_MESSAGES = 5000;
 const MAX_CHAT_TEXT_CHARS = 200;
 const PORTAL_DISPLAY_KEYS = Object.freeze(["portal1", "portal2"]);
-const PORTAL_POSITION_KEYS = Object.freeze(["portal1", "portal2", "hall"]);
 const PORTAL_DISPLAY_DEFAULT_TITLES = Object.freeze({
   portal1: "OX 퀴즈 대회",
   portal2: "포탈 2"
@@ -1008,73 +1007,6 @@ function normalizePortalDisplayState(rawValue, fallbackTitle = "") {
   };
 }
 
-function roundPortalPositionValue(rawValue, fallback = 0) {
-  const value = Number(rawValue);
-  if (!Number.isFinite(value)) {
-    return Math.round((Number(fallback) || 0) * 1000) / 1000;
-  }
-  return Math.round(value * 1000) / 1000;
-}
-
-function normalizePortalPositionEntry(rawValue) {
-  const source = rawValue && typeof rawValue === "object" ? rawValue : null;
-  if (!source) {
-    return null;
-  }
-  const x = Number(source.x);
-  const y = Number(source.y);
-  const z = Number(source.z);
-  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
-    return null;
-  }
-  const ry = normalizeYawAngle(
-    source.ry ?? source.yaw ?? source.rotationY ?? source.rotation ?? 0,
-    0
-  );
-  return {
-    x: roundPortalPositionValue(Math.max(-MAX_OBJECT_COORDINATE, Math.min(MAX_OBJECT_COORDINATE, x))),
-    y: roundPortalPositionValue(Math.max(-32, Math.min(260, y))),
-    z: roundPortalPositionValue(Math.max(-MAX_OBJECT_COORDINATE, Math.min(MAX_OBJECT_COORDINATE, z))),
-    ry: roundPortalPositionValue(ry)
-  };
-}
-
-function createPortalPositionsState(rawValue) {
-  const source = rawValue && typeof rawValue === "object" ? rawValue : {};
-  const next = {};
-  for (const key of PORTAL_POSITION_KEYS) {
-    const normalized = normalizePortalPositionEntry(source[key]);
-    if (normalized) {
-      next[key] = normalized;
-    }
-  }
-  return next;
-}
-
-function arePortalPositionsEqual(a, b) {
-  const left = createPortalPositionsState(a);
-  const right = createPortalPositionsState(b);
-  for (const key of PORTAL_POSITION_KEYS) {
-    const leftEntry = left[key] ?? null;
-    const rightEntry = right[key] ?? null;
-    if (!leftEntry && !rightEntry) {
-      continue;
-    }
-    if (!leftEntry || !rightEntry) {
-      return false;
-    }
-    if (
-      leftEntry.x !== rightEntry.x ||
-      leftEntry.y !== rightEntry.y ||
-      leftEntry.z !== rightEntry.z ||
-      leftEntry.ry !== rightEntry.ry
-    ) {
-      return false;
-    }
-  }
-  return true;
-}
-
 function normalizeBillboardVideoDataUrl(rawValue) {
   const value = String(rawValue ?? "").trim();
   if (!value || value.length > MAX_BILLBOARD_VIDEO_DATA_URL_CHARS) {
@@ -1102,7 +1034,6 @@ function createPersistentRoom(code, defaultPortalTargetUrl, defaultAZonePortalTa
     aZonePortalTarget: defaultAZonePortalTargetUrl,
     portalSchedule: createPortalScheduleState(),
     portalDisplays: createPortalDisplaysState(),
-    portalPositions: createPortalPositionsState(),
     mainPortalAd: createMainPortalAdState(),
     leftBillboard: createLeftBillboardState(),
     rightBillboard: createRightBillboardState(),
@@ -1267,7 +1198,6 @@ export class RoomService {
       this.defaultAZonePortalTargetUrl
     );
     const portalDisplays = createPortalDisplaysState(parsed?.portalDisplays);
-    const portalPositions = createPortalPositionsState(parsed?.portalPositions);
     const mainPortalAd = this.serializeMainPortalAd({ mainPortalAd: parsed?.mainPortalAd });
     const leftBillboard = this.serializeLeftBillboard({ leftBillboard: parsed?.leftBillboard });
     const rightBillboard = this.serializeRightBillboard({ rightBillboard: parsed?.rightBillboard });
@@ -1299,7 +1229,6 @@ export class RoomService {
     room.surfacePaint = restored;
     room.chatHistory = restoredChatHistory;
     room.portalDisplays = portalDisplays;
-    room.portalPositions = portalPositions;
     room.mainPortalAd = mainPortalAd;
     room.leftBillboard = leftBillboard;
     room.rightBillboard = rightBillboard;
@@ -1414,7 +1343,6 @@ export class RoomService {
       },
       chatHistory: this.serializeChatHistory(room),
       portalDisplays: this.serializePortalDisplays(room),
-      portalPositions: this.serializePortalPositions(room),
       mainPortalAd: this.serializeMainPortalAd(room),
       leftBillboard: this.serializeLeftBillboard(room),
       rightBillboard: this.serializeRightBillboard(room),
@@ -1555,7 +1483,6 @@ export class RoomService {
       aZonePortalTarget: String(room.aZonePortalTarget ?? "").trim(),
       portalSchedule: this.serializePortalSchedule(room),
       portalDisplays: this.serializePortalDisplays(room),
-      portalPositions: this.serializePortalPositions(room),
       mainPortalAd: this.serializeMainPortalAd(room),
       rightBillboard: this.serializeRightBillboard(room),
       securityTest: this.serializeSecurityTest(room),
@@ -1650,20 +1577,6 @@ export class RoomService {
   emitAZonePortalTargetUpdate(room) {
     this.io.to(room.code).emit("portal:a-zone-target:update", {
       targetUrl: String(room?.aZonePortalTarget ?? "").trim()
-    });
-  }
-
-  serializePortalPositions(room) {
-    if (!room || typeof room !== "object") {
-      return createPortalPositionsState();
-    }
-    room.portalPositions = createPortalPositionsState(room.portalPositions);
-    return room.portalPositions;
-  }
-
-  emitPortalPositionUpdate(room) {
-    this.io.to(room.code).emit("portal:positions:update", {
-      positions: this.serializePortalPositions(room)
     });
   }
 
@@ -2833,28 +2746,6 @@ export class RoomService {
     room.aZonePortalTarget = normalized;
     this.scheduleSurfacePaintSave();
     return { ok: true, changed: true, targetUrl: room.aZonePortalTarget };
-  }
-
-  setPortalPositions(room, rawPositions) {
-    if (!room) {
-      return { ok: false, error: "room not found" };
-    }
-    const nextPositions = createPortalPositionsState(rawPositions);
-    const previousPositions = this.serializePortalPositions(room);
-    if (arePortalPositionsEqual(previousPositions, nextPositions)) {
-      return {
-        ok: true,
-        changed: false,
-        positions: previousPositions
-      };
-    }
-    room.portalPositions = nextPositions;
-    this.scheduleSurfacePaintSave();
-    return {
-      ok: true,
-      changed: true,
-      positions: this.serializePortalPositions(room)
-    };
   }
 
   setSecurityTestEnabled(room, rawEnabled) {

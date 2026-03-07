@@ -1241,40 +1241,6 @@ export function registerSocketHandlers({
       });
     });
 
-    socket.on("portal:positions:set", async (payload = {}, ackFn) => {
-      const room = roomService.getRoomBySocket(socket);
-      if (!room) {
-        ack(ackFn, { ok: false, error: "room not found" });
-        return;
-      }
-      if (!roomService.isHost(room, socket.id)) {
-        ack(ackFn, { ok: false, error: "host only" });
-        return;
-      }
-      const persistenceError = getPersistentStateBlockReason(config, "portal position");
-      if (persistenceError) {
-        ack(ackFn, { ok: false, error: persistenceError });
-        return;
-      }
-
-      const result = roomService.setPortalPositions(room, payload?.positions ?? payload);
-      if (!result.ok) {
-        ack(ackFn, result);
-        return;
-      }
-      if (result.changed) {
-        roomService.emitPortalPositionUpdate(room);
-      }
-      if (!(await flushPersistentStateIfRequested(payload, ackFn, "portal position"))) {
-        return;
-      }
-      ack(ackFn, {
-        ok: true,
-        changed: Boolean(result.changed),
-        positions: result.positions
-      });
-    });
-
     socket.on("portal:display:set", (payload = {}, ackFn) => {
       const room = roomService.getRoomBySocket(socket);
       if (!room) {
