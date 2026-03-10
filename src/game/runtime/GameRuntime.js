@@ -5082,8 +5082,16 @@ export class GameRuntime {
       },
       () => {
         video.muted = true;
+        video.defaultMuted = true;
+        video.volume = 0;
+        video.setAttribute("muted", "true");
         video.play().then(
           () => {
+            video.muted = false;
+            video.defaultMuted = false;
+            video.volume = 1;
+            video.removeAttribute("muted");
+            video.play().catch(() => {});
             this.updateSpatialAudioMix();
           },
           () => {
@@ -10817,9 +10825,18 @@ void main() {
       video.muted = true;
       video.defaultMuted = true;
       video.volume = 0;
+      video.setAttribute("muted", "true");
       video.currentTime = 0;
       video.play().then(
-        () => {},
+        () => {
+          if (!muted) {
+            video.muted = false;
+            video.defaultMuted = false;
+            video.volume = 1;
+            video.removeAttribute("muted");
+            video.play().catch(() => {});
+          }
+        },
         () => {
           finishPlayback({ triggerHalfway: false });
         }
@@ -11106,9 +11123,18 @@ void main() {
         video.muted = true;
         video.defaultMuted = true;
         video.volume = 0;
+        video.setAttribute("muted", "true");
         video.currentTime = 0;
         video.play().then(
-          () => {},
+          () => {
+            if (!muted) {
+              video.muted = false;
+              video.defaultMuted = false;
+              video.volume = 1;
+              video.removeAttribute("muted");
+              video.play().catch(() => {});
+            }
+          },
           () => {
             if (this.npcGreetingVideoEl === video) {
               finishPlayback({ triggerHalfway: false, keepFrame: false });
@@ -25833,8 +25859,16 @@ void main() {
       },
       () => {
         video.muted = true;
+        video.defaultMuted = true;
+        video.volume = 0;
+        video.setAttribute("muted", "true");
         video.play().then(
           () => {
+            video.muted = false;
+            video.defaultMuted = false;
+            video.volume = 1;
+            video.removeAttribute("muted");
+            video.play().catch(() => {});
             this.updateSpatialAudioMix();
           },
           () => {
