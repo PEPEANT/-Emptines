@@ -9974,15 +9974,35 @@ export class GameRuntime {
     this.applyBootIntroWorldReveal(0);
     this.hud.setStatus(this.getStatusText());
     this.syncGameplayUiForFlow();
-    const greetingPlaybackMode = this.playNpcGreeting({
-      onFirstClipEnded: () => {
-        if (this.flowStage !== "boot_intro" || !this.bootIntroRevealDeferred) {
-          return;
+    this.npcGreetingMidpointTriggered = false;
+    const firstClipStarted = this.playNpcGreetingVideoOnScreen(
+      NPC_GREETING_VIDEO_SEQUENCE[0],
+      {
+        freezeOnEnd: false,
+        clipFreezeAtSeconds: null,
+        triggerHalfwayOnEnd: true,
+        muted: false,
+        playbackRate: NPC_GREETING_VIDEO_PLAYBACK_RATE,
+        onStarted: () => {
+          this.markNpcGreetingSeenInSession();
+        },
+        onHalfway: () => {
+          this.triggerNpcGreetingMidpointEffects();
+        },
+        onEnded: () => {
+          if (this.flowStage !== "boot_intro" || !this.bootIntroRevealDeferred) {
+            return;
+          }
+          this.beginBootIntroVisibleReveal();
         }
-        this.beginBootIntroVisibleReveal();
       }
-    });
-    if (greetingPlaybackMode === "screen" || greetingPlaybackMode === "overlay") {
+    );
+    if (firstClipStarted) {
+      this.npcGreetingPlaybackActive = false;
+      this.npcGreetingPlaybackClock = 0;
+      if (this.npcGreetingScreen) {
+        this.npcGreetingScreen.visible = true;
+      }
       this.bootIntroRevealDeferred = true;
     } else {
       this.beginBootIntroVisibleReveal();
@@ -10112,6 +10132,30 @@ export class GameRuntime {
     this.bootIntroCurrentPhaseId = "day";
     this.applyBootIntroWorldReveal(1);
     this.ensureEntryMusicPlayback();
+    const secondClipStarted = this.playNpcGreetingVideoOnScreen(
+      NPC_GREETING_VIDEO_SEQUENCE[1],
+      {
+        freezeOnEnd: true,
+        clipFreezeAtSeconds: null,
+        triggerHalfwayOnEnd: false,
+        muted: false,
+        playbackRate: NPC_GREETING_VIDEO_PLAYBACK_RATE,
+        onStarted: () => {
+          this.markNpcGreetingSeenInSession();
+        },
+        onEnded: () => {
+          this.npcGreetingPlaybackActive = false;
+          this.npcGreetingPlaybackClock = this.npcGreetingPlaybackDuration;
+        }
+      }
+    );
+    if (secondClipStarted) {
+      this.npcGreetingPlaybackActive = false;
+      this.npcGreetingPlaybackClock = 0;
+      if (this.npcGreetingScreen) {
+        this.npcGreetingScreen.visible = true;
+      }
+    }
     this.beginBridgeApproachFlow();
   }
 
