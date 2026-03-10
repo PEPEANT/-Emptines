@@ -10,6 +10,16 @@ import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { HUD } from "../ui/HUD.js";
 import { GAME_CONSTANTS } from "../config/gameConstants.js";
 import { getContentPack } from "../content/registry.js";
+import {
+  BASE_VOID_NPC_DEFINITIONS,
+  buildNpcReplyText,
+  buildNpcDefinitionIndex,
+  ensureNpcMemoryRecord,
+  formatNpcSources,
+  loadNpcMemoryStore,
+  recordNpcDialogueVisit,
+  saveNpcMemoryStore,
+} from "../npc/index.js";
 import { isLikelyTouchDevice } from "../utils/device.js";
 import { lerpAngle } from "../utils/math.js";
 import { disposeMeshTree } from "../utils/threeUtils.js";
@@ -33,10 +43,6 @@ function parseSeconds(raw, fallback, min = 0.1) {
   return Math.max(min, value);
 }
 
-const INTRO_BOOT_VIDEO_URL = new URL("../../../mp4/grok-video.0.mp4", import.meta.url).href;
-const NPC_GREETING_INTRO_VIDEO_URL = new URL("../../../mp4/chroma_02.webm", import.meta.url).href;
-const NPC_GREETING_FOLLOWUP_VIDEO_URL = new URL("../../../mp4/grok-video.webm", import.meta.url).href;
-const SPAWN_PORTAL_VEIL_REVEAL_VIDEO_URL = new URL("../../../mp4/grok-video00.mp4", import.meta.url).href;
 const ENTRY_BGM_URL = new URL("../../../mp3/TSUKUYOMI.mp3", import.meta.url).href;
 const AD_BILLBOARD_IMAGE_URL = new URL("../../../png/AD.41415786.1.png", import.meta.url).href;
 const PORTAL_TOP_AD_IMAGE_URL = new URL("../../../png/Gemini01.png", import.meta.url).href;
@@ -89,7 +95,7 @@ const MAX_PORTAL_DISPLAY_LINE_CHARS = 72;
 const MAX_BILLBOARD_VIDEO_DATA_URL_CHARS = 30_000_000;
 const MAX_BILLBOARD_VIDEO_BYTES = 20 * 1024 * 1024;
 const DEFAULT_PORTAL_TARGET_URL = "https://singularity-ox.onrender.com/?v=0.2";
-const A_ZONE_FIXED_PORTAL_TARGET_URL = "https://singularity-ox.onrender.com/?v=0.2";
+const A_ZONE_FIXED_PORTAL_TARGET_URL = "https://reclaim-fps.vercel.app/";
 const HALL_FIXED_PORTAL_TARGET_URL =
   "https://performance-i3w5.onrender.com/performance/?host=0&room=event01&from=emptines";
 const ROOM_ZONE_IDS = Object.freeze(["lobby", "fps", "ox"]);
@@ -110,8 +116,8 @@ const PORTAL_DISPLAY_DEFAULTS = Object.freeze({
   }),
   portal2: Object.freeze({
     mode: "text",
-    title: "포탈 2",
-    line2: "포탈 2 링크는 패널에서 변경",
+    title: "마인크래프트 FPS 온라인",
+    line2: "실시간 플레이 가능",
     line3: "",
     imageUrl: A_ZONE_FIXED_PORTAL_IMAGE_URL
   }),
@@ -135,8 +141,21 @@ const PORTAL_MOVABLE_IDS = Object.freeze({
   fps: "portal_fps",
   hall: "portal_hall"
 });
-const A_ZONE_PORTAL_ENABLED = false;
-const HALL_VENUE_BACKDROP_ENABLED = false;
+const PLAZA_BILLBOARD_MOVABLE_IDS = Object.freeze({
+  right: "plaza_billboard_right",
+  left: "plaza_billboard_left"
+});
+const A_ZONE_PORTAL_ENABLED = true;
+const HALL_VENUE_MOVABLE_ID = "hall_venue";
+const HALL_VENUE_COLLIDERS_ENABLED = false;
+const OBJECT_POSITION_PERSISTED_FIXED_ID_SET = new Set([
+  PORTAL_MOVABLE_IDS.ox,
+  PORTAL_MOVABLE_IDS.fps,
+  PORTAL_MOVABLE_IDS.hall,
+  HALL_VENUE_MOVABLE_ID,
+  PLAZA_BILLBOARD_MOVABLE_IDS.right,
+  PLAZA_BILLBOARD_MOVABLE_IDS.left
+]);
 const OBJECT_EDITOR_ROTATE_STEP_RAD = Math.PI / 36; // 5deg
 const OBJECT_EDITOR_ROTATE_SNAP_STEP_RAD = Math.PI / 12; // 15deg
 const OBJECT_EDITOR_MIN_LIMIT = 1;
@@ -153,7 +172,7 @@ const PORTAL_RETURN_STATE_STORAGE_KEY = "emptines_portal_return_state_v1";
 const PORTAL_RETURN_STATE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 const PROMO_MIN_SCALE = 0.35;
 const PROMO_MAX_SCALE = 2.85;
-const PROMO_DEFAULT_SCALE = 2.2;
+const PROMO_DEFAULT_SCALE = 1.4;
 const PROMO_MAX_MEDIA_BYTES = 6 * 1024 * 1024;
 const PROMO_LINK_INTERACT_RADIUS = 4.2;
 const PROMO_BLOCK_WIDTH = 2.8;
@@ -232,6 +251,7 @@ export class GameRuntime {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     const rendererExposure = Number(this.worldContent?.postProcessing?.exposure);
     this.renderer.toneMappingExposure = Number.isFinite(rendererExposure) ? rendererExposure : 1.08;
+    this.rendererBaseExposure = this.renderer.toneMappingExposure;
     this.renderer.shadowMap.enabled = !this.mobileEnabled;
     this.renderer.shadowMap.autoUpdate = false;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -264,7 +284,12 @@ export class GameRuntime {
     this.skySun = new THREE.Vector3();
     this.cloudLayer = null;
     this.cloudParticles = [];
+    this.cloudMainSpriteTexture = null;
+    this.cloudShadowSpriteTexture = null;
+    this.cloudSpriteTextureCache = new Map();
     this.sunLight = null;
+    this.hemiLight = null;
+    this.fillLight = null;
     this.ground = null;
     this.groundUnderside = null;
     this.boundaryGroup = null;
@@ -287,6 +312,10 @@ export class GameRuntime {
     this.chalkTablePickupRadius = 2.8;
     this.chalkTableChalkGroup = null;
     this.chalkPickupEl = null;
+    this.npcInteractionRaycaster = new THREE.Raycaster();
+    this.npcInteractionPointer = new THREE.Vector2(0, 0);
+    this.npcInteractiveEntries = [];
+    this.cityNpcEntries = [];
     this.paintableSurfaceMeshes = [];
     this.paintableSurfaceMap = new Map();
     this.surfacePaintState = new Map();
@@ -295,6 +324,30 @@ export class GameRuntime {
     this.cityAdBillboardTexture = null;
     this.futureCityBackdropTextureCache = new Map();
     this.futureCityFixedBillboardTextureCache = new Map();
+    this.futureCityBackdropBaseMaterials = [];
+    this.futureCityBackdropGlowMaterials = [];
+    this.futureCityDistrictBaseMaterials = [];
+    this.futureCityDistrictGlowMaterials = [];
+    this.futureCityBackdropDistrictGroup = null;
+    this.futureCityBackdropFloorGlowMaterial = null;
+    this.cloudVisualMaterials = [];
+    this.bootIntroNearMaterials = [];
+    this.bootIntroMidMaterials = [];
+    this.bootIntroAirHazeMaterials = [];
+    this.bootIntroNearGroup = null;
+    this.bootIntroMidGroup = null;
+    this.bootIntroAirHazeGroup = null;
+    this.bootIntroLookForward = new THREE.Vector3(0, 0, 1);
+    this.bootIntroLookRight = new THREE.Vector3(1, 0, 0);
+    this.bootIntroLookTarget = new THREE.Vector3();
+    this.npcPlayerLastSamplePosition = new THREE.Vector3();
+    this.npcPlayerIdleClock = 0;
+    this.npcPlayerCityLiveClock = 0;
+    this.npcTempWorldPosition = new THREE.Vector3();
+    this.npcTempLocalTarget = new THREE.Vector3();
+    this.npcTempDirection = new THREE.Vector3();
+    this.npcTempPlayerPosition = new THREE.Vector3();
+    this.npcTempPatrolTarget = new THREE.Vector3();
     this.ossModelTemplateCache = new Map();
     this.ossModelLoadPromiseCache = new Map();
     this.staticWorldColliders = [];
@@ -404,6 +457,7 @@ export class GameRuntime {
     this.promoPlacementPreviewActive = false;
     this.promoPlacementPreviewMesh = null;
     this.promoPlacementPreviewCurrentScale = PROMO_DEFAULT_SCALE;
+    this.promoPlacementPreviewCurrentScaleY = PROMO_DEFAULT_SCALE;
     this.promoPlacementPreviewBlockReason = "";
     this.promoPlacementPreviewTransform = null;
     this.runtimePolicyState = {
@@ -673,6 +727,7 @@ export class GameRuntime {
     this.localChatExpireAt = 0;
     this.loopRafCallback = () => this.loop();
     this.lastActiveMoveInputAt = 0;
+    this.npcPlayerLastSamplePosition.copy(this.playerPosition);
     this.cloudUpdateClock = 0;
     this.cloudUpdateInterval = this.mobileEnabled ? 0.05 : 1 / 30;
     this.cloudUpdateTurningInterval = this.mobileEnabled ? 0.08 : 1 / 24;
@@ -707,6 +762,8 @@ export class GameRuntime {
     this.mobilePromoScaleWrapEl = document.getElementById("mobile-promo-scale-wrap");
     this.mobilePromoScaleInputEl = document.getElementById("mobile-promo-scale");
     this.mobilePromoScaleValueEl = document.getElementById("mobile-promo-scale-value");
+    this.mobilePromoScaleYInputEl = document.getElementById("mobile-promo-scale-y");
+    this.mobilePromoScaleYValueEl = document.getElementById("mobile-promo-scale-y-value");
     this.mobileRotateOverlayEl = document.getElementById("mobile-rotate-overlay");
     this.fullscreenToggleBtnEl = document.getElementById("fullscreen-toggle");
     this.graphicsToggleBtnEl = document.getElementById("graphics-toggle");
@@ -813,11 +870,13 @@ export class GameRuntime {
     this.nicknameInputEl = document.getElementById("nickname-input");
     this.nicknameErrorEl = document.getElementById("nickname-error");
     this.npcChoiceGateEl = document.getElementById("npc-choice-gate");
-    this.npcChoiceNicknameBtnEl = document.getElementById("npc-choice-nickname");
-    this.npcChoiceGuideBtnEl = document.getElementById("npc-choice-guide");
-    this.npcChoicePlayBtnEl = document.getElementById("npc-choice-play");
-    this.introVideoOverlayEl = document.getElementById("intro-video-overlay");
-    this.introVideoEl = document.getElementById("intro-video");
+    this.npcChoiceNameEl = document.getElementById("npc-choice-name");
+    this.npcChoiceTitleEl = document.getElementById("npc-choice-title");
+    this.npcChoiceCopyEl = document.getElementById("npc-choice-copy");
+    this.npcChoiceSourcesEl = document.getElementById("npc-choice-sources");
+    this.npcChoiceActionsEl = document.getElementById("npc-choice-actions");
+    this.npcChoiceBackBtnEl = document.getElementById("npc-choice-back");
+    this.npcChoiceCloseBtnEl = document.getElementById("npc-choice-close");
     this.portalTransitionEl = document.getElementById("portal-transition");
     this.portalTransitionTextEl = document.getElementById("portal-transition-text");
     this.hallPortalCountdownEl = document.getElementById("hall-portal-countdown");
@@ -850,6 +909,8 @@ export class GameRuntime {
     this.promoPanelCloseBtnEl = document.getElementById("promo-panel-close");
     this.promoScaleInputEl = document.getElementById("promo-scale");
     this.promoScaleValueEl = document.getElementById("promo-scale-value");
+    this.promoScaleYInputEl = document.getElementById("promo-scale-y");
+    this.promoScaleYValueEl = document.getElementById("promo-scale-y-value");
     this.promoTypeSelectEl = document.getElementById("promo-shape");
     this.promoLinkInputEl = document.getElementById("promo-link-url");
     this.promoAllowOthersDrawRowEl = document.getElementById("promo-allow-others-draw-row");
@@ -907,6 +968,8 @@ export class GameRuntime {
     this.objEditorInfoEl = document.getElementById("obj-editor-info");
 
     const hubFlowConfig = this.worldContent?.hubFlow ?? {};
+    this.npcDefinitionIndex = buildNpcDefinitionIndex(BASE_VOID_NPC_DEFINITIONS);
+    this.npcConversationStore = loadNpcMemoryStore();
     const bridgeConfig = hubFlowConfig?.bridge ?? {};
     const cityConfig = hubFlowConfig?.city ?? {};
     const portalConfig = hubFlowConfig?.portal ?? {};
@@ -914,6 +977,9 @@ export class GameRuntime {
     this.flowStage = this.hubFlowEnabled ? "boot_intro" : "city_live";
     this.bootIntroPending = this.hubFlowEnabled;
     this.bootIntroVideoPlaying = false;
+    this.bootIntroRevealActive = false;
+    this.bootIntroRevealElapsed = 0;
+    this.bootIntroCurrentPhaseId = "night";
     this.entryMusicAudioEl = null;
     this.entryMusicStarted = false;
     this.entryMusicUnlockHandler = null;
@@ -939,6 +1005,219 @@ export class GameRuntime {
     this.rightBillboardSourcePosition = new THREE.Vector3(0, 7, 18.8);
     this.flowClock = 0;
     this.hubIntroDuration = parseSeconds(hubFlowConfig?.introSeconds, 4.8, 0.8);
+    this.bootIntroRevealDuration = THREE.MathUtils.clamp(this.hubIntroDuration + 2.2, 5.8, 8.6);
+    this.bootIntroSkyDayColor = new THREE.Color(this.worldContent.skyColor ?? 0xa8d4f5);
+    this.bootIntroSkyDawnColor = new THREE.Color(0x4f6781);
+    this.bootIntroSkyNightColor = new THREE.Color(0x04070e);
+    this.bootIntroFogDayColor = new THREE.Color(this.worldContent.skyColor ?? 0xa8d4f5);
+    this.bootIntroFogDawnColor = new THREE.Color(0x324355);
+    this.bootIntroFogNightColor = new THREE.Color(0x050811);
+    this.bootIntroDayFogDensity = Math.max(0, Number(this.worldContent.fogDensity) || 0);
+    this.bootIntroDawnFogDensity = Math.max(
+      0.0034,
+      this.bootIntroDayFogDensity * 1.72
+    );
+    this.bootIntroNightFogDensity = Math.max(
+      0.0054,
+      this.bootIntroDayFogDensity * 2.55
+    );
+    this.bootIntroDayFogNear = Number(this.worldContent.fogNear) || 110;
+    this.bootIntroDayFogFar = Number(this.worldContent.fogFar) || 500;
+    this.bootIntroDawnFogNear = Math.max(34, this.bootIntroDayFogNear * 0.32);
+    this.bootIntroDawnFogFar = Math.max(160, this.bootIntroDayFogFar * 0.58);
+    this.bootIntroNightFogNear = Math.max(20, this.bootIntroDayFogNear * 0.16);
+    this.bootIntroNightFogFar = Math.max(88, this.bootIntroDayFogFar * 0.34);
+    this.bootIntroNightSunDirection = new THREE.Vector3(0.18, -0.32, 0.93).normalize();
+    this.bootIntroDawnSunDirection = new THREE.Vector3(0.28, 0.06, 0.96).normalize();
+    this.bootIntroDaySunDirection = new THREE.Vector3();
+    this.bootIntroHemisphereDaySkyColor = new THREE.Color(
+      this.worldContent?.lights?.hemisphere?.skyColor ?? 0xe1efff
+    );
+    this.bootIntroHemisphereDayGroundColor = new THREE.Color(
+      this.worldContent?.lights?.hemisphere?.groundColor ?? 0xbec7d2
+    );
+    this.bootIntroSunDayColor = new THREE.Color(this.worldContent?.lights?.sun?.color ?? 0xffffff);
+    this.bootIntroFillDayColor = new THREE.Color(this.worldContent?.lights?.fill?.color ?? 0xe5f2ff);
+    this.bootIntroAtmosphereStates = Object.freeze({
+      night: Object.freeze({
+        skyColor: new THREE.Color(0x02060d),
+        fogColor: new THREE.Color(0x050913),
+        fogDensity: Math.max(0.0062, this.bootIntroDayFogDensity * 2.82),
+        fogNear: Math.max(18, this.bootIntroDayFogNear * 0.14),
+        fogFar: Math.max(82, this.bootIntroDayFogFar * 0.28),
+        sunDirection: new THREE.Vector3(0.16, -0.34, 0.93).normalize(),
+        sunIntensity: 0.018,
+        sunColor: new THREE.Color(0x7285ad),
+        hemiSkyColor: new THREE.Color(0x101725),
+        hemiGroundColor: new THREE.Color(0x040609),
+        hemiIntensity: 0.04,
+        fillColor: new THREE.Color(0x1a2533),
+        fillIntensity: 0.03,
+        exposure: this.rendererBaseExposure * 0.22,
+        cloudTint: new THREE.Color(0x3d5065),
+        cloudTintMix: 0.54,
+        cloudOpacityScale: 0.18,
+        cloudBrightness: 0.32,
+        cityBaseOpacity: 0.02,
+        cityBaseBrightness: 0.08,
+        cityAtmosphereBlend: 0.78,
+        cityGlowOpacity: 0,
+        cityGlowBrightness: 0.2,
+        cityDistrictBrightness: 0.08,
+        cityDistrictDetail: 0.02,
+        cityDistrictAtmosphereBlend: 0.82,
+        nearBrightness: 0.26,
+        nearAtmosphereBlend: 0.54,
+        nearEmissiveScale: 0.22,
+        midBrightness: 0.12,
+        midAtmosphereBlend: 0.78,
+        midEmissiveScale: 0.08,
+        airHazeColor: new THREE.Color(0x344452),
+        airHazeOpacity: 0.3,
+        airHazeBrightness: 0.34,
+        cameraLookYOffset: 19,
+        cameraLookLateralOffset: -1.2,
+        cameraLookForwardOffset: 8,
+        cameraPitch: -0.072,
+        headline: "야간 동기화",
+        subtitle: "남색 공기 속에 시티 실루엣이 잠겨 있습니다."
+      }),
+      preDawn: Object.freeze({
+        skyColor: new THREE.Color(0x24384b),
+        fogColor: new THREE.Color(0x182432),
+        fogDensity: Math.max(0.0051, this.bootIntroDayFogDensity * 2.05),
+        fogNear: Math.max(28, this.bootIntroDayFogNear * 0.22),
+        fogFar: Math.max(148, this.bootIntroDayFogFar * 0.46),
+        sunDirection: new THREE.Vector3(0.22, -0.05, 0.97).normalize(),
+        sunIntensity: 0.08,
+        sunColor: new THREE.Color(0x9ab1ce),
+        hemiSkyColor: new THREE.Color(0x1d2a39),
+        hemiGroundColor: new THREE.Color(0x0a0f15),
+        hemiIntensity: 0.16,
+        fillColor: new THREE.Color(0x334556),
+        fillIntensity: 0.09,
+        exposure: this.rendererBaseExposure * 0.42,
+        cloudTint: new THREE.Color(0x647d95),
+        cloudTintMix: 0.38,
+        cloudOpacityScale: 0.34,
+        cloudBrightness: 0.5,
+        cityBaseOpacity: 0.12,
+        cityBaseBrightness: 0.16,
+        cityAtmosphereBlend: 0.62,
+        cityGlowOpacity: 0.04,
+        cityGlowBrightness: 0.34,
+        cityDistrictBrightness: 0.16,
+        cityDistrictDetail: 0.08,
+        cityDistrictAtmosphereBlend: 0.66,
+        nearBrightness: 0.42,
+        nearAtmosphereBlend: 0.4,
+        nearEmissiveScale: 0.36,
+        midBrightness: 0.2,
+        midAtmosphereBlend: 0.6,
+        midEmissiveScale: 0.14,
+        airHazeColor: new THREE.Color(0x566675),
+        airHazeOpacity: 0.24,
+        airHazeBrightness: 0.44,
+        cameraLookYOffset: 16,
+        cameraLookLateralOffset: -0.74,
+        cameraLookForwardOffset: 10,
+        cameraPitch: -0.064,
+        headline: "새벽 전조",
+        subtitle: "저채도 안개층이 조금씩 풀리며 원경이 살아납니다."
+      }),
+      dawnReveal: Object.freeze({
+        skyColor: new THREE.Color(0x738ca6),
+        fogColor: new THREE.Color(0x61788f),
+        fogDensity: Math.max(0.0031, this.bootIntroDayFogDensity * 1.32),
+        fogNear: Math.max(56, this.bootIntroDayFogNear * 0.5),
+        fogFar: Math.max(248, this.bootIntroDayFogFar * 0.72),
+        sunDirection: new THREE.Vector3(0.28, 0.09, 0.95).normalize(),
+        sunIntensity: 0.46,
+        sunColor: new THREE.Color(0xffd7b0),
+        hemiSkyColor: new THREE.Color(0x8ea4bb),
+        hemiGroundColor: new THREE.Color(0x475767),
+        hemiIntensity: 0.48,
+        fillColor: new THREE.Color(0xc4d6e7),
+        fillIntensity: 0.18,
+        exposure: this.rendererBaseExposure * 0.76,
+        cloudTint: new THREE.Color(0xd7e5f0),
+        cloudTintMix: 0.16,
+        cloudOpacityScale: 0.78,
+        cloudBrightness: 0.88,
+        cityBaseOpacity: 0.56,
+        cityBaseBrightness: 0.62,
+        cityAtmosphereBlend: 0.22,
+        cityGlowOpacity: 0.42,
+        cityGlowBrightness: 0.7,
+        cityDistrictBrightness: 0.54,
+        cityDistrictDetail: 0.56,
+        cityDistrictAtmosphereBlend: 0.24,
+        nearBrightness: 0.82,
+        nearAtmosphereBlend: 0.12,
+        nearEmissiveScale: 0.74,
+        midBrightness: 0.58,
+        midAtmosphereBlend: 0.24,
+        midEmissiveScale: 0.48,
+        airHazeColor: new THREE.Color(0xa7b8c4),
+        airHazeOpacity: 0.1,
+        airHazeBrightness: 0.72,
+        cameraLookYOffset: 11,
+        cameraLookLateralOffset: -0.28,
+        cameraLookForwardOffset: 13,
+        cameraPitch: -0.052,
+        headline: "도시 노출",
+        subtitle: "안개 뒤에 있던 시뮬라크 시티가 빛을 받기 시작합니다."
+      }),
+      day: Object.freeze({
+        skyColor: this.bootIntroSkyDayColor.clone(),
+        fogColor: this.bootIntroFogDayColor.clone(),
+        fogDensity: this.bootIntroDayFogDensity,
+        fogNear: this.bootIntroDayFogNear,
+        fogFar: this.bootIntroDayFogFar,
+        sunDirection: this.bootIntroDaySunDirection.clone(),
+        sunIntensity: Number(this.worldContent?.lights?.sun?.intensity) || 0.86,
+        sunColor: this.bootIntroSunDayColor.clone(),
+        hemiSkyColor: this.bootIntroHemisphereDaySkyColor.clone(),
+        hemiGroundColor: this.bootIntroHemisphereDayGroundColor.clone(),
+        hemiIntensity: Number(this.worldContent?.lights?.hemisphere?.intensity) || 0.88,
+        fillColor: this.bootIntroFillDayColor.clone(),
+        fillIntensity: Number(this.worldContent?.lights?.fill?.intensity) || 0.26,
+        exposure: this.rendererBaseExposure,
+        cloudTint: this.bootIntroSkyDayColor.clone(),
+        cloudTintMix: 0.06,
+        cloudOpacityScale: 1,
+        cloudBrightness: 1,
+        cityBaseOpacity: 1,
+        cityBaseBrightness: 1,
+        cityAtmosphereBlend: 0,
+        cityGlowOpacity: 1,
+        cityGlowBrightness: 1,
+        cityDistrictBrightness: 1,
+        cityDistrictDetail: 1,
+        cityDistrictAtmosphereBlend: 0,
+        nearBrightness: 1,
+        nearAtmosphereBlend: 0,
+        nearEmissiveScale: 1,
+        midBrightness: 1,
+        midAtmosphereBlend: 0,
+        midEmissiveScale: 1,
+        airHazeColor: new THREE.Color(0xd6e5f1),
+        airHazeOpacity: 0,
+        airHazeBrightness: 1,
+        cameraLookYOffset: 6,
+        cameraLookLateralOffset: 0,
+        cameraLookForwardOffset: 15,
+        cameraPitch: -0.036,
+        headline: "시야 안정화",
+        subtitle: "주광 전환이 끝나고 도시 전체가 읽히기 시작합니다."
+      })
+    });
+    this.bootIntroPhaseSequence = Object.freeze([
+      Object.freeze({ id: "night", start: 0, end: 0.18, from: "night", to: "night" }),
+      Object.freeze({ id: "pre-dawn", start: 0.18, end: 0.48, from: "night", to: "preDawn" }),
+      Object.freeze({ id: "dawn-reveal", start: 0.48, end: 0.84, from: "preDawn", to: "dawnReveal" }),
+      Object.freeze({ id: "day", start: 0.84, end: 1, from: "dawnReveal", to: "day" })
+    ]);
     this.bridgeApproachSpawn = parseVec3(
       bridgeConfig?.approachSpawn,
       [0, GAME_CONSTANTS.PLAYER_HEIGHT, -98]
@@ -947,8 +1226,14 @@ export class GameRuntime {
       bridgeConfig?.spawn,
       [0, GAME_CONSTANTS.PLAYER_HEIGHT, -86]
     );
-    this.bridgeNpcPosition = parseVec3(bridgeConfig?.npcPosition, [0, 0, -82]);
+    this.bridgeNpcPosition = parseVec3(bridgeConfig?.npcPosition, [0, 0, -92]);
+    this.bridgeNpcScale = THREE.MathUtils.clamp(
+      Number(bridgeConfig?.npcScale) || 1.34,
+      0.85,
+      1.8
+    );
     this.bridgeNpcTriggerRadius = Math.max(2.5, Number(bridgeConfig?.npcTriggerRadius) || 5);
+    this.hubNpcPlacements = this.resolveHubNpcPlacements(hubFlowConfig);
     this.bridgeMirrorPosition = parseVec3(bridgeConfig?.mirrorPosition, [0, 1.72, -76]);
     this.bridgeMirrorLookSeconds = parseSeconds(bridgeConfig?.mirrorLookSeconds, 1.5, 0.4);
     this.mirrorLookClock = 0;
@@ -1000,7 +1285,7 @@ export class GameRuntime {
     this.portalPrewarmLastAt = new Map();
     this.portalPrewarmMinIntervalMs = 2 * 60 * 1000;
     this.portalPrewarmKickTimer = null;
-    this.aZonePortalFloorPosition = new THREE.Vector3(-60, 0.08, 0);
+    this.aZonePortalFloorPosition = parseVec3(portalConfig?.aZonePosition, [0, 0.08, -4]);
     this.aZonePortalRadius = Math.max(2.2, this.portalRadius * 0.88);
     this.hallPortalFloorPosition = parseVec3(portalConfig?.hallPosition, [0, 0.08, 22]);
     this.hallPortalRadius = Math.max(2.2, Number(portalConfig?.hallRadius) || this.portalRadius * 0.92);
@@ -1039,11 +1324,15 @@ export class GameRuntime {
     this.spawnPortalVeilGroup = null;
     this.spawnPortalVeilWorldZ = this.bridgeNpcPosition.z;
     this.spawnPortalVeilMaterial = null;
+    this.spawnPortalVeilCanvas = null;
+    this.spawnPortalVeilContext = null;
     this.spawnPortalVeilBaseTexture = null;
     this.spawnPortalVeilTexture = null;
     this.spawnPortalVeilVideoEl = null;
     this.spawnPortalVeilVideoTexture = null;
     this.spawnPortalVeilRevealStarted = false;
+    this.spawnPortalVeilRevealClock = 0;
+    this.spawnPortalVeilRevealDuration = 4.6;
     this.aZonePortalGroup = null;
     this.aZonePortalRing = null;
     this.aZonePortalCore = null;
@@ -1058,6 +1347,9 @@ export class GameRuntime {
     this.portalOxAnchorEntry = null;
     this.portalFpsAnchorEntry = null;
     this.portalHallAnchorEntry = null;
+    this.hallVenueAnchorEntry = null;
+    this.plazaBillboardRightAnchorEntry = null;
+    this.plazaBillboardLeftAnchorEntry = null;
     this.portalAnchorSyncTemp = new THREE.Vector3();
     this.portalBillboardCanvas = null;
     this.portalBillboardContext = null;
@@ -1081,11 +1373,17 @@ export class GameRuntime {
     this.npcTemplePortalCore = null;
     this.npcTemplePortalGlow = null;
     this.npcGreetingScreen = null;
+    this.npcGreetingPlaybackActive = false;
+    this.npcGreetingPlaybackClock = 0;
+    this.npcGreetingPlaybackDuration = 4.8;
     this.npcGreetingVideoEl = null;
     this.npcGreetingVideoTexture = null;
     this.npcGreetingPlayed = false;
     this.npcGreetingMidpointTriggered = false;
     this.npcWelcomeBubbleLabel = null;
+    this.activeNpcDialogueNpcId = "";
+    this.activeNpcDialogueNodeId = "";
+    this.activeNpcDialogueHistory = [];
     this.mirrorGateGroup = null;
     this.mirrorGatePanel = null;
     this.bridgeBoundaryMarker = null;
@@ -1186,6 +1484,7 @@ export class GameRuntime {
       lights.hemisphere.intensity
     );
     this.scene.add(hemi);
+    this.hemiLight = hemi;
 
     const sun = new THREE.DirectionalLight(sunConfig.color, sunConfig.intensity);
     sun.position.fromArray(sunConfig.position);
@@ -1204,10 +1503,15 @@ export class GameRuntime {
     sun.shadow.normalBias = sunConfig.shadowNormalBias;
     this.scene.add(sun);
     this.sunLight = sun;
+    this.bootIntroDaySunDirection.copy(sun.position).normalize();
+    this.bootIntroAtmosphereStates?.day?.sunDirection?.copy?.(this.bootIntroDaySunDirection);
+    this.sunLightBaseDistance = Math.max(1, sun.position.length());
 
     const fill = new THREE.DirectionalLight(lights.fill.color, lights.fill.intensity);
     fill.position.fromArray(lights.fill.position);
     this.scene.add(fill);
+    this.fillLight = fill;
+    this.fillLightBaseDistance = Math.max(1, fill.position.length());
 
     this.setupSky(sun.position.clone().normalize());
     this.setupCloudLayer();
@@ -1339,6 +1643,10 @@ export class GameRuntime {
     }
     this.staticWorldColliders.length = 0;
     this.movableObjects.length = 0;
+    this.cityNpcEntries.length = 0;
+    this.npcPlayerIdleClock = 0;
+    this.npcPlayerCityLiveClock = 0;
+    this.npcPlayerLastSamplePosition.copy(this.playerPosition);
     this.clearSecurityTestObjectLabels();
     this.objEditorDragging = false;
     this.clearObjEditorSelection();
@@ -1357,6 +1665,8 @@ export class GameRuntime {
       this.npcGreetingVideoTexture = null;
     }
     this.npcGreetingScreen = null;
+    this.npcGreetingPlaybackActive = false;
+    this.npcGreetingPlaybackClock = 0;
     this.npcGreetingPlayed = false;
     this.npcGreetingMidpointTriggered = false;
     if (this.npcWelcomeBubbleLabel) {
@@ -1398,6 +1708,8 @@ export class GameRuntime {
     this.spawnPortalVeilTexture = null;
     this.spawnPortalVeilVideoTexture = null;
     this.spawnPortalVeilBaseTexture = null;
+    this.spawnPortalVeilCanvas = null;
+    this.spawnPortalVeilContext = null;
     this.portalBillboardCanvas = null;
     this.portalBillboardContext = null;
     this.portalBillboardGroup = null;
@@ -1424,6 +1736,7 @@ export class GameRuntime {
     this.spawnPortalVeilMaterial = null;
     this.spawnPortalVeilWorldZ = this.bridgeNpcPosition.z;
     this.spawnPortalVeilRevealStarted = false;
+    this.spawnPortalVeilRevealClock = 0;
     this.aZonePortalGroup = null;
     this.aZonePortalRing = null;
     this.aZonePortalCore = null;
@@ -1438,6 +1751,15 @@ export class GameRuntime {
     this.portalOxAnchorEntry = null;
     this.portalFpsAnchorEntry = null;
     this.portalHallAnchorEntry = null;
+    this.hallVenueAnchorEntry = null;
+    this.plazaBillboardRightAnchorEntry = null;
+    this.plazaBillboardLeftAnchorEntry = null;
+    this.bootIntroNearMaterials.length = 0;
+    this.bootIntroMidMaterials.length = 0;
+    this.bootIntroAirHazeMaterials.length = 0;
+    this.bootIntroNearGroup = null;
+    this.bootIntroMidGroup = null;
+    this.bootIntroAirHazeGroup = null;
     this.portalCoreGlow = null;
     this.portalReplicaCoreGlow = null;
     this.npcTemplePortalCore = null;
@@ -1472,6 +1794,9 @@ export class GameRuntime {
     this.spawnPortalVeilVideoEl = null;
     this.spawnPortalVeilVideoTexture = null;
     this.spawnPortalVeilRevealStarted = false;
+    this.spawnPortalVeilRevealClock = 0;
+    this.spawnPortalVeilCanvas = null;
+    this.spawnPortalVeilContext = null;
     this.aZonePortalGroup = null;
     this.aZonePortalRing = null;
     this.aZonePortalCore = null;
@@ -1486,10 +1811,22 @@ export class GameRuntime {
     this.portalOxAnchorEntry = null;
     this.portalFpsAnchorEntry = null;
     this.portalHallAnchorEntry = null;
+    this.hallVenueAnchorEntry = null;
+    this.plazaBillboardRightAnchorEntry = null;
+    this.plazaBillboardLeftAnchorEntry = null;
+    this.bootIntroNearMaterials.length = 0;
+    this.bootIntroMidMaterials.length = 0;
+    this.bootIntroAirHazeMaterials.length = 0;
+    this.bootIntroNearGroup = null;
+    this.bootIntroMidGroup = null;
+    this.bootIntroAirHazeGroup = null;
+    this.cityNpcEntries.length = 0;
     this.npcGuideGroup = null;
     this.npcTemplePortalCore = null;
     this.npcTemplePortalGlow = null;
     this.npcGreetingScreen = null;
+    this.npcGreetingPlaybackActive = false;
+    this.npcGreetingPlaybackClock = 0;
     this.npcWelcomeBubbleLabel = null;
     this.mirrorGateGroup = null;
     this.mirrorGatePanel = null;
@@ -1522,6 +1859,8 @@ export class GameRuntime {
     } else {
       bridgeDirection.normalize();
     }
+    this.bootIntroLookForward.copy(bridgeDirection);
+    this.bootIntroLookRight.set(bridgeDirection.z, 0, -bridgeDirection.x).normalize();
 
     const bridgeYaw = Math.atan2(bridgeDirection.x, bridgeDirection.z);
     const cityPlazaCenterZ = this.citySpawn.z + 4;
@@ -1600,6 +1939,7 @@ export class GameRuntime {
     const cityTerraceWidth = this.mobileEnabled ? 116 : 132;
     const liftRearCityY = (value) => cityTerraceRise + (Number(value) || 0);
     this.addFutureCityBackdrop(group, bridgeDirection);
+    const airHazeGroup = this.createBootIntroAirHazeLayer(bridgeDirection);
 
     const plaza = new THREE.Mesh(
       new THREE.CylinderGeometry(plazaRadius, plazaRadius, 0.22, this.mobileEnabled ? 26 : 42),
@@ -1739,7 +2079,7 @@ export class GameRuntime {
       B: { centerX: 60, objectEnabled: true }
     };
     // Push the skyline back so the center lane reads like an approach into the city.
-    const cityBuildingRearOffsetZ = 118;
+    const cityBuildingRearOffsetZ = 132;
     const toRearCityZ = (value) => (Number(value) || 0) + cityBuildingRearOffsetZ;
 
     const zoneABorder = new THREE.Mesh(
@@ -1914,8 +2254,8 @@ export class GameRuntime {
         repeatY: 3.2,
         roughness: 0.6,
         metalness: 0.12,
-        emissive: 0x1a3048,
-        emissiveIntensity: 0.42
+        emissive: 0x2a4b66,
+        emissiveIntensity: 0.52
       }),
       this.createCityWindowMaterial({
         style: "cyan",
@@ -1923,8 +2263,8 @@ export class GameRuntime {
         repeatY: 3.6,
         roughness: 0.58,
         metalness: 0.14,
-        emissive: 0x183a50,
-        emissiveIntensity: 0.45
+        emissive: 0x275972,
+        emissiveIntensity: 0.56
       }),
       this.createCityWindowMaterial({
         style: "amber",
@@ -1932,8 +2272,8 @@ export class GameRuntime {
         repeatY: 3.4,
         roughness: 0.62,
         metalness: 0.12,
-        emissive: 0x2a2010,
-        emissiveIntensity: 0.42
+        emissive: 0x4d3819,
+        emissiveIntensity: 0.5
       })
     ];
     for (let ti = 0; ti < towerPositions.length; ti++) {
@@ -1987,8 +2327,8 @@ export class GameRuntime {
         repeatY: 7.6,
         roughness: 0.56,
         metalness: 0.16,
-        emissive: 0x31506a,
-        emissiveIntensity: 0.62
+        emissive: 0x3b6482,
+        emissiveIntensity: 0.72
       },
       {
         style: "cyan",
@@ -1996,8 +2336,8 @@ export class GameRuntime {
         repeatY: 8.1,
         roughness: 0.54,
         metalness: 0.18,
-        emissive: 0x2a5878,
-        emissiveIntensity: 0.68
+        emissive: 0x32769a,
+        emissiveIntensity: 0.76
       },
       {
         style: "amber",
@@ -2005,8 +2345,8 @@ export class GameRuntime {
         repeatY: 7.5,
         roughness: 0.58,
         metalness: 0.14,
-        emissive: 0x5a4220,
-        emissiveIntensity: 0.58
+        emissive: 0x73552a,
+        emissiveIntensity: 0.64
       }
     ];
     const skylineMats = skylineMaterialPresets.map((preset) => this.createCityWindowMaterial(preset));
@@ -2025,11 +2365,11 @@ export class GameRuntime {
       }),
     ];
     const skylineRoofMaterial = new THREE.MeshStandardMaterial({
-      color: 0x98b3c8,
-      roughness: 0.62,
-      metalness: 0.24,
-      emissive: 0x44698e,
-      emissiveIntensity: 0.46
+      color: 0xb3c6d4,
+      roughness: 0.56,
+      metalness: 0.22,
+      emissive: 0x5a7d98,
+      emissiveIntensity: 0.32
     });
     const bridgeLocalTarget = new THREE.Vector3(
       this.bridgeApproachSpawn.x - cityGroupWorldX,
@@ -2045,7 +2385,7 @@ export class GameRuntime {
       facingDirection,
       surfaceBaseId = "",
       sharedScreenMaterials = null,
-      glowOpacity = 0.2,
+      glowOpacity = 0.12,
       parentGroup = cityGroup
     }) => {
       const boardGroup = new THREE.Group();
@@ -2067,11 +2407,11 @@ export class GameRuntime {
           boardThickness + 0.05
         ),
         new THREE.MeshStandardMaterial({
-          color: 0x10161d,
-          roughness: 0.28,
-          metalness: 0.58,
-          emissive: 0x1e3348,
-          emissiveIntensity: 0.26
+          color: 0x131b24,
+          roughness: 0.22,
+          metalness: 0.46,
+          emissive: 0x21415d,
+          emissiveIntensity: 0.18
         })
       );
       frameMesh.position.z = -0.015;
@@ -2163,7 +2503,7 @@ export class GameRuntime {
         // Keep rooftop billboards facing the front spawn approach.
         facingDirection: toBridge,
         surfaceBaseId,
-        glowOpacity: 0.22,
+        glowOpacity: 0.14,
         parentGroup
       });
       upperBoard.boardGroup.rotation.x = -0.12;
@@ -2933,6 +3273,10 @@ export class GameRuntime {
       this.chalkPickupEl?.classList.add("hidden");
     }
 
+    this.npcInteractiveEntries = [];
+    this.cityNpcEntries = [];
+    this.addConfiguredCityNpcs(cityGroup);
+
     const npcGuide = new THREE.Group();
     npcGuide.position.set(this.bridgeNpcPosition.x, 0, this.bridgeNpcPosition.z);
     const npcTempleGate = this.createKoreanTempleGateMesh({
@@ -2942,6 +3286,8 @@ export class GameRuntime {
     npcTempleGate.position.set(0, 0, 0.34);
     const spawnPortalVeil = new THREE.Group();
     spawnPortalVeil.position.set(0, this.mobileEnabled ? 8.4 : 10.8, npcTempleGate.position.z - 0.03);
+    const npcAvatarGroup = new THREE.Group();
+    npcAvatarGroup.scale.setScalar(this.bridgeNpcScale);
     const veilWidth = this.mobileEnabled ? 84 : 122;
     const veilHeight = this.mobileEnabled ? 48 : 70;
     const veilTexture = this.createSpawnPortalVeilTexture();
@@ -2952,6 +3298,8 @@ export class GameRuntime {
       metalness: 0.1,
       emissive: 0x000000,
       emissiveIntensity: 0,
+      transparent: true,
+      opacity: 0.98,
       depthWrite: true,
       side: THREE.DoubleSide
     });
@@ -3058,9 +3406,7 @@ export class GameRuntime {
     npcHoloFrame.renderOrder = 13;
     npcHoloFrame.frustumCulled = false;
 
-    npcGuide.add(
-      npcTempleGate,
-      spawnPortalVeil,
+    npcAvatarGroup.add(
       npcHoloFloor,
       npcHoloRing,
       npcHoloBeam,
@@ -3069,8 +3415,13 @@ export class GameRuntime {
       npcPad,
       npcHoloFrame
     );
+    this.attachNpcTitleLabel(npcAvatarGroup, this.getNpcDefinition("bridge_gatekeeper"), 2.58);
     const npcGreetingScreen = this.createNpcGreetingScreen();
-    npcGuide.add(npcGreetingScreen);
+    npcAvatarGroup.add(npcGreetingScreen);
+    this.registerNpcInteraction("bridge_gatekeeper", npcAvatarGroup, {
+      interactionRadius: this.bridgeNpcTriggerRadius
+    });
+    npcGuide.add(npcTempleGate, spawnPortalVeil, npcAvatarGroup);
     this.npcWelcomeBubbleLabel = null;
 
     const mirrorGate = new THREE.Group();
@@ -3193,12 +3544,10 @@ export class GameRuntime {
 
     const aZonePortalRadius = Math.max(2.4, Number(this.aZonePortalRadius) || this.portalRadius * 0.88);
     const aZonePortalGroup = new THREE.Group();
-    const aZonePortalLocalX = cityZoneConfig.A.centerX;
-    const aZonePortalLocalZ = 0;
     aZonePortalGroup.position.set(
-      cityGroup.position.x + aZonePortalLocalX,
+      this.aZonePortalFloorPosition.x,
       0,
-      cityGroup.position.z + aZonePortalLocalZ
+      this.aZonePortalFloorPosition.z
     );
     this.aZonePortalFloorPosition.set(
       aZonePortalGroup.position.x,
@@ -3404,41 +3753,45 @@ export class GameRuntime {
     });
     hallPortalGroup.add(hallPortalBillboard);
 
-    // Keep the old concert hall mesh parked and hidden so the center axis stays open.
-    const hallVenueCenter = new THREE.Vector3(0, -220, 0);
+    // Bring the hall facade back into the live map and park it behind the hall portal.
+    const hallVenueCenter = new THREE.Vector3(
+      this.hallPortalFloorPosition.x,
+      0,
+      this.hallPortalFloorPosition.z - 23
+    );
     const hallVenueGroup = new THREE.Group();
     hallVenueGroup.position.copy(hallVenueCenter);
-    hallVenueGroup.visible = HALL_VENUE_BACKDROP_ENABLED;
+    hallVenueGroup.visible = true;
 
     const hallVenueWallMat = new THREE.MeshStandardMaterial({
-      color: 0x3e4554,
-      roughness: 0.7,
-      metalness: 0.12,
-      emissive: 0x1f2a3b,
-      emissiveIntensity: 0.12
+      color: 0x697480,
+      roughness: 0.62,
+      metalness: 0.1,
+      emissive: 0x344556,
+      emissiveIntensity: 0.14
     });
     const hallVenueRoofMat = new THREE.MeshStandardMaterial({
-      color: 0x7f4567,
-      roughness: 0.42,
-      metalness: 0.18,
-      emissive: 0x3d2136,
-      emissiveIntensity: 0.2
+      color: 0x8b7580,
+      roughness: 0.48,
+      metalness: 0.14,
+      emissive: 0x4e3942,
+      emissiveIntensity: 0.15
     });
     const hallVenueTrimMat = new THREE.MeshStandardMaterial({
-      color: 0x8998ad,
-      roughness: 0.48,
-      metalness: 0.26,
-      emissive: 0x364961,
-      emissiveIntensity: 0.18
+      color: 0xafb8c3,
+      roughness: 0.4,
+      metalness: 0.22,
+      emissive: 0x5a6d80,
+      emissiveIntensity: 0.12
     });
     const hallVenueGlassMat = new THREE.MeshStandardMaterial({
-      color: 0x7fd9ff,
-      roughness: 0.18,
-      metalness: 0.34,
-      emissive: 0x2f97be,
-      emissiveIntensity: 0.3,
+      color: 0xb6ebff,
+      roughness: 0.12,
+      metalness: 0.26,
+      emissive: 0x58b8d7,
+      emissiveIntensity: 0.22,
       transparent: true,
-      opacity: 0.72
+      opacity: 0.68
     });
 
     const hallVenueBase = new THREE.Mesh(
@@ -3496,9 +3849,10 @@ export class GameRuntime {
     const hallVenueSign = new THREE.Mesh(
       new THREE.PlaneGeometry(9.8, 2.1),
       new THREE.MeshBasicMaterial({
-        color: 0xffd1f0,
+        color: 0xf2e7eb,
         transparent: true,
-        opacity: 0.78,
+        opacity: 0.9,
+        toneMapped: false,
         side: THREE.DoubleSide
       })
     );
@@ -3535,7 +3889,7 @@ export class GameRuntime {
         maxY
       );
     };
-    if (HALL_VENUE_BACKDROP_ENABLED) {
+    if (HALL_VENUE_COLLIDERS_ENABLED) {
       registerHallVenueCollider(0, 2.2, 24.8, 18.2, 0, 17);
       registerHallVenueCollider(-14.2, 0.8, 7.4, 12.4, 0, 13);
       registerHallVenueCollider(14.2, 0.8, 7.4, 12.4, 0, 13);
@@ -3574,19 +3928,33 @@ export class GameRuntime {
       portalGroup,
       PORTAL_MOVABLE_IDS.ox,
       oxPortalAnchorColliderIndex,
-      { disableColliderSync: true, editorLocked: true }
+      { disableColliderSync: true, editorLocked: false }
     );
     const fpsPortalAnchorEntry = this.registerMovableObject(
       aZonePortalGroup,
       PORTAL_MOVABLE_IDS.fps,
       fpsPortalAnchorColliderIndex,
-      { disableColliderSync: true, editorLocked: true }
+      { disableColliderSync: true, editorLocked: false }
     );
     const hallPortalAnchorEntry = this.registerMovableObject(
       hallPortalGroup,
       PORTAL_MOVABLE_IDS.hall,
       hallPortalAnchorColliderIndex,
-      { disableColliderSync: true, editorLocked: true }
+      { disableColliderSync: true, editorLocked: false }
+    );
+    const hallVenueAnchorColliderIndex = this.registerStaticWorldBoxCollider(
+      hallVenueGroup.position.x,
+      hallVenueGroup.position.z,
+      0.2,
+      0.2,
+      portalAnchorColliderY,
+      portalAnchorColliderMaxY
+    );
+    const hallVenueAnchorEntry = this.registerMovableObject(
+      hallVenueGroup,
+      HALL_VENUE_MOVABLE_ID,
+      hallVenueAnchorColliderIndex,
+      { disableColliderSync: true, editorLocked: false }
     );
 
     this.hubFlowGroup = group;
@@ -3603,6 +3971,7 @@ export class GameRuntime {
     this.spawnPortalVeilMaterial = veilMaterial;
     this.spawnPortalVeilWorldZ = npcGuide.position.z + npcTempleGate.position.z;
     this.spawnPortalVeilRevealStarted = false;
+    this.spawnPortalVeilRevealClock = 0;
     this.npcGreetingMidpointTriggered = false;
     this.aZonePortalGroup = aZonePortalGroup;
     this.aZonePortalRing = aZonePortalRing;
@@ -3618,7 +3987,11 @@ export class GameRuntime {
     this.portalOxAnchorEntry = oxPortalAnchorEntry;
     this.portalFpsAnchorEntry = fpsPortalAnchorEntry;
     this.portalHallAnchorEntry = hallPortalAnchorEntry;
+    this.hallVenueAnchorEntry = hallVenueAnchorEntry;
     this.npcGuideGroup = npcGuide;
+    this.bootIntroNearGroup = bridgeGroup;
+    this.bootIntroMidGroup = cityGroup;
+    this.bootIntroAirHazeGroup = airHazeGroup;
     this.mirrorGateGroup = mirrorGate;
     this.mirrorGatePanel = null;
     this.bridgeBoundaryMarker = null;
@@ -3641,7 +4014,22 @@ export class GameRuntime {
       hubChildren.push(aZonePortalGroup);
     }
     hubChildren.push(hallVenueGroup);
+    if (airHazeGroup) {
+      hubChildren.push(airHazeGroup);
+    }
     group.add(...hubChildren);
+    this.registerBootIntroDepthMeshMaterials(bridgeGroup, "near");
+    this.registerBootIntroDepthMeshMaterials(npcGuide, "near");
+    this.registerBootIntroDepthMeshMaterials(cityGroup, "mid");
+    this.registerBootIntroDepthMeshMaterials(mirrorGate, "mid");
+    this.registerBootIntroDepthMeshMaterials(bridgeFarEndTempleGate, "mid");
+    this.registerBootIntroDepthMeshMaterials(cityEntryTempleGate, "mid");
+    this.registerBootIntroDepthMeshMaterials(portalGroup, "mid");
+    this.registerBootIntroDepthMeshMaterials(hallPortalGroup, "mid");
+    this.registerBootIntroDepthMeshMaterials(hallVenueGroup, "mid");
+    if (A_ZONE_PORTAL_ENABLED) {
+      this.registerBootIntroDepthMeshMaterials(aZonePortalGroup, "mid");
+    }
     this.scene.add(group);
     this.loadSavedObjectPositions();
     this.syncPortalAnchorsFromMovableObjects({ force: true });
@@ -3851,9 +4239,29 @@ export class GameRuntime {
     }
 
     const maxAnisotropy = this.renderer?.capabilities?.getMaxAnisotropy?.() ?? 1;
-    const adTexture = this.textureLoader.load(AD_BILLBOARD_IMAGE_URL);
+    const adTexture = this.textureLoader.load(AD_BILLBOARD_IMAGE_URL, (loadedTexture) => {
+      const width = Math.trunc(Number(loadedTexture?.image?.width) || 0);
+      const height = Math.trunc(Number(loadedTexture?.image?.height) || 0);
+      const canUseMipmaps =
+        Boolean(this.renderer?.capabilities?.isWebGL2) ||
+        (THREE.MathUtils.isPowerOfTwo(width) && THREE.MathUtils.isPowerOfTwo(height));
+      loadedTexture.generateMipmaps = canUseMipmaps;
+      loadedTexture.minFilter = canUseMipmaps
+        ? THREE.LinearMipmapLinearFilter
+        : THREE.LinearFilter;
+      loadedTexture.magFilter = THREE.LinearFilter;
+      loadedTexture.anisotropy = this.mobileEnabled
+        ? Math.min(4, maxAnisotropy)
+        : Math.min(16, maxAnisotropy);
+      loadedTexture.needsUpdate = true;
+    });
     adTexture.colorSpace = THREE.SRGBColorSpace;
-    adTexture.anisotropy = this.mobileEnabled ? Math.min(2, maxAnisotropy) : Math.min(8, maxAnisotropy);
+    adTexture.wrapS = THREE.ClampToEdgeWrapping;
+    adTexture.wrapT = THREE.ClampToEdgeWrapping;
+    adTexture.minFilter = THREE.LinearFilter;
+    adTexture.magFilter = THREE.LinearFilter;
+    adTexture.generateMipmaps = false;
+    adTexture.anisotropy = this.mobileEnabled ? Math.min(4, maxAnisotropy) : Math.min(16, maxAnisotropy);
     this.plazaBillboardAdTexture = adTexture;
 
     const supportMaterial = new THREE.MeshStandardMaterial({
@@ -3873,7 +4281,7 @@ export class GameRuntime {
     const glowMaterial = new THREE.MeshBasicMaterial({
       color: 0x5ecbff,
       transparent: true,
-      opacity: 0.1,
+      opacity: 0.06,
       depthWrite: false,
       side: THREE.DoubleSide,
       toneMapped: false
@@ -3896,6 +4304,8 @@ export class GameRuntime {
       { x: -33.5, z: 42.5, yaw: Math.PI * 0.75 },
       { x: 33.5, z: 42.5, yaw: -Math.PI * 0.75 }
     ];
+    const billboardAnchorColliderY = -1200;
+    const billboardAnchorColliderMaxY = -1100;
 
     placements.forEach((placement, index) => {
       const board = new THREE.Group();
@@ -3936,7 +4346,22 @@ export class GameRuntime {
 
       board.add(leftColumn, rightColumn, frame, glow, screen);
       cityGroup.add(board);
+      const movableId =
+        index === 0 ? PLAZA_BILLBOARD_MOVABLE_IDS.right : PLAZA_BILLBOARD_MOVABLE_IDS.left;
+      const anchorColliderIndex = this.registerStaticWorldBoxCollider(
+        board.position.x,
+        board.position.z,
+        0.2,
+        0.2,
+        billboardAnchorColliderY,
+        billboardAnchorColliderMaxY
+      );
+      const anchorEntry = this.registerMovableObject(board, movableId, anchorColliderIndex, {
+        disableColliderSync: true,
+        editorLocked: false
+      });
       if (index === 0) {
+        this.plazaBillboardRightAnchorEntry = anchorEntry;
         this.plazaBillboardRightScreenMaterial = screenMaterial;
         this.rightBillboardSourcePosition.set(
           this.citySpawn.x + placement.x,
@@ -3944,6 +4369,7 @@ export class GameRuntime {
           this.citySpawn.z + 4 + placement.z
         );
       } else if (index === 1) {
+        this.plazaBillboardLeftAnchorEntry = anchorEntry;
         this.plazaBillboardLeftScreenMaterial = screenMaterial;
       }
     });
@@ -5763,6 +6189,12 @@ export class GameRuntime {
     if (!rootGroup) {
       return;
     }
+    this.futureCityBackdropBaseMaterials.length = 0;
+    this.futureCityBackdropGlowMaterials.length = 0;
+    this.futureCityDistrictBaseMaterials.length = 0;
+    this.futureCityDistrictGlowMaterials.length = 0;
+    this.futureCityBackdropDistrictGroup = null;
+    this.futureCityBackdropFloorGlowMaterial = null;
     const baseTexture = this.getFutureCityBackdropTexture("base");
     const glowTexture = this.getFutureCityBackdropTexture("glow");
     if (!baseTexture) {
@@ -5782,33 +6214,33 @@ export class GameRuntime {
     const spawnBase = this.bridgeApproachSpawn?.clone?.() ?? new THREE.Vector3(0, 0, -98);
     spawnBase.y = 0;
 
-    const centerDistance = this.mobileEnabled ? 228 : 248;
+    const centerDistance = this.mobileEnabled ? 258 : 292;
     const center = spawnBase.clone().addScaledVector(forward, centerDistance);
-    const skylineHeight = this.mobileEnabled ? 92 : 118;
-    const skylineY = this.mobileEnabled ? 20 : 28;
+    const skylineHeight = this.mobileEnabled ? 80 : 102;
+    const skylineY = this.mobileEnabled ? 17 : 23;
     const baseYaw = Math.atan2(forward.x, forward.z) + Math.PI;
 
     const segments = [
       {
-        width: this.mobileEnabled ? 320 : 420,
+        width: this.mobileEnabled ? 288 : 392,
         xOffset: 0,
         zOffset: 0,
         yawOffset: 0,
-        opacity: 0.88
+        opacity: 0.82
       },
       {
-        width: this.mobileEnabled ? 250 : 330,
-        xOffset: this.mobileEnabled ? -190 : -270,
-        zOffset: 18,
+        width: this.mobileEnabled ? 232 : 300,
+        xOffset: this.mobileEnabled ? -184 : -258,
+        zOffset: 24,
         yawOffset: 0.24,
-        opacity: 0.8
+        opacity: 0.72
       },
       {
-        width: this.mobileEnabled ? 250 : 330,
-        xOffset: this.mobileEnabled ? 190 : 270,
-        zOffset: 18,
+        width: this.mobileEnabled ? 232 : 300,
+        xOffset: this.mobileEnabled ? 184 : 258,
+        zOffset: 24,
         yawOffset: -0.24,
-        opacity: 0.8
+        opacity: 0.72
       }
     ];
 
@@ -5833,6 +6265,7 @@ export class GameRuntime {
           toneMapped: false
         })
       );
+      this.registerFutureCityBackdropMaterial(basePlane.material, "base");
       basePlane.position.set(segmentCenter.x, skylineY, segmentCenter.z);
       basePlane.rotation.y = baseYaw + segment.yawOffset;
       basePlane.frustumCulled = false;
@@ -5844,7 +6277,7 @@ export class GameRuntime {
           new THREE.MeshBasicMaterial({
             map: glowTexture,
             transparent: true,
-            opacity: segment.opacity * 0.72,
+            opacity: segment.opacity * 0.62,
             side: THREE.DoubleSide,
             depthWrite: false,
             blending: THREE.AdditiveBlending,
@@ -5852,6 +6285,7 @@ export class GameRuntime {
             toneMapped: false
           })
         );
+        this.registerFutureCityBackdropMaterial(glowPlane.material, "glow");
         glowPlane.position.copy(basePlane.position);
         glowPlane.position.y += 0.2;
         glowPlane.rotation.copy(basePlane.rotation);
@@ -5876,6 +6310,8 @@ export class GameRuntime {
         toneMapped: false
       })
     );
+    this.futureCityBackdropFloorGlowMaterial = floorGlow.material;
+    this.registerFutureCityBackdropMaterial(floorGlow.material, "glow");
     floorGlow.rotation.x = -Math.PI / 2;
     floorGlow.position.copy(center);
     floorGlow.position.y = 0.07;
@@ -5909,7 +6345,9 @@ export class GameRuntime {
         ? THREE.LinearMipmapLinearFilter
         : THREE.LinearFilter;
       loadedTexture.magFilter = THREE.LinearFilter;
-      loadedTexture.anisotropy = Math.min(8, this.renderer?.capabilities?.getMaxAnisotropy?.() || 1);
+      loadedTexture.anisotropy = this.mobileEnabled
+        ? Math.min(6, this.renderer?.capabilities?.getMaxAnisotropy?.() || 1)
+        : Math.min(16, this.renderer?.capabilities?.getMaxAnisotropy?.() || 1);
       loadedTexture.needsUpdate = true;
     });
     texture.colorSpace = THREE.SRGBColorSpace;
@@ -5918,25 +6356,24 @@ export class GameRuntime {
     texture.minFilter = THREE.LinearFilter;
     texture.magFilter = THREE.LinearFilter;
     texture.generateMipmaps = false;
-    texture.anisotropy = Math.min(8, this.renderer?.capabilities?.getMaxAnisotropy?.() || 1);
-    texture.needsUpdate = true;
+    texture.anisotropy = this.mobileEnabled
+      ? Math.min(6, this.renderer?.capabilities?.getMaxAnisotropy?.() || 1)
+      : Math.min(16, this.renderer?.capabilities?.getMaxAnisotropy?.() || 1);
     this.futureCityFixedBillboardTextureCache.set(normalized, texture);
     return texture;
   }
 
   createFutureCityFixedBillboardScreenMaterial(imageUrl, emissiveIntensity = 0.9) {
     const map = this.getFutureCityFixedBillboardTexture(imageUrl);
-    return new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      roughness: 0.18,
-      metalness: 0.08,
+    const brightness = THREE.MathUtils.clamp(Number(emissiveIntensity) || 0.9, 0.82, 1.16);
+    return new THREE.MeshBasicMaterial({
+      color: new THREE.Color(brightness, brightness, brightness),
       map,
-      emissive: 0xffffff,
-      emissiveMap: map,
-      emissiveIntensity: THREE.MathUtils.clamp(Number(emissiveIntensity) || 0.9, 0.24, 1.4),
+      transparent: true,
+      alphaTest: 0.02,
       polygonOffset: true,
-      polygonOffsetFactor: -1,
-      polygonOffsetUnits: -2,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -4,
       fog: false,
       toneMapped: false
     });
@@ -5971,6 +6408,60 @@ export class GameRuntime {
             return;
           }
           scene.updateMatrixWorld(true);
+          const maxAnisotropy = this.renderer?.capabilities?.getMaxAnisotropy?.() || 1;
+          const tuneMaterial = (material) => {
+            if (!material || material.userData?.emptinesCityToneAdjusted) {
+              return;
+            }
+            if (material.color?.isColor) {
+              material.color.offsetHSL(0, -0.06, 0.08);
+            }
+            if (material.emissive?.isColor) {
+              material.emissive.offsetHSL(0, -0.04, 0.04);
+            }
+            if ("roughness" in material) {
+              material.roughness = THREE.MathUtils.clamp(
+                (Number(material.roughness) || 0.58) * 0.92,
+                0.18,
+                0.92
+              );
+            }
+            if ("metalness" in material) {
+              material.metalness = THREE.MathUtils.clamp(
+                (Number(material.metalness) || 0.18) * 0.9,
+                0.02,
+                0.72
+              );
+            }
+            if ("emissiveIntensity" in material) {
+              material.emissiveIntensity = Math.max(
+                0.12,
+                Number(material.emissiveIntensity) || 0.12
+              );
+            }
+            for (const textureKey of ["map", "emissiveMap"]) {
+              const texture = material[textureKey];
+              if (!texture?.isTexture) {
+                continue;
+              }
+              const width = Math.trunc(Number(texture?.image?.width) || 0);
+              const height = Math.trunc(Number(texture?.image?.height) || 0);
+              const canUseMipmaps =
+                Boolean(this.renderer?.capabilities?.isWebGL2) ||
+                (THREE.MathUtils.isPowerOfTwo(width) && THREE.MathUtils.isPowerOfTwo(height));
+              texture.generateMipmaps = canUseMipmaps;
+              texture.minFilter = canUseMipmaps
+                ? THREE.LinearMipmapLinearFilter
+                : THREE.LinearFilter;
+              texture.magFilter = THREE.LinearFilter;
+              texture.anisotropy = this.mobileEnabled
+                ? Math.min(4, maxAnisotropy)
+                : Math.min(12, maxAnisotropy);
+              texture.needsUpdate = true;
+            }
+            material.userData.emptinesCityToneAdjusted = true;
+            material.needsUpdate = true;
+          };
           scene.traverse((child) => {
             if (!child?.isMesh) {
               return;
@@ -5979,15 +6470,10 @@ export class GameRuntime {
             child.receiveShadow = true;
             if (Array.isArray(child.material)) {
               for (const mat of child.material) {
-                if (mat && "emissiveIntensity" in mat) {
-                  mat.emissiveIntensity = Math.max(0.08, Number(mat.emissiveIntensity) || 0.08);
-                }
+                tuneMaterial(mat);
               }
-            } else if (child.material && "emissiveIntensity" in child.material) {
-              child.material.emissiveIntensity = Math.max(
-                0.08,
-                Number(child.material.emissiveIntensity) || 0.08
-              );
+            } else if (child.material) {
+              tuneMaterial(child.material);
             }
           });
           this.ossModelTemplateCache.set(normalizedFile, scene);
@@ -6059,6 +6545,12 @@ export class GameRuntime {
         -center.z * fitScale
       );
       model.updateMatrixWorld(true);
+      model.traverse((child) => {
+        if (!child?.isMesh) {
+          return;
+        }
+        this.registerFutureCityDistrictMeshMaterials(child, "base");
+      });
       wrapper.add(model);
       parentGroup.add(wrapper);
     });
@@ -6076,8 +6568,9 @@ export class GameRuntime {
 
     const districtGroup = new THREE.Group();
     districtGroup.name = "future_city_billboard_district";
+    this.futureCityBackdropDistrictGroup = districtGroup;
     const toPlayer = forward.clone().multiplyScalar(-1).normalize();
-    const baseCenter = center.clone().addScaledVector(forward, this.mobileEnabled ? -46 : -40);
+    const baseCenter = center.clone().addScaledVector(forward, this.mobileEnabled ? -54 : -48);
     const topBillboardForwardOffset = this.mobileEnabled ? 9 : 14;
     const styleCycle = ["cyan", "slate", "amber"];
     const spawnFacingTarget = this.bridgeApproachSpawn?.clone?.() ?? new THREE.Vector3(0, 0, -98);
@@ -6159,6 +6652,7 @@ export class GameRuntime {
       podium.position.set(anchor.x, podiumHeight * 0.5, anchor.z);
       podium.castShadow = false;
       podium.receiveShadow = true;
+      this.registerFutureCityDistrictMeshMaterials(podium, "base");
       districtGroup.add(podium);
 
       const podiumCornice = new THREE.Mesh(
@@ -6174,6 +6668,7 @@ export class GameRuntime {
       podiumCornice.position.set(anchor.x, podiumHeight + 0.12, anchor.z);
       podiumCornice.castShadow = false;
       podiumCornice.receiveShadow = true;
+      this.registerFutureCityDistrictMeshMaterials(podiumCornice, "base");
       districtGroup.add(podiumCornice);
 
       const shaft = new THREE.Mesh(
@@ -6183,6 +6678,7 @@ export class GameRuntime {
       shaft.position.set(anchor.x, podiumHeight + shaftHeight * 0.5, anchor.z);
       shaft.castShadow = false;
       shaft.receiveShadow = true;
+      this.registerFutureCityDistrictMeshMaterials(shaft, "base");
       districtGroup.add(shaft);
 
       const crown = new THREE.Mesh(
@@ -6192,6 +6688,7 @@ export class GameRuntime {
       crown.position.set(anchor.x, podiumHeight + shaftHeight + crownHeight * 0.5 + 0.12, anchor.z);
       crown.castShadow = false;
       crown.receiveShadow = true;
+      this.registerFutureCityDistrictMeshMaterials(crown, "base");
       districtGroup.add(crown);
 
       const edgeLightMaterial = new THREE.MeshBasicMaterial({
@@ -6215,6 +6712,7 @@ export class GameRuntime {
           );
           edge.position.set(anchor.x + sx * edgeOffsetX, edgeY, anchor.z + sz * edgeOffsetZ);
           edge.renderOrder = 6;
+          this.registerFutureCityDistrictMeshMaterials(edge, "glow");
           districtGroup.add(edge);
         }
       }
@@ -6257,18 +6755,20 @@ export class GameRuntime {
       topFrame.position.z = -0.02;
       topFrame.castShadow = false;
       topFrame.receiveShadow = true;
+      this.registerFutureCityDistrictMeshMaterials(topFrame, "base");
       const topScreen = new THREE.Mesh(
         new THREE.PlaneGeometry(topBoardWidth, topBoardHeight),
         this.createFutureCityFixedBillboardScreenMaterial(imageUrl, 0.98)
       );
       topScreen.position.z = topBoardDepth * 0.5 + 0.06;
       topScreen.renderOrder = 7;
+      this.registerFutureCityDistrictMeshMaterials(topScreen, "glow");
       const topGlow = new THREE.Mesh(
         new THREE.PlaneGeometry(topBoardWidth + 0.36, topBoardHeight + 0.36),
         new THREE.MeshBasicMaterial({
           color: 0x67f3ff,
           transparent: true,
-          opacity: 0.2,
+          opacity: 0.14,
           side: THREE.DoubleSide,
           depthTest: false,
           depthWrite: false,
@@ -6279,6 +6779,7 @@ export class GameRuntime {
       );
       topGlow.position.z = topBoardDepth * 0.5 + 0.09;
       topGlow.renderOrder = 8;
+      this.registerFutureCityDistrictMeshMaterials(topGlow, "glow");
       topBoardGroup.add(topFrame, topScreen, topGlow);
       districtGroup.add(topBoardGroup);
     }
@@ -6315,16 +6816,16 @@ export class GameRuntime {
 
     if (targetLayer === "base") {
       const skyGlow = context.createLinearGradient(0, Math.round(height * 0.4), 0, height);
-      skyGlow.addColorStop(0, "rgba(24, 54, 86, 0)");
-      skyGlow.addColorStop(0.56, "rgba(11, 24, 42, 0.34)");
-      skyGlow.addColorStop(1, "rgba(5, 12, 24, 0.78)");
+      skyGlow.addColorStop(0, "rgba(30, 66, 102, 0)");
+      skyGlow.addColorStop(0.56, "rgba(18, 36, 58, 0.28)");
+      skyGlow.addColorStop(1, "rgba(10, 18, 30, 0.62)");
       context.fillStyle = skyGlow;
       context.fillRect(0, 0, width, height);
     } else {
       const haze = context.createLinearGradient(0, Math.round(height * 0.46), 0, height);
       haze.addColorStop(0, "rgba(35, 198, 255, 0)");
-      haze.addColorStop(0.7, "rgba(27, 160, 224, 0.2)");
-      haze.addColorStop(1, "rgba(33, 255, 187, 0.34)");
+      haze.addColorStop(0.7, "rgba(27, 160, 224, 0.16)");
+      haze.addColorStop(1, "rgba(33, 255, 187, 0.28)");
       context.fillStyle = haze;
       context.fillRect(0, 0, width, height);
     }
@@ -6340,19 +6841,22 @@ export class GameRuntime {
       const h = Math.max(36, Math.round(towerHeight));
       if (targetLayer === "base") {
         const towerGradient = context.createLinearGradient(x, y, x, y + h);
-        towerGradient.addColorStop(0, "rgba(41, 64, 92, 0.86)");
-        towerGradient.addColorStop(1, "rgba(11, 18, 34, 0.98)");
+        towerGradient.addColorStop(0, "rgba(58, 86, 116, 0.82)");
+        towerGradient.addColorStop(1, "rgba(18, 28, 42, 0.9)");
         context.fillStyle = towerGradient;
         context.fillRect(x, y, w, h);
 
-        context.fillStyle = "rgba(146, 203, 255, 0.1)";
+        context.fillStyle = "rgba(182, 223, 255, 0.12)";
         context.fillRect(x + 1, y + 1, Math.max(2, Math.round(w * 0.14)), h - 2);
       }
 
       const windowStepX = this.mobileEnabled ? 7 : 8;
-      const windowStepY = this.mobileEnabled ? 8 : 9;
+      const windowStepY = this.mobileEnabled ? 9 : 10;
       const windowWidth = this.mobileEnabled ? 2 : 3;
-      const lightThreshold = targetLayer === "base" ? 0.86 : 0.78;
+      const windowHeight = targetLayer === "base"
+        ? (this.mobileEnabled ? 3 : 4)
+        : (this.mobileEnabled ? 4 : 5);
+      const lightThreshold = targetLayer === "base" ? 0.84 : 0.76;
       for (let wx = x + 4; wx < x + w - 4; wx += windowStepX) {
         for (let wy = y + 5; wy < y + h - 4; wy += windowStepY) {
           const n = rand(wx * 0.061, wy * 0.037, index * 0.17);
@@ -6365,7 +6869,7 @@ export class GameRuntime {
           context.fillStyle = targetLayer === "base"
             ? `rgba(164, 220, 255, ${alpha.toFixed(3)})`
             : `rgba(112, 255, 214, ${alpha.toFixed(3)})`;
-          context.fillRect(wx, wy, windowWidth, 2);
+          context.fillRect(wx, wy, windowWidth, windowHeight);
         }
       }
 
@@ -6404,8 +6908,8 @@ export class GameRuntime {
 
     const horizonFog = context.createLinearGradient(0, horizonY - 20, 0, height);
     horizonFog.addColorStop(0, "rgba(80, 198, 255, 0)");
-    horizonFog.addColorStop(0.62, targetLayer === "base" ? "rgba(22, 44, 66, 0.32)" : "rgba(53, 210, 255, 0.18)");
-    horizonFog.addColorStop(1, targetLayer === "base" ? "rgba(8, 15, 26, 0.66)" : "rgba(27, 245, 169, 0.22)");
+    horizonFog.addColorStop(0.62, targetLayer === "base" ? "rgba(28, 52, 76, 0.24)" : "rgba(53, 210, 255, 0.14)");
+    horizonFog.addColorStop(1, targetLayer === "base" ? "rgba(12, 20, 32, 0.5)" : "rgba(27, 245, 169, 0.18)");
     context.fillStyle = horizonFog;
     context.fillRect(0, horizonY - 20, width, height - horizonY + 20);
 
@@ -6413,9 +6917,14 @@ export class GameRuntime {
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.wrapS = THREE.ClampToEdgeWrapping;
     texture.wrapT = THREE.ClampToEdgeWrapping;
-    texture.minFilter = THREE.LinearFilter;
+    texture.minFilter = this.renderer?.capabilities?.isWebGL2
+      ? THREE.LinearMipmapLinearFilter
+      : THREE.LinearFilter;
     texture.magFilter = THREE.LinearFilter;
-    texture.anisotropy = Math.min(8, this.renderer?.capabilities?.getMaxAnisotropy?.() || 1);
+    texture.generateMipmaps = Boolean(this.renderer?.capabilities?.isWebGL2);
+    texture.anisotropy = this.mobileEnabled
+      ? Math.min(4, this.renderer?.capabilities?.getMaxAnisotropy?.() || 1)
+      : Math.min(12, this.renderer?.capabilities?.getMaxAnisotropy?.() || 1);
     texture.needsUpdate = true;
     this.futureCityBackdropTextureCache.set(cacheKey, texture);
     return texture;
@@ -6425,31 +6934,31 @@ export class GameRuntime {
     const key = String(style ?? "").trim().toLowerCase();
     if (key === "cyan") {
       return {
-        wall: "#4c6277",
-        mullion: "#6d869d",
-        glassDark: "#28506f",
-        glassMid: "#3d76a1",
-        glassLight: "#8ce4ff",
-        reflection: "rgba(220, 246, 255, 0.32)"
+        wall: "#60798d",
+        mullion: "#84a0b7",
+        glassDark: "#356484",
+        glassMid: "#4f88b2",
+        glassLight: "#a6efff",
+        reflection: "rgba(232, 249, 255, 0.34)"
       };
     }
     if (key === "amber") {
       return {
-        wall: "#635d55",
-        mullion: "#847c72",
-        glassDark: "#403c31",
-        glassMid: "#675a4a",
-        glassLight: "#f0ca7a",
-        reflection: "rgba(255, 244, 214, 0.3)"
+        wall: "#776e63",
+        mullion: "#9a9083",
+        glassDark: "#52483b",
+        glassMid: "#7d6853",
+        glassLight: "#f6d88f",
+        reflection: "rgba(255, 247, 220, 0.32)"
       };
     }
     return {
-      wall: "#596d80",
-      mullion: "#7b98ae",
-      glassDark: "#324d65",
-      glassMid: "#4d7593",
-      glassLight: "#cae6ff",
-      reflection: "rgba(224, 244, 255, 0.34)"
+      wall: "#687d90",
+      mullion: "#8ea9bc",
+      glassDark: "#3b5c73",
+      glassMid: "#5f85a3",
+      glassLight: "#d7ecff",
+      reflection: "rgba(231, 246, 255, 0.36)"
     };
   }
 
@@ -6482,11 +6991,11 @@ export class GameRuntime {
     context.fillRect(0, 0, canvas.width, canvas.height);
 
     const cols = 7;
-    const rows = 14;
+    const rows = 12;
     const marginX = 14;
-    const marginY = 8;
+    const marginY = 10;
     const gapX = 5;
-    const gapY = 4;
+    const gapY = 6;
     const innerWidth = canvas.width - marginX * 2;
     const innerHeight = canvas.height - marginY * 2;
     const windowWidth = Math.max(6, Math.floor((innerWidth - gapX * (cols - 1)) / cols));
@@ -6507,14 +7016,14 @@ export class GameRuntime {
     for (let row = 0; row < rows; row += 1) {
       const rowY = marginY + row * (windowHeight + gapY);
       if (row % 4 === 0) {
-        context.fillStyle = "rgba(134, 164, 196, 0.06)";
+        context.fillStyle = "rgba(164, 194, 220, 0.07)";
         context.fillRect(marginX, Math.max(marginY, rowY - 1), innerWidth, 2);
       }
       for (let col = 0; col < cols; col += 1) {
         const x = marginX + col * (windowWidth + gapX);
         const y = rowY;
         const n = pseudoRandom(col, row, safeRepeatX + safeRepeatY);
-        const litThreshold = row % 3 === 0 ? 0.78 : 0.84;
+        const litThreshold = row % 3 === 0 ? 0.74 : 0.81;
         const lit = n > litThreshold;
         let fillColor = palette.glassDark;
         if (lit) {
@@ -6534,7 +7043,7 @@ export class GameRuntime {
           Math.max(1, Math.floor(windowHeight * 0.14))
         );
 
-        context.fillStyle = "rgba(0, 0, 0, 0.08)";
+        context.fillStyle = "rgba(0, 0, 0, 0.06)";
         context.fillRect(x, y + windowHeight - 1, windowWidth, 1);
       }
     }
@@ -6544,7 +7053,12 @@ export class GameRuntime {
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
     texture.repeat.set(safeRepeatX, safeRepeatY);
-    texture.anisotropy = Math.min(8, this.renderer?.capabilities?.getMaxAnisotropy?.() || 1);
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.generateMipmaps = true;
+    texture.anisotropy = this.mobileEnabled
+      ? Math.min(4, this.renderer?.capabilities?.getMaxAnisotropy?.() || 1)
+      : Math.min(12, this.renderer?.capabilities?.getMaxAnisotropy?.() || 1);
     texture.needsUpdate = true;
     this.cityWindowTextureCache.set(cacheKey, texture);
     return texture;
@@ -6583,56 +7097,65 @@ export class GameRuntime {
     }
 
     const gradient = context.createLinearGradient(0, 0, canvas.width, canvas.height);
-    gradient.addColorStop(0, "#061420");
-    gradient.addColorStop(0.42, "#0d2b43");
-    gradient.addColorStop(1, "#1d516f");
+    gradient.addColorStop(0, "#0d2334");
+    gradient.addColorStop(0.42, "#174564");
+    gradient.addColorStop(1, "#3a88af");
     context.fillStyle = gradient;
     context.fillRect(0, 0, canvas.width, canvas.height);
 
-    context.fillStyle = "rgba(58, 193, 255, 0.22)";
+    context.fillStyle = "rgba(58, 193, 255, 0.16)";
     for (let y = 0; y < canvas.height; y += 8) {
-      context.fillRect(0, y, canvas.width, 3);
+      context.fillRect(0, y, canvas.width, 2);
     }
 
-    context.strokeStyle = "rgba(140, 231, 255, 0.28)";
-    context.lineWidth = 2;
+    context.fillStyle = "rgba(7, 17, 24, 0.22)";
+    context.fillRect(54, 54, 450, 146);
+    context.fillRect(54, 282, 356, 92);
+
+    context.strokeStyle = "rgba(214, 249, 255, 0.4)";
+    context.lineWidth = 3;
     context.strokeRect(34, 34, canvas.width - 68, canvas.height - 68);
 
-    context.fillStyle = "rgba(36, 227, 153, 0.18)";
-    context.fillRect(72, 84, 380, 96);
-    context.fillRect(72, 304, 300, 64);
+    context.fillStyle = "rgba(36, 227, 153, 0.16)";
+    context.fillRect(72, 84, 392, 102);
+    context.fillRect(72, 304, 316, 68);
 
-    context.fillStyle = "#d8f7ff";
+    context.fillStyle = "#eefcff";
     context.font = "700 72px sans-serif";
     context.fillText("EMPTINES", 84, 160);
     context.font = "700 56px sans-serif";
-    context.fillStyle = "#70ffcb";
+    context.fillStyle = "#8dffd7";
     context.fillText("LIVE SCREEN", 84, 362);
 
     context.font = "500 34px sans-serif";
-    context.fillStyle = "rgba(225, 248, 255, 0.95)";
+    context.fillStyle = "rgba(238, 250, 255, 0.98)";
     context.fillText("DRAW YOUR AD", 84, 236);
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.wrapS = THREE.ClampToEdgeWrapping;
     texture.wrapT = THREE.ClampToEdgeWrapping;
-    texture.minFilter = THREE.LinearFilter;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
     texture.magFilter = THREE.LinearFilter;
-    texture.generateMipmaps = false;
+    texture.generateMipmaps = true;
+    texture.anisotropy = this.mobileEnabled
+      ? Math.min(4, this.renderer?.capabilities?.getMaxAnisotropy?.() || 1)
+      : Math.min(16, this.renderer?.capabilities?.getMaxAnisotropy?.() || 1);
     texture.needsUpdate = true;
     this.cityAdBillboardTexture = texture;
     return texture;
   }
 
   createCityAdBillboardMaterial() {
+    const map = this.getCityAdBillboardTexture();
     return new THREE.MeshStandardMaterial({
       color: 0xffffff,
-      roughness: 0.26,
-      metalness: 0.28,
-      emissive: 0x1d4b70,
-      emissiveIntensity: 0.36,
-      map: this.getCityAdBillboardTexture()
+      roughness: 0.22,
+      metalness: 0.2,
+      emissive: 0x2d6d94,
+      emissiveMap: map,
+      emissiveIntensity: 0.28,
+      map
     });
   }
 
@@ -8099,18 +8622,31 @@ export class GameRuntime {
     if (!Number.isFinite(step) || Math.abs(step) < 0.0001) {
       return;
     }
-    const nextScale = THREE.MathUtils.clamp(
-      (Number(target.scale) || 1) + step,
+    const currentScale = THREE.MathUtils.clamp(Number(target.scale) || 1, PROMO_MIN_SCALE, PROMO_MAX_SCALE);
+    const currentScaleY = THREE.MathUtils.clamp(
+      Number(target.scaleY) || currentScale,
       PROMO_MIN_SCALE,
       PROMO_MAX_SCALE
     );
-    if (Math.abs(nextScale - (Number(target.scale) || 1)) < 0.0001) {
+    const nextScale = THREE.MathUtils.clamp(
+      currentScale + step,
+      PROMO_MIN_SCALE,
+      PROMO_MAX_SCALE
+    );
+    if (Math.abs(nextScale - currentScale) < 0.0001) {
       return;
     }
+    const scaleRatio = nextScale / Math.max(0.001, currentScale);
+    const nextScaleY = THREE.MathUtils.clamp(
+      currentScaleY * scaleRatio,
+      PROMO_MIN_SCALE,
+      PROMO_MAX_SCALE
+    );
     this.requestPromoUpsert({
       placeInFront: false,
       preserveExistingStyle: true,
-      scaleOverride: nextScale
+      scaleOverride: nextScale,
+      scaleYOverride: nextScaleY
     });
   }
 
@@ -8267,7 +8803,9 @@ export class GameRuntime {
       this.surfacePainterSaveBtnEl.removeAttribute("title");
     }
     if (this.surfacePainterImportBtnEl) {
-      const canImport = this.surfacePainterOpen && this.hasHostPrivilege();
+      const canImportVisible = this.hasHostPrivilege();
+      const canImport = this.surfacePainterOpen && canImportVisible;
+      this.surfacePainterImportBtnEl.classList.toggle("hidden", !canImportVisible);
       this.surfacePainterImportBtnEl.disabled = !canImport;
       this.surfacePainterImportBtnEl.title = canImport
         ? "PNG/JPG 파일을 캔버스로 불러옵니다."
@@ -8737,7 +9275,6 @@ export class GameRuntime {
     topAdTexture.magFilter = THREE.LinearFilter;
     topAdTexture.generateMipmaps = true;
     topAdTexture.anisotropy = this.mobileEnabled ? Math.min(2, maxAnisotropy) : Math.min(8, maxAnisotropy);
-    topAdTexture.needsUpdate = true;
 
     topAdGlow = new THREE.Mesh(
       new THREE.PlaneGeometry(topAdDefaultSize.width + 0.82, topAdDefaultSize.height + 0.74),
@@ -8909,6 +9446,7 @@ export class GameRuntime {
       this.hubFlowUiEl?.classList.add("hidden");
       this.hideNicknameGate();
       this.hideNpcChoiceGate();
+      this.bootIntroCurrentPhaseId = "day";
       this.bridgeNpcPlayApproved = true;
       this.lastSafePosition.copy(this.playerPosition);
       this.ensureEntryMusicPlayback();
@@ -8928,6 +9466,7 @@ export class GameRuntime {
       this.hideNicknameGate();
       this.hideNpcChoiceGate();
       this.setMirrorGateVisible(false);
+      this.bootIntroCurrentPhaseId = "day";
       this.lastSafePosition.copy(this.playerPosition);
       this.ensureEntryMusicPlayback();
       return;
@@ -8965,6 +9504,11 @@ export class GameRuntime {
         this.hideNicknameGate();
         this.hideNpcChoiceGate();
         this.setMirrorGateVisible(false);
+        this.bootIntroCurrentPhaseId = "day";
+        this.bootIntroRevealActive = false;
+        this.bootIntroRevealElapsed = this.bootIntroRevealDuration;
+        this.bootIntroVideoPlaying = false;
+        this.applyBootIntroWorldReveal(1);
         this.lastSafePosition.copy(this.playerPosition);
         this.ensureEntryMusicPlayback();
         return;
@@ -8982,6 +9526,11 @@ export class GameRuntime {
       this.hideNicknameGate();
       this.hideNpcChoiceGate();
       this.setMirrorGateVisible(false);
+      this.bootIntroCurrentPhaseId = "day";
+      this.bootIntroRevealActive = false;
+      this.bootIntroRevealElapsed = this.bootIntroRevealDuration;
+      this.bootIntroVideoPlaying = false;
+      this.applyBootIntroWorldReveal(1);
       this.lastSafePosition.copy(this.playerPosition);
       this.ensureEntryMusicPlayback();
       return;
@@ -9005,6 +9554,11 @@ export class GameRuntime {
       this.hideNicknameGate();
       this.hideNpcChoiceGate();
       this.setMirrorGateVisible(false);
+      this.bootIntroCurrentPhaseId = "day";
+      this.bootIntroRevealActive = false;
+      this.bootIntroRevealElapsed = this.bootIntroRevealDuration;
+      this.bootIntroVideoPlaying = false;
+      this.applyBootIntroWorldReveal(1);
       this.lastSafePosition.copy(this.playerPosition);
       this.ensureEntryMusicPlayback();
       return;
@@ -9016,6 +9570,9 @@ export class GameRuntime {
     this.flowStage = "boot_intro";
     this.bootIntroPending = true;
     this.bootIntroVideoPlaying = false;
+    this.bootIntroRevealActive = false;
+    this.bootIntroRevealElapsed = 0;
+    this.bootIntroCurrentPhaseId = "night";
     this.flowClock = 0;
     this.mirrorLookClock = 0;
     this.bridgeBoundaryDingClock = 0;
@@ -9026,6 +9583,7 @@ export class GameRuntime {
     this.hideNpcChoiceGate();
     this.setMirrorGateVisible(false);
     this.setFlowHeadline("입장 확인", "임시 닉네임을 입력하고 시작하세요.");
+    this.applyBootIntroWorldReveal(0);
     this.hud.setStatus(this.getStatusText());
     this.showNicknameGate();
     this.lastSafePosition.copy(this.playerPosition);
@@ -9041,14 +9599,11 @@ export class GameRuntime {
       event.preventDefault();
       this.confirmBridgeName();
     });
-    this.npcChoiceNicknameBtnEl?.addEventListener("click", () => {
-      this.openNpcNicknameGate();
+    this.npcChoiceBackBtnEl?.addEventListener("click", () => {
+      this.navigateNpcDialogueBack();
     });
-    this.npcChoiceGuideBtnEl?.addEventListener("click", () => {
-      this.handleNpcCityGuideChoice();
-    });
-    this.npcChoicePlayBtnEl?.addEventListener("click", () => {
-      this.handleNpcPlayChoice();
+    this.npcChoiceCloseBtnEl?.addEventListener("click", () => {
+      this.hideNpcChoiceGate();
     });
   }
 
@@ -9057,23 +9612,13 @@ export class GameRuntime {
   }
 
   showNpcChoiceGate() {
-    if (!this.hubFlowEnabled || this.flowStage !== "bridge_approach" || this.bridgeNpcPlayApproved) {
+    if (!this.hubFlowEnabled || this.flowStage !== "bridge_approach") {
       return;
     }
     if (performance.now() < this.bridgeNpcChoiceCooldownUntil) {
       return;
     }
-    if (!this.npcChoiceGateEl) {
-      return;
-    }
-    if (!(this.nicknameGateEl?.classList.contains("hidden") ?? true)) {
-      return;
-    }
-    this.npcChoiceGateEl.classList.remove("hidden");
-    if (document.pointerLockElement === this.renderer.domElement) {
-      document.exitPointerLock?.();
-    }
-    this.syncMobileUiState();
+    this.openNpcDialogue("bridge_gatekeeper", "", { resetHistory: true });
   }
 
   hideNpcChoiceGate() {
@@ -9081,38 +9626,152 @@ export class GameRuntime {
       return;
     }
     this.npcChoiceGateEl.classList.add("hidden");
-    this.syncMobileUiState();
-  }
-
-  openNpcNicknameGate() {
-    if (!this.hubFlowEnabled || this.flowStage !== "bridge_approach") {
-      return;
+    this.npcChoiceGateEl.setAttribute("aria-hidden", "true");
+    this.activeNpcDialogueNpcId = "";
+    this.activeNpcDialogueNodeId = "";
+    this.activeNpcDialogueHistory = [];
+    if (this.npcChoiceActionsEl) {
+      this.npcChoiceActionsEl.replaceChildren();
     }
-    this.hideNpcChoiceGate();
-    this.setFlowHeadline("입장 확인", "임시 닉네임을 입력하세요.");
-    this.showNicknameGate();
+    this.syncMobileUiState();
     this.hud.setStatus(this.getStatusText());
   }
 
-  handleNpcCityGuideChoice() {
-    if (!this.hubFlowEnabled || this.flowStage !== "bridge_approach") {
+  navigateNpcDialogueBack() {
+    if (!this.activeNpcDialogueNpcId) {
       return;
     }
-    this.bridgeNpcChoiceCooldownUntil = performance.now() + 1400;
-    this.hideNpcChoiceGate();
-    this.playNpcGreeting();
-    this.appendChatLine("NPC", "도시 안에서는 자유 이동, 광고판 그리기, 포탈 이동을 할 수 있습니다.", "system");
-    this.appendChatLine("NPC", "신사문은 언제든 바로 통과 가능합니다.", "system");
-    this.setChatOpen(true);
+    const previousNodeId = this.activeNpcDialogueHistory.pop();
+    const definition = this.getNpcDefinition(this.activeNpcDialogueNpcId);
+    const targetNodeId = previousNodeId || definition?.dialogue?.rootNodeId || "";
+    if (!targetNodeId) {
+      this.hideNpcChoiceGate();
+      return;
+    }
+    this.openNpcDialogue(this.activeNpcDialogueNpcId, targetNodeId, { preserveHistory: true });
   }
 
-  handleNpcPlayChoice() {
-    if (!this.hubFlowEnabled || this.flowStage !== "bridge_approach") {
+  renderNpcDialogueNode(npcId, nodeId) {
+    const definition = this.getNpcDefinition(npcId);
+    const node = this.getNpcDialogueNode(npcId, nodeId);
+    if (!definition || !node || !this.npcChoiceGateEl) {
+      return false;
+    }
+
+    const memoryRecord = ensureNpcMemoryRecord(this.npcConversationStore, npcId);
+    const replyText = buildNpcReplyText(node, memoryRecord) || node.prompt;
+    recordNpcDialogueVisit(this.npcConversationStore, npcId, node);
+    saveNpcMemoryStore(this.npcConversationStore);
+
+    this.activeNpcDialogueNpcId = npcId;
+    this.activeNpcDialogueNodeId = node.id;
+
+    if (this.npcChoiceNameEl) {
+      this.npcChoiceNameEl.textContent = definition.displayName;
+    }
+    if (this.npcChoiceTitleEl) {
+      this.npcChoiceTitleEl.textContent = node.title;
+    }
+    if (this.npcChoiceCopyEl) {
+      this.npcChoiceCopyEl.textContent = replyText;
+    }
+    if (this.npcChoiceSourcesEl) {
+      const sourceText = formatNpcSources(node);
+      this.npcChoiceSourcesEl.textContent = sourceText;
+      this.npcChoiceSourcesEl.classList.toggle("hidden", !sourceText);
+    }
+    if (this.npcChoiceActionsEl) {
+      this.npcChoiceActionsEl.replaceChildren();
+      node.options.forEach((option, index) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = `${index + 1}. ${option.label}`;
+        if (option.primary) {
+          button.classList.add("npc-choice-primary");
+        }
+        button.addEventListener("click", () => {
+          this.handleNpcDialogueOptionSelection(option);
+        });
+        this.npcChoiceActionsEl.appendChild(button);
+      });
+    }
+
+    if (this.npcChoiceBackBtnEl) {
+      const canGoBack =
+        this.activeNpcDialogueHistory.length > 0 ||
+        node.id !== definition.dialogue.rootNodeId;
+      this.npcChoiceBackBtnEl.classList.toggle("hidden", !canGoBack);
+    }
+
+    if (node.chatEcho) {
+      this.appendChatLine("", `${definition.displayName}: ${replyText}`, "system");
+    }
+
+    return true;
+  }
+
+  openNpcDialogue(npcId, nodeId = "", options = {}) {
+    if (!(this.nicknameGateEl?.classList.contains("hidden") ?? true)) {
+      return;
+    }
+    const definition = this.getNpcDefinition(npcId);
+    if (!definition || !this.npcChoiceGateEl) {
+      return;
+    }
+    const targetNodeId = String(nodeId ?? "").trim() || definition.dialogue.rootNodeId;
+    const previousNodeId = this.activeNpcDialogueNodeId;
+    const preserveHistory = options.preserveHistory === true;
+    const resetHistory = options.resetHistory === true;
+
+    if (resetHistory) {
+      this.activeNpcDialogueHistory = [];
+    } else if (!preserveHistory && previousNodeId && previousNodeId !== targetNodeId) {
+      this.activeNpcDialogueHistory.push(previousNodeId);
+    }
+
+    this.npcChoiceGateEl.classList.remove("hidden");
+    this.npcChoiceGateEl.setAttribute("aria-hidden", "false");
+    if (document.pointerLockElement === this.renderer.domElement) {
+      document.exitPointerLock?.();
+    }
+
+    const rendered = this.renderNpcDialogueNode(npcId, targetNodeId);
+    if (!rendered) {
+      this.hideNpcChoiceGate();
+      return;
+    }
+    const node = this.getNpcDialogueNode(npcId, targetNodeId);
+    if (node?.playGreetingVideo && npcId === "bridge_gatekeeper") {
+      this.playNpcGreeting();
+    }
+    this.syncMobileUiState();
+    this.hud.setStatus(this.getStatusText());
+  }
+
+  handleNpcDialogueOptionSelection(option) {
+    if (!option || !this.activeNpcDialogueNpcId) {
+      return;
+    }
+    const label = String(option.label ?? "").trim();
+    if (label) {
+      this.appendChatLine(this.localPlayerName, label, "self");
+    }
+    if (option.action === "open_nickname_gate") {
+      this.hideNpcChoiceGate();
+      this.setFlowHeadline("입장 확인", "임시 닉네임을 입력하세요.");
+      this.showNicknameGate();
+      this.hud.setStatus(this.getStatusText());
+      return;
+    }
+    if (option.action === "close_dialogue" || option.closeAfterSelect) {
+      this.hideNpcChoiceGate();
+      return;
+    }
+    if (option.nextNodeId) {
+      this.openNpcDialogue(this.activeNpcDialogueNpcId, option.nextNodeId);
       return;
     }
     this.hideNpcChoiceGate();
-    this.appendChatLine("NPC", "나중에 놀아줄게. 지금은 신사문으로 바로 입장해도 돼.", "system");
-    this.setChatOpen(true);
   }
 
   showNicknameGate() {
@@ -9253,6 +9912,10 @@ export class GameRuntime {
   beginBridgeApproachFlow() {
     this.bootIntroPending = false;
     this.bootIntroVideoPlaying = false;
+    this.bootIntroRevealActive = false;
+    this.bootIntroRevealElapsed = this.bootIntroRevealDuration;
+    this.bootIntroCurrentPhaseId = "day";
+    this.applyBootIntroWorldReveal(1);
     this.flowStage = "bridge_approach";
     this.bridgeNpcPlayApproved = true;
     this.bridgeNpcPromptCooldownUntil = 0;
@@ -9273,55 +9936,72 @@ export class GameRuntime {
     this.playNpcGreeting();
   }
 
-  finishBootIntroVideo() {
-    this.bootIntroVideoPlaying = false;
-    if (this.introVideoEl) {
-      this.introVideoEl.onended = null;
-      this.introVideoEl.onerror = null;
-      this.introVideoEl.pause();
-      this.introVideoEl.removeAttribute("src");
-      this.introVideoEl.load();
-    }
-    this.introVideoOverlayEl?.classList.add("hidden");
-    this.beginBridgeApproachFlow();
-  }
-
-  playBootIntroVideo() {
+  startBootIntroWorldReveal() {
     if (!this.hubFlowEnabled) {
       this.beginBridgeApproachFlow();
       return;
     }
+    this.bootIntroVideoPlaying = true;
+    this.bootIntroRevealActive = true;
+    this.bootIntroRevealElapsed = 0;
+    this.bootIntroCurrentPhaseId = "";
+    this.keys.clear();
+    this.chalkDrawingActive = false;
+    this.chalkLastStamp = null;
+    this.setFlowHeadline("시야 동기화", "밤이 걷히며 시뮬라크 시티가 열립니다.");
+    this.applyBootIntroWorldReveal(0);
+    this.hud.setStatus(this.getStatusText());
+    this.syncGameplayUiForFlow();
+  }
 
-    if (!this.introVideoEl || !this.introVideoOverlayEl) {
-      this.beginBridgeApproachFlow();
+  finishBootIntroWorldReveal() {
+    this.bootIntroRevealActive = false;
+    this.bootIntroVideoPlaying = false;
+    this.bootIntroRevealElapsed = this.bootIntroRevealDuration;
+    this.bootIntroCurrentPhaseId = "day";
+    this.applyBootIntroWorldReveal(1);
+    this.beginBridgeApproachFlow();
+  }
+
+  updateBootIntroWorldReveal(delta) {
+    if (!this.hubFlowEnabled || this.flowStage !== "boot_intro") {
+      return;
+    }
+    if (!this.bootIntroRevealActive) {
+      this.applyBootIntroWorldReveal(0);
       return;
     }
 
-    this.bootIntroVideoPlaying = true;
-    this.introVideoOverlayEl.classList.remove("hidden");
-    const video = this.introVideoEl;
-    video.src = INTRO_BOOT_VIDEO_URL;
-    video.currentTime = 0;
-    video.playbackRate = 1.5;
-    video.muted = false;
-    video.loop = false;
-    video.onended = () => {
-      this.finishBootIntroVideo();
-    };
-    video.onerror = () => {
-      this.finishBootIntroVideo();
-    };
+    this.bootIntroRevealElapsed += Math.max(0, delta);
+    const progress = THREE.MathUtils.clamp(
+      this.bootIntroRevealElapsed / Math.max(0.001, this.bootIntroRevealDuration),
+      0,
+      1
+    );
+    const stageState = this.applyBootIntroWorldReveal(progress);
 
-    video.play().catch(() => {
-      video.muted = true;
-      video.currentTime = 0;
-      video.play().then(
-        () => {},
-        () => {
-          this.finishBootIntroVideo();
-        }
-      );
-    });
+    const lookEase = 1 - Math.exp(-Math.max(0, delta) * 1.6);
+    this.bootIntroLookTarget.copy(this.cityLookTarget);
+    this.bootIntroLookTarget.y += Number(stageState?.cameraLookYOffset) || 0;
+    this.bootIntroLookTarget.addScaledVector(
+      this.bootIntroLookRight,
+      Number(stageState?.cameraLookLateralOffset) || 0
+    );
+    this.bootIntroLookTarget.addScaledVector(
+      this.bootIntroLookForward,
+      Number(stageState?.cameraLookForwardOffset) || 0
+    );
+    const targetYaw = this.getLookYaw(this.playerPosition, this.bootIntroLookTarget);
+    this.yaw = lerpAngle(this.yaw, targetYaw, lookEase);
+    this.pitch = THREE.MathUtils.lerp(
+      this.pitch,
+      Number(stageState?.cameraPitch) || -0.045,
+      lookEase * 0.92
+    );
+
+    if (progress >= 0.999) {
+      this.finishBootIntroWorldReveal();
+    }
   }
 
   confirmBridgeName() {
@@ -9337,7 +10017,7 @@ export class GameRuntime {
       this.pendingPlayerNameSync = true;
       this.syncPlayerNameIfConnected();
       this.hideNicknameGate();
-      this.playBootIntroVideo();
+      this.startBootIntroWorldReveal();
       return;
     }
 
@@ -9500,6 +10180,14 @@ export class GameRuntime {
         this.promoRemoveInFlight;
       this.mobilePromoScaleInputEl.disabled = scaleControlDisabled;
     }
+    if (this.mobilePromoScaleYInputEl) {
+      const scaleControlDisabled =
+        !previewScaleVisible ||
+        !(this.socket && this.networkConnected) ||
+        this.promoSetInFlight ||
+        this.promoRemoveInFlight;
+      this.mobilePromoScaleYInputEl.disabled = scaleControlDisabled;
+    }
     if (!visible) {
       this.resetMobileControlInputState();
     }
@@ -9617,10 +10305,12 @@ export class GameRuntime {
     const screen = new THREE.Mesh(
       new THREE.PlaneGeometry(1.42, 2.38),
       new THREE.MeshBasicMaterial({
-        color: 0x5ecbff,
+        color: 0xa9d9ff,
         transparent: true,
-        opacity: 0.08,
-        depthWrite: false
+        opacity: 0.02,
+        depthWrite: false,
+        toneMapped: false,
+        blending: THREE.AdditiveBlending
       })
     );
     screen.position.set(0, 1.48, -0.42);
@@ -9628,6 +10318,8 @@ export class GameRuntime {
     screen.renderOrder = 12;
     screen.frustumCulled = false;
     screen.visible = false;
+    this.npcGreetingPlaybackActive = false;
+    this.npcGreetingPlaybackClock = 0;
     this.npcGreetingVideoEl = null;
     this.npcGreetingVideoTexture = null;
     this.npcGreetingScreen = screen;
@@ -9792,49 +10484,22 @@ export class GameRuntime {
     if (!this.hubFlowEnabled || this.npcGreetingPlayed || !this.npcGreetingScreen) {
       return;
     }
-
-    const introSourceUrl = String(NPC_GREETING_INTRO_VIDEO_URL ?? "").trim();
-    const followupSourceUrl = String(NPC_GREETING_FOLLOWUP_VIDEO_URL ?? "").trim();
-    if (!introSourceUrl && !followupSourceUrl) {
-      this.markNpcGreetingSeenInSession();
-      return;
-    }
-
-    if (this.npcGreetingVideoEl) {
-      return;
-    }
     this.markNpcGreetingSeenInSession();
     this.npcGreetingMidpointTriggered = false;
-
-    const playFollowup = () => {
-      if (!followupSourceUrl) {
-        return;
-      }
-      this.playNpcGreetingVideoOnScreen(followupSourceUrl, { freezeOnEnd: true });
-    };
-
-    if (!introSourceUrl) {
-      this.triggerNpcGreetingMidpointEffects();
-      playFollowup();
-      return;
+    this.npcGreetingPlaybackActive = true;
+    this.npcGreetingPlaybackClock = 0;
+    this.disposeNpcGreetingVideoPlayback();
+    const material =
+      this.npcGreetingScreen && !Array.isArray(this.npcGreetingScreen.material)
+        ? this.npcGreetingScreen.material
+        : null;
+    if (material) {
+      material.map = null;
+      material.color.setHex(0xa9d9ff);
+      material.opacity = 0.04;
+      material.needsUpdate = true;
     }
-
-    const started = this.playNpcGreetingVideoOnScreen(introSourceUrl, {
-      freezeOnEnd: false,
-      triggerHalfwayOnEnd: true,
-      onHalfway: () => {
-        this.triggerNpcGreetingMidpointEffects();
-      },
-      onEnded: () => {
-        this.triggerNpcGreetingMidpointEffects();
-        playFollowup();
-      }
-    });
-
-    if (!started) {
-      this.triggerNpcGreetingMidpointEffects();
-      playFollowup();
-    }
+    this.npcGreetingScreen.visible = true;
   }
 
   createSpawnPortalVeilTexture() {
@@ -9846,9 +10511,6 @@ export class GameRuntime {
       return null;
     }
 
-    context.fillStyle = "#000000";
-    context.fillRect(0, 0, canvas.width, canvas.height);
-
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.wrapS = THREE.ClampToEdgeWrapping;
@@ -9857,9 +10519,69 @@ export class GameRuntime {
     texture.magFilter = THREE.LinearFilter;
     texture.generateMipmaps = false;
     texture.needsUpdate = true;
+    this.spawnPortalVeilCanvas = canvas;
+    this.spawnPortalVeilContext = context;
     this.spawnPortalVeilBaseTexture = texture;
     this.spawnPortalVeilTexture = texture;
+    this.drawSpawnPortalVeilTexture(0);
     return texture;
+  }
+
+  drawSpawnPortalVeilTexture(progress = 0) {
+    const canvas = this.spawnPortalVeilCanvas;
+    const context = this.spawnPortalVeilContext;
+    if (!canvas || !context) {
+      return;
+    }
+    const width = canvas.width;
+    const height = canvas.height;
+    const reveal = THREE.MathUtils.clamp(Number(progress) || 0, 0, 1);
+    const horizonLift = THREE.MathUtils.smoothstep(reveal, 0.1, 0.9);
+    const pulse = 0.5 + 0.5 * Math.sin(this.portalPulseClock * 1.6 + reveal * Math.PI * 0.85);
+
+    context.clearRect(0, 0, width, height);
+
+    const baseGradient = context.createLinearGradient(0, 0, 0, height);
+    baseGradient.addColorStop(0, "rgba(6, 10, 18, 0.98)");
+    baseGradient.addColorStop(
+      0.55,
+      `rgba(${Math.round(12 + horizonLift * 34)}, ${Math.round(20 + horizonLift * 52)}, ${Math.round(34 + horizonLift * 76)}, 0.96)`
+    );
+    baseGradient.addColorStop(
+      1,
+      `rgba(${Math.round(28 + horizonLift * 68)}, ${Math.round(42 + horizonLift * 86)}, ${Math.round(62 + horizonLift * 96)}, 0.86)`
+    );
+    context.fillStyle = baseGradient;
+    context.fillRect(0, 0, width, height);
+
+    const mistAlpha = 0.2 + (1 - reveal) * 0.42;
+    context.fillStyle = `rgba(188, 214, 232, ${mistAlpha.toFixed(3)})`;
+    for (let index = 0; index < 11; index += 1) {
+      const y = height * (0.16 + index * 0.078);
+      const wobble = Math.sin(this.portalPulseClock * 0.45 + index * 0.8) * width * 0.015;
+      context.fillRect(wobble, y, width, Math.max(2, height * 0.018));
+    }
+
+    const dawnGlow = context.createRadialGradient(
+      width * 0.5,
+      height * (0.74 - reveal * 0.08),
+      width * 0.02,
+      width * 0.5,
+      height * 0.74,
+      width * (0.42 + reveal * 0.08)
+    );
+    dawnGlow.addColorStop(
+      0,
+      `rgba(228, 244, 255, ${(0.08 + reveal * 0.2 + pulse * 0.03).toFixed(3)})`
+    );
+    dawnGlow.addColorStop(0.42, `rgba(126, 168, 206, ${(0.08 + reveal * 0.22).toFixed(3)})`);
+    dawnGlow.addColorStop(1, "rgba(16, 28, 44, 0)");
+    context.fillStyle = dawnGlow;
+    context.fillRect(0, 0, width, height);
+
+    if (this.spawnPortalVeilTexture) {
+      this.spawnPortalVeilTexture.needsUpdate = true;
+    }
   }
 
   freezeVideoOnLastFrame(video, texture = null) {
@@ -9884,71 +10606,661 @@ export class GameRuntime {
       return;
     }
     this.spawnPortalVeilRevealStarted = true;
-
-    const sourceUrl = String(SPAWN_PORTAL_VEIL_REVEAL_VIDEO_URL ?? "").trim();
-    if (!sourceUrl || !this.spawnPortalVeilMaterial) {
+    this.spawnPortalVeilRevealClock = 0;
+    if (!this.spawnPortalVeilMaterial) {
       return;
     }
-
-    if (this.spawnPortalVeilVideoEl) {
-      return;
-    }
-
-    const video = document.createElement("video");
-    video.preload = "auto";
-    video.playsInline = true;
-    video.muted = true;
-    video.volume = 0;
-    video.loop = false;
-    video.crossOrigin = "anonymous";
-    video.disablePictureInPicture = true;
-    video.setAttribute("playsinline", "true");
-    video.setAttribute("webkit-playsinline", "true");
-    video.setAttribute("disableremoteplayback", "true");
-    video.src = sourceUrl;
-    video.currentTime = 0;
-
-    const texture = new THREE.VideoTexture(video);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.minFilter = THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    texture.generateMipmaps = false;
-
-    this.spawnPortalVeilVideoEl = video;
-    this.spawnPortalVeilVideoTexture = texture;
-    this.spawnPortalVeilTexture = texture;
-    this.spawnPortalVeilMaterial.map = texture;
+    this.spawnPortalVeilMaterial.map = this.spawnPortalVeilBaseTexture;
     this.spawnPortalVeilMaterial.color.setHex(0xffffff);
-    this.spawnPortalVeilMaterial.emissive.setHex(0x0f1f32);
-    this.spawnPortalVeilMaterial.emissiveIntensity = 0.26;
+    this.spawnPortalVeilMaterial.emissive.setHex(0x10263a);
+    this.spawnPortalVeilMaterial.emissiveIntensity = 0.18;
     this.spawnPortalVeilMaterial.needsUpdate = true;
-
-    const finishPlayback = () => {
-      if (this.spawnPortalVeilVideoEl !== video) {
-        return;
-      }
-      video.onended = null;
-      video.onerror = null;
-      this.freezeVideoOnLastFrame(video, texture);
-    };
-
-    video.onended = finishPlayback;
-    video.onerror = finishPlayback;
-    video.play().catch(() => {
-      video.currentTime = 0;
-      video.play().then(
-        () => {},
-        () => {
-          finishPlayback();
-        }
-      );
-    });
   }
 
-  updateSpawnPortalVeilTexture() {
+  attachNpcTitleLabel(root, definition, yOffset = 2.42) {
+    if (!root || !definition) {
+      return;
+    }
+    const title = String(definition.appearance?.titleLabel ?? definition.displayName ?? "").trim();
+    if (!title) {
+      return;
+    }
+    const label = this.createTextLabel(title, "name");
+    label.position.set(0, yOffset, 0);
+    root.add(label);
+  }
+
+  registerNpcInteraction(npcId, mesh, overrides = {}) {
+    const definition = this.getNpcDefinition(npcId);
+    if (!definition || !mesh) {
+      return null;
+    }
+    const entry = {
+      id: npcId,
+      definition,
+      mesh,
+      interactionRadius: Math.max(
+        1.5,
+        Number(overrides?.interactionRadius) || Number(definition.interactionRadius) || 4.8
+      ),
+      visuals: overrides?.visuals ?? null,
+      runtimeState: overrides?.runtimeState ?? null
+    };
+    this.npcInteractiveEntries.push(entry);
+    return entry;
+  }
+
+  createCityNpcGuideMesh(npcId, placement) {
+    const definition = this.getNpcDefinition(npcId);
+    if (!definition) {
+      return null;
+    }
+
+    const appearance = definition.appearance ?? {};
+    const npcGroup = new THREE.Group();
+    npcGroup.position.copy(placement.position);
+    npcGroup.scale.setScalar(Math.max(0.5, Number(placement.scale) || Number(definition.scale) || 1));
+
+    const body = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.3, 0.8, 4, 8),
+      new THREE.MeshStandardMaterial({
+        color: appearance.bodyColor ?? 0x4f667a,
+        roughness: 0.42,
+        metalness: 0.16,
+        emissive: appearance.bodyColor ?? 0x30465d,
+        emissiveIntensity: 0.18
+      })
+    );
+    body.position.y = 0.88;
+    body.castShadow = !this.mobileEnabled;
+    body.receiveShadow = true;
+
+    const head = new THREE.Mesh(
+      new THREE.SphereGeometry(0.24, 14, 14),
+      new THREE.MeshStandardMaterial({
+        color: appearance.headColor ?? 0x9dc1da,
+        roughness: 0.28,
+        metalness: 0.16,
+        emissive: appearance.headColor ?? 0x587696,
+        emissiveIntensity: 0.18
+      })
+    );
+    head.position.y = 1.58;
+    head.castShadow = !this.mobileEnabled;
+    head.receiveShadow = true;
+
+    const pad = new THREE.Mesh(
+      new THREE.RingGeometry(0.88, 1.22, this.mobileEnabled ? 24 : 34),
+      new THREE.MeshBasicMaterial({
+        color: appearance.padColor ?? 0xbfe7ff,
+        transparent: true,
+        opacity: 0.68,
+        side: THREE.DoubleSide,
+        depthWrite: false
+      })
+    );
+    pad.rotation.x = -Math.PI / 2;
+    pad.position.y = 0.04;
+
+    const floor = new THREE.Mesh(
+      new THREE.CircleGeometry(1.88, this.mobileEnabled ? 26 : 44),
+      new THREE.MeshBasicMaterial({
+        color: appearance.beamColor ?? 0x86d7ff,
+        transparent: true,
+        opacity: 0.14,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+      })
+    );
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = 0.028;
+
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(1.18, 1.94, this.mobileEnabled ? 24 : 44),
+      new THREE.MeshBasicMaterial({
+        color: appearance.ringColor ?? 0xe1f7ff,
+        transparent: true,
+        opacity: 0.38,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+      })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.032;
+
+    const beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.48, 0.94, 2.1, this.mobileEnabled ? 10 : 14, 1, true),
+      new THREE.MeshBasicMaterial({
+        color: appearance.beamColor ?? 0x86d7ff,
+        transparent: true,
+        opacity: 0.12,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+      })
+    );
+    beam.position.y = 1.08;
+
+    npcGroup.add(floor, ring, beam, body, head, pad);
+    this.attachNpcTitleLabel(npcGroup, definition, 2.36);
+    const runtimeState = this.createCityNpcRuntimeState(definition, placement, npcGroup);
+    const entry = this.registerNpcInteraction(npcId, npcGroup, {
+      visuals: {
+        body,
+        head,
+        pad,
+        floor,
+        ring,
+        beam
+      },
+      runtimeState,
+      interactionRadius: placement.interactionRadius
+    });
+    if (entry && runtimeState) {
+      this.cityNpcEntries.push(entry);
+    }
+    return npcGroup;
+  }
+
+  createCityNpcRuntimeState(definition, placement, mesh) {
+    if (!definition || !placement || !mesh || definition.zone !== "city") {
+      return null;
+    }
+    const behavior = definition.behavior ?? null;
+    if (!behavior) {
+      return null;
+    }
+    const homeLocalPosition = mesh.position.clone();
+    const patrolPoints = Array.isArray(behavior.patrolOffsets) && behavior.patrolOffsets.length > 0
+      ? behavior.patrolOffsets.map((offset) => {
+          const localPoint = homeLocalPosition.clone();
+          localPoint.x += Number(offset?.[0]) || 0;
+          localPoint.y += Number(offset?.[1]) || 0;
+          localPoint.z += Number(offset?.[2]) || 0;
+          return localPoint;
+        })
+      : [homeLocalPosition.clone()];
+    return {
+      behavior,
+      homeLocalPosition,
+      patrolPoints,
+      patrolIndex: patrolPoints.length > 1 ? 1 : 0,
+      patrolWaitClock: this.getNpcPatrolWaitSeconds(behavior),
+      mode: behavior.mode === "roam" ? "patrol" : "idle",
+      speedScale: 0.92 + Math.random() * 0.16,
+      bobPhase: Math.random() * Math.PI * 2,
+      bobAmount: 0.026 + Math.random() * 0.018,
+      approachSide: Math.random() < 0.5 ? -1 : 1,
+      cooldownClock: 0
+    };
+  }
+
+  getNpcPatrolWaitSeconds(behavior) {
+    const min = Math.max(0.2, Number(behavior?.patrolWaitMin) || 1);
+    const max = Math.max(min, Number(behavior?.patrolWaitMax) || 3);
+    return min + Math.random() * (max - min);
+  }
+
+  isPlayerBusyForNpcApproach() {
+    if (this.flowStage !== "city_live") {
+      return true;
+    }
+    if (this.portalTransitioning || this.surfacePainterOpen || this.surfacePainterDrawing) {
+      return true;
+    }
+    if (this.chalkDrawingActive || this.promoPlacementPreviewActive || this.hostCustomBlockPlacementPreviewActive) {
+      return true;
+    }
+    if (this.objEditorDragging || this.chatOpen || this.isNpcChoiceGateOpen()) {
+      return true;
+    }
+    return !(this.nicknameGateEl?.classList.contains("hidden") ?? true);
+  }
+
+  updateNpcPlayerIdleState(delta) {
+    if (this.flowStage !== "city_live") {
+      this.npcPlayerIdleClock = 0;
+      this.npcPlayerCityLiveClock = 0;
+      this.npcPlayerLastSamplePosition.copy(this.playerPosition);
+      return;
+    }
+    this.npcPlayerCityLiveClock += delta;
+    const dx = this.playerPosition.x - this.npcPlayerLastSamplePosition.x;
+    const dz = this.playerPosition.z - this.npcPlayerLastSamplePosition.z;
+    const movedDistanceSq = dx * dx + dz * dz;
+    const recentlyMoving = performance.now() - this.lastActiveMoveInputAt < 240;
+    const isStill = movedDistanceSq < 0.0009 && !recentlyMoving;
+    if (!this.isPlayerBusyForNpcApproach() && isStill) {
+      this.npcPlayerIdleClock += delta;
+    } else {
+      this.npcPlayerIdleClock = 0;
+    }
+    this.npcPlayerLastSamplePosition.copy(this.playerPosition);
+  }
+
+  moveNpcEntryTowardLocal(entry, targetLocal, speed, delta) {
+    if (!entry?.mesh || !targetLocal) {
+      return true;
+    }
+    const mesh = entry.mesh;
+    const dx = Number(targetLocal.x) - Number(mesh.position.x);
+    const dz = Number(targetLocal.z) - Number(mesh.position.z);
+    const distance = Math.hypot(dx, dz);
+    if (distance <= 0.001) {
+      mesh.position.x = Number(targetLocal.x) || mesh.position.x;
+      mesh.position.z = Number(targetLocal.z) || mesh.position.z;
+      return true;
+    }
+    const runtimeState = entry.runtimeState ?? null;
+    const step = Math.max(0.001, Number(speed) || 0.1) * (runtimeState?.speedScale ?? 1) * delta;
+    if (distance <= step) {
+      mesh.position.x = Number(targetLocal.x) || mesh.position.x;
+      mesh.position.z = Number(targetLocal.z) || mesh.position.z;
+      return true;
+    }
+    mesh.position.x += (dx / distance) * step;
+    mesh.position.z += (dz / distance) * step;
+    return false;
+  }
+
+  rotateNpcEntryTowardLocal(entry, targetLocal, delta, speed = 4) {
+    if (!entry?.mesh || !targetLocal) {
+      return;
+    }
+    const mesh = entry.mesh;
+    const dx = Number(targetLocal.x) - Number(mesh.position.x);
+    const dz = Number(targetLocal.z) - Number(mesh.position.z);
+    if (Math.abs(dx) < 0.001 && Math.abs(dz) < 0.001) {
+      return;
+    }
+    const targetYaw = Math.atan2(dx, dz);
+    mesh.rotation.y = lerpAngle(mesh.rotation.y, targetYaw, Math.min(1, delta * Math.max(1, Number(speed) || 4)));
+  }
+
+  updateNpcAmbientVisuals(entry) {
+    const visuals = entry?.visuals;
+    const runtimeState = entry?.runtimeState;
+    if (!visuals || !runtimeState) {
+      return;
+    }
+    const pulse = 0.5 + 0.5 * Math.sin(this.elapsedSeconds * 2.6 + runtimeState.bobPhase);
+    const motionWeight =
+      runtimeState.mode === "approach" ? 1 : runtimeState.mode === "patrol" ? 0.8 : 0.5;
+    if (visuals.body) {
+      visuals.body.position.y = 0.88 + Math.sin(this.elapsedSeconds * 1.9 + runtimeState.bobPhase) * 0.025 * motionWeight;
+    }
+    if (visuals.head) {
+      visuals.head.position.y =
+        1.58 + Math.sin(this.elapsedSeconds * 2.1 + runtimeState.bobPhase + 0.45) * runtimeState.bobAmount;
+    }
+    if (visuals.beam?.material) {
+      visuals.beam.material.opacity = 0.1 + pulse * 0.06 + (runtimeState.mode === "approach" ? 0.05 : 0);
+    }
+    if (visuals.ring?.material) {
+      visuals.ring.material.opacity = 0.26 + pulse * 0.12 + (runtimeState.mode === "approach" ? 0.08 : 0);
+    }
+    if (visuals.pad?.material) {
+      visuals.pad.material.opacity = 0.52 + pulse * 0.14;
+    }
+    if (visuals.floor?.material) {
+      visuals.floor.material.opacity = 0.08 + pulse * 0.04;
+    }
+  }
+
+  updateCityNpcBehaviors(delta) {
+    if (!this.cityNpcEntries.length) {
+      return;
+    }
+    this.updateNpcPlayerIdleState(delta);
+    const playerBusy = this.isPlayerBusyForNpcApproach();
+
+    for (const entry of this.cityNpcEntries) {
+      if (!entry?.mesh || !entry.mesh.visible || !entry.runtimeState) {
+        continue;
+      }
+      const runtimeState = entry.runtimeState;
+      const behavior = runtimeState.behavior;
+      this.updateNpcAmbientVisuals(entry);
+
+      if (runtimeState.cooldownClock > 0) {
+        runtimeState.cooldownClock = Math.max(0, runtimeState.cooldownClock - delta);
+      }
+
+      if (this.activeNpcDialogueNpcId === entry.id) {
+        const parent = entry.mesh.parent;
+        if (parent) {
+          this.npcTempLocalTarget.copy(this.playerPosition);
+          parent.worldToLocal(this.npcTempLocalTarget);
+          this.npcTempLocalTarget.y = entry.mesh.position.y;
+          this.rotateNpcEntryTowardLocal(entry, this.npcTempLocalTarget, delta, behavior.yawSlerpSpeed);
+        }
+        continue;
+      }
+
+      if (behavior.mode !== "roam") {
+        continue;
+      }
+
+      const playerDistance = this.getNpcEntryDistance(entry);
+      const canApproachPlayer =
+        behavior.canApproachPlayer &&
+        !playerBusy &&
+        this.npcPlayerCityLiveClock >= behavior.cityEntryGrace &&
+        this.npcPlayerIdleClock >= behavior.idleApproachDelay &&
+        runtimeState.cooldownClock <= 0 &&
+        playerDistance <= behavior.maxApproachDistance &&
+        playerDistance >= behavior.stopDistance + 1.2;
+
+      if (runtimeState.mode === "approach" && !canApproachPlayer) {
+        runtimeState.mode = "return";
+        runtimeState.cooldownClock = Math.max(runtimeState.cooldownClock, behavior.returnDelay);
+      } else if (runtimeState.mode !== "approach" && canApproachPlayer) {
+        runtimeState.mode = "approach";
+      }
+
+      if (runtimeState.mode === "approach") {
+        const parent = entry.mesh.parent;
+        if (!parent) {
+          continue;
+        }
+        entry.mesh.getWorldPosition(this.npcTempWorldPosition);
+        this.npcTempDirection
+          .set(
+            this.playerPosition.x - this.npcTempWorldPosition.x,
+            0,
+            this.playerPosition.z - this.npcTempWorldPosition.z
+          );
+        if (this.npcTempDirection.lengthSq() < 0.0001) {
+          runtimeState.mode = "return";
+          continue;
+        }
+        this.npcTempDirection.normalize();
+        this.npcTempPlayerPosition
+          .set(this.playerPosition.x, runtimeState.homeLocalPosition.y, this.playerPosition.z)
+          .addScaledVector(this.npcTempDirection, -behavior.stopDistance);
+        this.npcTempPlayerPosition.x += -this.npcTempDirection.z * runtimeState.approachSide * 1.1;
+        this.npcTempPlayerPosition.z += this.npcTempDirection.x * runtimeState.approachSide * 1.1;
+        parent.worldToLocal(this.npcTempPlayerPosition);
+        this.npcTempPlayerPosition.y = runtimeState.homeLocalPosition.y;
+        this.moveNpcEntryTowardLocal(entry, this.npcTempPlayerPosition, behavior.approachSpeed, delta);
+        this.rotateNpcEntryTowardLocal(entry, this.npcTempPlayerPosition, delta, behavior.yawSlerpSpeed);
+        continue;
+      }
+
+      if (runtimeState.mode === "return") {
+        const reachedHome = this.moveNpcEntryTowardLocal(entry, runtimeState.homeLocalPosition, behavior.roamSpeed, delta);
+        this.rotateNpcEntryTowardLocal(entry, runtimeState.homeLocalPosition, delta, behavior.yawSlerpSpeed);
+        if (reachedHome) {
+          runtimeState.mode = "patrol";
+          runtimeState.patrolWaitClock = this.getNpcPatrolWaitSeconds(behavior);
+        }
+        continue;
+      }
+
+      const patrolPoints = Array.isArray(runtimeState.patrolPoints) ? runtimeState.patrolPoints : [];
+      if (patrolPoints.length <= 1) {
+        continue;
+      }
+      const patrolTarget = patrolPoints[runtimeState.patrolIndex] ?? runtimeState.homeLocalPosition;
+      const targetDx = patrolTarget.x - entry.mesh.position.x;
+      const targetDz = patrolTarget.z - entry.mesh.position.z;
+      const targetDistance = Math.hypot(targetDx, targetDz);
+      if (targetDistance <= 0.18) {
+        if (runtimeState.patrolWaitClock > 0) {
+          runtimeState.patrolWaitClock = Math.max(0, runtimeState.patrolWaitClock - delta);
+        } else {
+          runtimeState.patrolIndex = (runtimeState.patrolIndex + 1) % patrolPoints.length;
+          runtimeState.patrolWaitClock = this.getNpcPatrolWaitSeconds(behavior);
+          runtimeState.approachSide *= Math.random() < 0.5 ? -1 : 1;
+        }
+      } else {
+        this.moveNpcEntryTowardLocal(entry, patrolTarget, behavior.roamSpeed, delta);
+        this.rotateNpcEntryTowardLocal(entry, patrolTarget, delta, behavior.yawSlerpSpeed);
+      }
+    }
+  }
+
+  addConfiguredCityNpcs(cityGroup) {
+    if (!cityGroup) {
+      return;
+    }
+    const placements = Array.isArray(this.hubNpcPlacements) ? this.hubNpcPlacements : [];
+    for (const placement of placements) {
+      if (!placement || placement.id === "bridge_gatekeeper") {
+        continue;
+      }
+      const definition = this.getNpcDefinition(placement.id);
+      if (!definition || definition.zone !== "city") {
+        continue;
+      }
+      const mesh = this.createCityNpcGuideMesh(placement.id, placement);
+      if (mesh) {
+        cityGroup.add(mesh);
+      }
+    }
+  }
+
+  updateNpcGreetingScreen(delta) {
+    const screen = this.npcGreetingScreen;
+    const material = screen && !Array.isArray(screen.material) ? screen.material : null;
+    if (!screen || !material) {
+      return;
+    }
+
+    if (!this.npcGreetingPlaybackActive) {
+      if (!this.npcGreetingPlayed) {
+        screen.visible = false;
+        material.opacity = 0;
+        return;
+      }
+      screen.visible = true;
+      const idlePulse = 0.5 + 0.5 * Math.sin(this.portalPulseClock * 2.8);
+      material.color.setRGB(0.62 + idlePulse * 0.06, 0.84 + idlePulse * 0.05, 1);
+      material.opacity = 0.06 + idlePulse * 0.035;
+      return;
+    }
+
+    this.npcGreetingPlaybackClock = Math.min(
+      this.npcGreetingPlaybackDuration,
+      this.npcGreetingPlaybackClock + Math.max(0, Number(delta) || 0)
+    );
+    const progress = THREE.MathUtils.clamp(
+      this.npcGreetingPlaybackClock / Math.max(0.001, this.npcGreetingPlaybackDuration),
+      0,
+      1
+    );
+    const fadeIn = THREE.MathUtils.smoothstep(progress, 0, 0.18);
+    const hold = 1 - THREE.MathUtils.smoothstep(progress, 0.62, 1);
+    const glow = Math.max(fadeIn * hold, 0);
+    const pulse = 0.5 + 0.5 * Math.sin(this.portalPulseClock * 8.2 + progress * Math.PI * 3.2);
+
+    screen.visible = true;
+    material.color.setRGB(0.68 + glow * 0.14, 0.86 + glow * 0.08, 1);
+    material.opacity = 0.08 + glow * 0.22 + pulse * 0.04;
+
+    if (!this.npcGreetingMidpointTriggered && progress >= 0.42) {
+      this.triggerNpcGreetingMidpointEffects();
+    }
+    if (progress >= 1) {
+      this.npcGreetingPlaybackActive = false;
+      this.npcGreetingPlaybackClock = this.npcGreetingPlaybackDuration;
+    }
+  }
+
+  updateSpawnPortalVeilTexture(delta = 0) {
+    if (!this.spawnPortalVeilMaterial) {
+      return;
+    }
+    if (this.spawnPortalVeilRevealStarted) {
+      this.spawnPortalVeilRevealClock = Math.min(
+        this.spawnPortalVeilRevealDuration,
+        this.spawnPortalVeilRevealClock + Math.max(0, Number(delta) || 0)
+      );
+    }
+    const reveal = this.spawnPortalVeilRevealStarted
+      ? THREE.MathUtils.clamp(
+          this.spawnPortalVeilRevealClock / Math.max(0.001, this.spawnPortalVeilRevealDuration),
+          0,
+          1
+        )
+      : 0;
+    this.drawSpawnPortalVeilTexture(reveal);
+    this.spawnPortalVeilMaterial.opacity = THREE.MathUtils.lerp(0.98, 0.24, reveal);
+    this.spawnPortalVeilMaterial.emissiveIntensity = THREE.MathUtils.lerp(0.04, 0.22, reveal);
+    this.spawnPortalVeilMaterial.needsUpdate = true;
     if (this.spawnPortalVeilTexture) {
       this.spawnPortalVeilTexture.needsUpdate = true;
     }
+  }
+
+  resolveHubNpcPlacements(hubFlowConfig = {}) {
+    const configuredPlacements = Array.isArray(hubFlowConfig?.npcs) ? hubFlowConfig.npcs : [];
+    if (configuredPlacements.length) {
+      return configuredPlacements.map((placement) => {
+        const npcId = String(placement?.id ?? "").trim();
+        const definition = this.getNpcDefinition(npcId);
+        return {
+          id: npcId,
+          position: parseVec3(placement?.position, [0, 0, 0]),
+          scale: Math.max(0.5, Number(placement?.scale) || Number(definition?.scale) || 1),
+          interactionRadius: Math.max(
+            1.5,
+            Number(placement?.interactionRadius) || Number(definition?.interactionRadius) || 4.8
+          )
+        };
+      });
+    }
+
+    return [
+      {
+        id: "bridge_gatekeeper",
+        position: this.bridgeNpcPosition.clone(),
+        scale: this.bridgeNpcScale,
+        interactionRadius: this.bridgeNpcTriggerRadius
+      }
+    ];
+  }
+
+  getNpcDefinition(npcId) {
+    return this.npcDefinitionIndex.get(String(npcId ?? "").trim()) ?? null;
+  }
+
+  getNpcDialogueNode(npcId, nodeId) {
+    const definition = this.getNpcDefinition(npcId);
+    if (!definition) {
+      return null;
+    }
+    const key = String(nodeId ?? "").trim() || definition.dialogue.rootNodeId;
+    return definition.dialogue.nodeLookup[key] ?? null;
+  }
+
+  updateNpcInteractionPointerFromClient(clientX, clientY) {
+    const canvasRect = this.renderer?.domElement?.getBoundingClientRect?.();
+    if (canvasRect && canvasRect.width > 0 && canvasRect.height > 0) {
+      this.npcInteractionPointer.x = ((clientX - canvasRect.left) / canvasRect.width) * 2 - 1;
+      this.npcInteractionPointer.y = -((clientY - canvasRect.top) / canvasRect.height) * 2 + 1;
+      return;
+    }
+    this.npcInteractionPointer.set(0, 0);
+  }
+
+  findNpcEntryForObject(object) {
+    if (!object || !this.npcInteractiveEntries.length) {
+      return null;
+    }
+    let current = object;
+    while (current) {
+      const entry = this.npcInteractiveEntries.find((candidate) => candidate?.mesh === current) ?? null;
+      if (entry) {
+        return entry;
+      }
+      current = current.parent ?? null;
+    }
+    return null;
+  }
+
+  getNpcEntryDistance(entry) {
+    if (!entry?.mesh) {
+      return Number.POSITIVE_INFINITY;
+    }
+    entry.mesh.getWorldPosition(this.tempVecA);
+    const dx = this.playerPosition.x - this.tempVecA.x;
+    const dz = this.playerPosition.z - this.tempVecA.z;
+    return Math.hypot(dx, dz);
+  }
+
+  canInteractWithNpcEntry(entry) {
+    if (!entry?.mesh || !entry.mesh.visible) {
+      return false;
+    }
+    const definition = entry.definition;
+    if (!definition) {
+      return false;
+    }
+    if (Array.isArray(definition.allowedFlowStages) && definition.allowedFlowStages.length > 0) {
+      if (!definition.allowedFlowStages.includes(this.flowStage)) {
+        return false;
+      }
+    }
+    return this.getNpcEntryDistance(entry) <= Math.max(1.5, Number(entry.interactionRadius) || 4.8);
+  }
+
+  pickNpcAtClient(clientX, clientY) {
+    if (!this.camera || !this.npcInteractiveEntries.length) {
+      return null;
+    }
+    const meshes = this.npcInteractiveEntries
+      .filter((entry) => entry?.mesh?.visible)
+      .map((entry) => entry.mesh);
+    if (!meshes.length) {
+      return null;
+    }
+    this.updateNpcInteractionPointerFromClient(clientX, clientY);
+    this.npcInteractionRaycaster.setFromCamera(this.npcInteractionPointer, this.camera);
+    const intersections = this.npcInteractionRaycaster.intersectObjects(meshes, true);
+    for (const intersection of intersections) {
+      const entry = this.findNpcEntryForObject(intersection?.object);
+      if (entry && this.canInteractWithNpcEntry(entry)) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
+  pickNpcAtScreenCenter() {
+    if (!this.camera || !this.npcInteractiveEntries.length) {
+      return null;
+    }
+    const meshes = this.npcInteractiveEntries
+      .filter((entry) => entry?.mesh?.visible)
+      .map((entry) => entry.mesh);
+    if (!meshes.length) {
+      return null;
+    }
+    this.npcInteractionPointer.set(0, 0);
+    this.npcInteractionRaycaster.setFromCamera(this.npcInteractionPointer, this.camera);
+    const intersections = this.npcInteractionRaycaster.intersectObjects(meshes, true);
+    for (const intersection of intersections) {
+      const entry = this.findNpcEntryForObject(intersection?.object);
+      if (entry && this.canInteractWithNpcEntry(entry)) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
+  tryInteractWithNpcFromPointer(clientX, clientY, useScreenCenter = false) {
+    if (this.surfacePainterOpen || !(this.nicknameGateEl?.classList.contains("hidden") ?? true)) {
+      return false;
+    }
+    const entry = useScreenCenter ? this.pickNpcAtScreenCenter() : this.pickNpcAtClient(clientX, clientY);
+    if (!entry) {
+      return false;
+    }
+    this.openNpcDialogue(entry.definition.id, entry.definition.dialogue.rootNodeId, { resetHistory: true });
+    return true;
   }
 
   getNpcDistance() {
@@ -10245,8 +11557,9 @@ export class GameRuntime {
 
     this.portalPulseClock += delta;
     this.updateNpcTemplePortalVisual();
+    this.updateNpcGreetingScreen(delta);
     this.updateBridgeBoundaryMarker(delta);
-    this.updateSpawnPortalVeilVisibility();
+    this.updateSpawnPortalVeilVisibility(delta);
     this.syncPortalAnchorsFromMovableObjects();
     this.requestPortalPrewarm();
 
@@ -10284,6 +11597,8 @@ export class GameRuntime {
     }
 
     if (this.flowStage === "boot_intro") {
+      // World-space intro: keep the player fixed while the atmosphere opens.
+      this.updateBootIntroWorldReveal(delta);
       this.updatePortalVisual();
       return;
     }
@@ -10495,7 +11810,7 @@ export class GameRuntime {
     glowMaterial.opacity = 0.65 + pulse * 0.28;
   }
 
-  updateSpawnPortalVeilVisibility() {
+  updateSpawnPortalVeilVisibility(delta = 0) {
     if (!this.spawnPortalVeilGroup) {
       return;
     }
@@ -10507,7 +11822,7 @@ export class GameRuntime {
       this.flowStage === "portal_transfer";
     this.spawnPortalVeilGroup.visible = !forceHideByFlow && !passedPortal;
     if (this.spawnPortalVeilGroup.visible) {
-      this.updateSpawnPortalVeilTexture();
+      this.updateSpawnPortalVeilTexture(delta);
     }
   }
 
@@ -10800,7 +12115,9 @@ export class GameRuntime {
     if (text) {
       this.boundaryWarningEl.textContent = String(text);
     }
-    this.boundaryWarningEl.classList.toggle("on", Boolean(active));
+    const isActive = Boolean(active);
+    this.boundaryWarningEl.classList.toggle("on", isActive);
+    this.boundaryWarningEl.setAttribute("aria-hidden", isActive ? "false" : "true");
   }
 
   getBoundarySoftLimit() {
@@ -11462,13 +12779,6 @@ export class GameRuntime {
         return "";
       }
 
-      if (parsed.hostname.endsWith("onrender.com")) {
-        parsed.pathname = "/health";
-        parsed.search = "";
-        parsed.hash = "";
-        return parsed.toString();
-      }
-
       parsed.hash = "";
       parsed.searchParams.set("_prewarm", "1");
       if (!parsed.searchParams.has("from")) {
@@ -11933,6 +13243,11 @@ export class GameRuntime {
     this.socket.emit("room:quick-join", { name: nextName }, (response = {}) => {
       if (!response?.ok) {
         return;
+      }
+      if (this.autoHostClaimEnabled && !this.isRoomHost) {
+        window.setTimeout(() => {
+          this.requestHostClaim({ skipThrottle: true });
+        }, 0);
       }
       onJoined?.(response);
     });
@@ -12672,6 +13987,12 @@ export class GameRuntime {
     const mediaDataUrl = String(rawValue.mediaDataUrl ?? "").trim();
     const hasMediaData = /^data:image\/webp;base64,/i.test(mediaDataUrl);
     const mediaKind = hasMediaData ? "image" : "none";
+    const scale = THREE.MathUtils.clamp(Number(rawValue.scale) || 1, PROMO_MIN_SCALE, PROMO_MAX_SCALE);
+    const scaleY = THREE.MathUtils.clamp(
+      Number(rawValue.scaleY) || scale,
+      PROMO_MIN_SCALE,
+      PROMO_MAX_SCALE
+    );
     return {
       ownerKey,
       ownerName: this.formatPlayerName(rawValue.ownerName ?? "PLAYER"),
@@ -12680,7 +14001,8 @@ export class GameRuntime {
       y: THREE.MathUtils.clamp(Number(rawValue.y) || 0, -100, 400),
       z: THREE.MathUtils.clamp(Number(rawValue.z) || 0, -2000, 2000),
       yaw: this.normalizePromoYaw(rawValue.yaw, 0),
-      scale: THREE.MathUtils.clamp(Number(rawValue.scale) || 1, PROMO_MIN_SCALE, PROMO_MAX_SCALE),
+      scale,
+      scaleY,
       linkUrl: this.normalizePromoLinkUrl(rawValue.linkUrl ?? ""),
       mediaDataUrl: hasMediaData ? mediaDataUrl : "",
       mediaKind,
@@ -12702,6 +14024,7 @@ export class GameRuntime {
       entry.z.toFixed(3),
       this.normalizePromoYaw(entry.yaw, 0).toFixed(4),
       entry.scale.toFixed(3),
+      (Number(entry.scaleY) || Number(entry.scale) || 1).toFixed(3),
       entry.linkUrl,
       entry.mediaKind,
       entry.mediaDataUrl.slice(0, 64),
@@ -13193,23 +14516,44 @@ export class GameRuntime {
     const own = this.getOwnPromoObject();
     const hasOwnPromo = Boolean(own);
     const previewActive = this.promoPlacementPreviewActive && !hasOwnPromo;
-    const previewScale = THREE.MathUtils.clamp(
+    const previewScaleX = THREE.MathUtils.clamp(
       Number(this.promoPlacementPreviewCurrentScale) ||
         Number(this.promoScaleInputEl?.value) ||
         PROMO_DEFAULT_SCALE,
       PROMO_MIN_SCALE,
       PROMO_MAX_SCALE
     );
-    const panelScaleValue = THREE.MathUtils.clamp(
+    const previewScaleY = THREE.MathUtils.clamp(
+      Number(this.promoPlacementPreviewCurrentScaleY) ||
+        Number(this.promoScaleYInputEl?.value) ||
+        previewScaleX,
+      PROMO_MIN_SCALE,
+      PROMO_MAX_SCALE
+    );
+    const panelScaleXValue = THREE.MathUtils.clamp(
       Number(this.promoScaleInputEl?.value) || PROMO_DEFAULT_SCALE,
       PROMO_MIN_SCALE,
       PROMO_MAX_SCALE
     );
-    const scaleValue = hasOwnPromo
+    const panelScaleYValue = THREE.MathUtils.clamp(
+      Number(this.promoScaleYInputEl?.value) || panelScaleXValue,
+      PROMO_MIN_SCALE,
+      PROMO_MAX_SCALE
+    );
+    const scaleXValue = hasOwnPromo
       ? THREE.MathUtils.clamp(Number(own?.scale) || PROMO_DEFAULT_SCALE, PROMO_MIN_SCALE, PROMO_MAX_SCALE)
       : previewActive
-        ? previewScale
-        : panelScaleValue;
+        ? previewScaleX
+        : panelScaleXValue;
+    const scaleYValue = hasOwnPromo
+      ? THREE.MathUtils.clamp(
+          Number(own?.scaleY) || Number(own?.scale) || PROMO_DEFAULT_SCALE,
+          PROMO_MIN_SCALE,
+          PROMO_MAX_SCALE
+        )
+      : previewActive
+        ? previewScaleY
+        : panelScaleYValue;
     const allowOthersDrawValue = typeof this.promoAllowOthersDrawDraft === "boolean"
       ? this.promoAllowOthersDrawDraft
       : Boolean(own?.allowOthersDraw);
@@ -13265,20 +14609,38 @@ export class GameRuntime {
     }
 
     if (this.promoScaleInputEl && document.activeElement !== this.promoScaleInputEl) {
-      this.promoScaleInputEl.value = String(scaleValue.toFixed(2));
+      this.promoScaleInputEl.value = String(scaleXValue.toFixed(2));
     }
     if (this.promoScaleValueEl) {
       const currentScale = Number(this.promoScaleInputEl?.value);
-      const safeScale = Number.isFinite(currentScale) ? currentScale : scaleValue;
+      const safeScale = Number.isFinite(currentScale) ? currentScale : scaleXValue;
       this.promoScaleValueEl.textContent = `${safeScale.toFixed(2)}x`;
     }
+    if (this.promoScaleYInputEl && document.activeElement !== this.promoScaleYInputEl) {
+      this.promoScaleYInputEl.value = String(scaleYValue.toFixed(2));
+    }
+    if (this.promoScaleYValueEl) {
+      const currentScaleY = Number(this.promoScaleYInputEl?.value);
+      const safeScaleY = Number.isFinite(currentScaleY) ? currentScaleY : scaleYValue;
+      this.promoScaleYValueEl.textContent = `${safeScaleY.toFixed(2)}x`;
+    }
     if (this.mobilePromoScaleInputEl && document.activeElement !== this.mobilePromoScaleInputEl) {
-      this.mobilePromoScaleInputEl.value = String(scaleValue.toFixed(2));
+      this.mobilePromoScaleInputEl.value = String(scaleXValue.toFixed(2));
     }
     if (this.mobilePromoScaleValueEl) {
       const currentMobileScale = Number(this.mobilePromoScaleInputEl?.value);
-      const safeMobileScale = Number.isFinite(currentMobileScale) ? currentMobileScale : scaleValue;
+      const safeMobileScale = Number.isFinite(currentMobileScale) ? currentMobileScale : scaleXValue;
       this.mobilePromoScaleValueEl.textContent = `${safeMobileScale.toFixed(2)}x`;
+    }
+    if (this.mobilePromoScaleYInputEl && document.activeElement !== this.mobilePromoScaleYInputEl) {
+      this.mobilePromoScaleYInputEl.value = String(scaleYValue.toFixed(2));
+    }
+    if (this.mobilePromoScaleYValueEl) {
+      const currentMobileScaleY = Number(this.mobilePromoScaleYInputEl?.value);
+      const safeMobileScaleY = Number.isFinite(currentMobileScaleY)
+        ? currentMobileScaleY
+        : scaleYValue;
+      this.mobilePromoScaleYValueEl.textContent = `${safeMobileScaleY.toFixed(2)}x`;
     }
     if (this.promoLinkInputEl && document.activeElement !== this.promoLinkInputEl) {
       this.promoLinkInputEl.value = linkValue;
@@ -13365,6 +14727,7 @@ export class GameRuntime {
     const promoActionBlockedReason = this.getPromoActionBlockedReason();
     const disabled = !connected || busy || Boolean(promoActionBlockedReason);
     this.promoScaleInputEl && (this.promoScaleInputEl.disabled = disabled);
+    this.promoScaleYInputEl && (this.promoScaleYInputEl.disabled = disabled);
     this.promoTypeSelectEl && (this.promoTypeSelectEl.disabled = disabled);
     this.promoLinkInputEl && (this.promoLinkInputEl.disabled = disabled);
     this.promoAllowOthersDrawEl && (this.promoAllowOthersDrawEl.disabled = disabled || !showPromoLockControl);
@@ -13649,6 +15012,7 @@ export class GameRuntime {
     this.scene.add(group);
     this.promoPlacementPreviewMesh = group;
     this.promoPlacementPreviewCurrentScale = PROMO_DEFAULT_SCALE;
+    this.promoPlacementPreviewCurrentScaleY = PROMO_DEFAULT_SCALE;
     return group;
   }
 
@@ -13701,20 +15065,26 @@ export class GameRuntime {
 
     const preview = this.ensurePromoPlacementPreviewMesh();
     const transform = this.getPromoPlacementTransform();
-    const scale = THREE.MathUtils.clamp(
+    const scaleX = THREE.MathUtils.clamp(
       Number(this.promoScaleInputEl?.value) || PROMO_DEFAULT_SCALE,
       PROMO_MIN_SCALE,
       PROMO_MAX_SCALE
     );
-    const blockReason = this.getPromoPlacementBlockReason(transform, scale);
-    this.promoPlacementPreviewCurrentScale = scale;
+    const scaleY = THREE.MathUtils.clamp(
+      Number(this.promoScaleYInputEl?.value) || scaleX,
+      PROMO_MIN_SCALE,
+      PROMO_MAX_SCALE
+    );
+    const blockReason = this.getPromoPlacementBlockReason(transform, scaleX);
+    this.promoPlacementPreviewCurrentScale = scaleX;
+    this.promoPlacementPreviewCurrentScaleY = scaleY;
     this.promoPlacementPreviewBlockReason = blockReason;
     this.promoPlacementPreviewTransform = transform;
 
-    const bodyHeight = PROMO_BLOCK_HEIGHT * scale;
+    const bodyHeight = PROMO_BLOCK_HEIGHT * scaleY;
     preview.position.set(transform.x, transform.y + bodyHeight * 0.5, transform.z);
     preview.rotation.set(0, this.normalizePromoYaw(transform.yaw, 0), 0);
-    preview.scale.set(scale, scale, scale);
+    preview.scale.set(scaleX, scaleY, scaleX);
     preview.visible = true;
     this.setPromoPlacementPreviewTint(Boolean(blockReason));
   }
@@ -13800,11 +15170,19 @@ export class GameRuntime {
       PROMO_MIN_SCALE,
       PROMO_MAX_SCALE
     );
+    const scaleY = THREE.MathUtils.clamp(
+      Number(this.promoPlacementPreviewCurrentScaleY) ||
+        Number(this.promoScaleYInputEl?.value) ||
+        scale,
+      PROMO_MIN_SCALE,
+      PROMO_MAX_SCALE
+    );
     this.clearPromoPlacementPreview({ syncUi: true });
     this.requestPromoUpsert({
       placeInFront: false,
       preserveExistingStyle: true,
       scaleOverride: scale,
+      scaleYOverride: scaleY,
       transformOverride: transform,
       skipPlacementPreview: true
     });
@@ -13826,15 +15204,43 @@ export class GameRuntime {
       PROMO_MIN_SCALE,
       PROMO_MAX_SCALE
     );
+    const currentY = THREE.MathUtils.clamp(
+      Number(this.promoScaleYInputEl?.value) ||
+        this.promoPlacementPreviewCurrentScaleY ||
+        current,
+      PROMO_MIN_SCALE,
+      PROMO_MAX_SCALE
+    );
     const next = THREE.MathUtils.clamp(current + step, PROMO_MIN_SCALE, PROMO_MAX_SCALE);
     if (Math.abs(next - current) < 0.0001) {
       return;
     }
+    const scaleRatio = next / Math.max(0.001, current);
+    const nextY = THREE.MathUtils.clamp(currentY * scaleRatio, PROMO_MIN_SCALE, PROMO_MAX_SCALE);
     this.promoScaleInputEl.value = next.toFixed(2);
     if (this.promoScaleValueEl) {
       this.promoScaleValueEl.textContent = `${next.toFixed(2)}x`;
     }
+    if (this.promoScaleYInputEl) {
+      this.promoScaleYInputEl.value = nextY.toFixed(2);
+    }
+    if (this.promoScaleYValueEl) {
+      this.promoScaleYValueEl.textContent = `${nextY.toFixed(2)}x`;
+    }
+    if (this.mobilePromoScaleInputEl) {
+      this.mobilePromoScaleInputEl.value = next.toFixed(2);
+    }
+    if (this.mobilePromoScaleValueEl) {
+      this.mobilePromoScaleValueEl.textContent = `${next.toFixed(2)}x`;
+    }
+    if (this.mobilePromoScaleYInputEl) {
+      this.mobilePromoScaleYInputEl.value = nextY.toFixed(2);
+    }
+    if (this.mobilePromoScaleYValueEl) {
+      this.mobilePromoScaleYValueEl.textContent = `${nextY.toFixed(2)}x`;
+    }
     this.promoPlacementPreviewCurrentScale = next;
+    this.promoPlacementPreviewCurrentScaleY = nextY;
     this.updatePromoPlacementPreview();
   }
 
@@ -13871,6 +15277,7 @@ export class GameRuntime {
     placeAtCenter = false,
     preserveExistingStyle = false,
     scaleOverride = null,
+    scaleYOverride = null,
     transformOverride = null,
     allowOthersDrawOverride = null,
     skipPlacementPreview = false,
@@ -13912,6 +15319,7 @@ export class GameRuntime {
             placeAtCenter,
             preserveExistingStyle,
             scaleOverride,
+            scaleYOverride,
             transformOverride,
             allowOthersDrawOverride,
             skipPlacementPreview,
@@ -13958,17 +15366,26 @@ export class GameRuntime {
       };
     }
     const scaleOverrideValue = Number(scaleOverride);
+    const scaleYOverrideValue = Number(scaleYOverride);
     const hasScaleOverride = Number.isFinite(scaleOverrideValue);
+    const hasScaleYOverride = Number.isFinite(scaleYOverrideValue);
     const previewScaleRaw = hasScaleOverride
       ? scaleOverrideValue
       : Number(this.promoScaleInputEl?.value) || Number(own?.scale) || PROMO_DEFAULT_SCALE;
     const previewScale = THREE.MathUtils.clamp(previewScaleRaw, PROMO_MIN_SCALE, PROMO_MAX_SCALE);
+    const previewScaleYRaw = hasScaleYOverride
+      ? scaleYOverrideValue
+      : Number(this.promoScaleYInputEl?.value) || Number(own?.scaleY) || previewScale;
+    const previewScaleY = THREE.MathUtils.clamp(previewScaleYRaw, PROMO_MIN_SCALE, PROMO_MAX_SCALE);
     const blockReason = this.getPromoPlacementBlockReason(transform, previewScale);
     const hasPositionChange =
       !own ||
       Math.abs(Number(transform.x) - Number(own.x)) > 0.001 ||
       Math.abs(Number(transform.z) - Number(own.z)) > 0.001;
-    const hasScaleChange = !own || Math.abs(previewScale - (Number(own?.scale) || PROMO_DEFAULT_SCALE)) > 0.001;
+    const hasScaleChange =
+      !own ||
+      Math.abs(previewScale - (Number(own?.scale) || PROMO_DEFAULT_SCALE)) > 0.001 ||
+      Math.abs(previewScaleY - (Number(own?.scaleY) || Number(own?.scale) || PROMO_DEFAULT_SCALE)) > 0.001;
     if (blockReason && (hasPositionChange || hasScaleChange)) {
       const reasonMessage =
         this.getPromoPlacementBlockReasonMessage(blockReason) || PLAYER_PLACEABLE_BLOCKED_MESSAGE;
@@ -13981,8 +15398,18 @@ export class GameRuntime {
       : usePanelValues
         ? Number(this.promoScaleInputEl?.value)
         : Number(own?.scale);
+    const scaleYRaw = hasScaleYOverride
+      ? scaleYOverrideValue
+      : usePanelValues
+        ? Number(this.promoScaleYInputEl?.value)
+        : Number(own?.scaleY);
     const scale = THREE.MathUtils.clamp(
       Number.isFinite(scaleRaw) ? scaleRaw : own?.scale ?? PROMO_DEFAULT_SCALE,
+      PROMO_MIN_SCALE,
+      PROMO_MAX_SCALE
+    );
+    const scaleY = THREE.MathUtils.clamp(
+      Number.isFinite(scaleYRaw) ? scaleYRaw : own?.scaleY ?? scale,
       PROMO_MIN_SCALE,
       PROMO_MAX_SCALE
     );
@@ -14027,6 +15454,7 @@ export class GameRuntime {
         yaw: this.normalizePromoYaw(transform.yaw, 0),
         kind,
         scale,
+        scaleY,
         linkUrl,
         mediaDataUrl,
         allowOthersDraw,
@@ -14193,8 +15621,13 @@ export class GameRuntime {
 
   createPromoBlockVisual(entry) {
     const safeScale = THREE.MathUtils.clamp(Number(entry.scale) || 1, PROMO_MIN_SCALE, PROMO_MAX_SCALE);
+    const safeScaleY = THREE.MathUtils.clamp(
+      Number(entry.scaleY) || safeScale,
+      PROMO_MIN_SCALE,
+      PROMO_MAX_SCALE
+    );
     const bodyWidth = PROMO_BLOCK_WIDTH * safeScale;
-    const bodyHeight = PROMO_BLOCK_HEIGHT * safeScale;
+    const bodyHeight = PROMO_BLOCK_HEIGHT * safeScaleY;
     const bodyDepth = PROMO_BLOCK_DEPTH * safeScale;
     const surfaceBaseId = this.getPromoPaintSurfaceBaseId(entry.ownerKey);
 
@@ -14257,13 +15690,18 @@ export class GameRuntime {
 
   createPromoSignVisual(entry) {
     const safeScale = THREE.MathUtils.clamp(Number(entry.scale) || 1, PROMO_MIN_SCALE, PROMO_MAX_SCALE);
+    const safeScaleY = THREE.MathUtils.clamp(
+      Number(entry.scaleY) || safeScale,
+      PROMO_MIN_SCALE,
+      PROMO_MAX_SCALE
+    );
     const boardWidth = 2.6 * safeScale;
-    const boardHeight = 1.5 * safeScale;
+    const boardHeight = 1.5 * safeScaleY;
     const boardDepth = 0.12 * safeScale;
-    const poleHeight = 1.7 * safeScale;
+    const poleHeight = 1.7 * safeScaleY;
 
     const group = new THREE.Group();
-    group.position.set(entry.x, entry.y - 0.7 * safeScale, entry.z);
+    group.position.set(entry.x, entry.y - 0.7 * safeScaleY, entry.z);
     group.rotation.y = this.normalizePromoYaw(entry.yaw, 0);
 
     const pole = new THREE.Mesh(
@@ -14822,7 +16260,7 @@ export class GameRuntime {
     });
   }
 
-  requestHostClaim({ manual = false } = {}) {
+  requestHostClaim({ manual = false, skipThrottle = false } = {}) {
     if (!this.socket || !this.networkConnected) {
       if (manual) {
         this.appendChatLine("", "서버 연결 후 다시 시도하세요. (/host)", "system");
@@ -14839,7 +16277,7 @@ export class GameRuntime {
       return;
     }
 
-    if (!manual) {
+    if (!manual && !skipThrottle) {
       const now = performance.now();
       if (now - this.autoHostClaimLastAttemptMs < 1200) {
         return;
@@ -15199,6 +16637,840 @@ export class GameRuntime {
     this.skyEnvironmentTexture = null;
   }
 
+  registerCloudVisualMaterial(material) {
+    if (!material || material.userData?.emptinesCloudVisualCaptured) {
+      return;
+    }
+    material.userData.emptinesCloudVisualCaptured = true;
+    this.cloudVisualMaterials.push({
+      material,
+      opacity: Number.isFinite(Number(material.opacity)) ? Number(material.opacity) : 1,
+      color: material.color?.isColor ? material.color.clone() : null
+    });
+  }
+
+  registerFutureCityBackdropMaterial(material, kind = "base") {
+    if (!material || material.userData?.emptinesFutureCityVisualCaptured) {
+      return;
+    }
+    material.userData.emptinesFutureCityVisualCaptured = true;
+    const record = {
+      material,
+      opacity: Number.isFinite(Number(material.opacity)) ? Number(material.opacity) : 1,
+      color: material.color?.isColor ? material.color.clone() : null
+    };
+    if (kind === "glow") {
+      this.futureCityBackdropGlowMaterials.push(record);
+      return;
+    }
+    this.futureCityBackdropBaseMaterials.push(record);
+  }
+
+  registerFutureCityDistrictMaterial(material, kind = "base") {
+    if (!material || material.userData?.emptinesFutureCityDistrictCaptured) {
+      return;
+    }
+    material.userData.emptinesFutureCityDistrictCaptured = true;
+    const record = {
+      material,
+      opacity: Number.isFinite(Number(material.opacity)) ? Number(material.opacity) : 1,
+      color: material.color?.isColor ? material.color.clone() : null,
+      emissive: material.emissive?.isColor ? material.emissive.clone() : null,
+      emissiveIntensity:
+        "emissiveIntensity" in material && Number.isFinite(Number(material.emissiveIntensity))
+          ? Number(material.emissiveIntensity)
+          : 0
+    };
+    if (kind === "glow") {
+      this.futureCityDistrictGlowMaterials.push(record);
+      return;
+    }
+    this.futureCityDistrictBaseMaterials.push(record);
+  }
+
+  registerFutureCityDistrictMeshMaterials(mesh, kind = "base") {
+    if (!mesh?.material) {
+      return;
+    }
+    if (Array.isArray(mesh.material)) {
+      for (const material of mesh.material) {
+        this.registerFutureCityDistrictMaterial(material, kind);
+      }
+      return;
+    }
+    this.registerFutureCityDistrictMaterial(mesh.material, kind);
+  }
+
+  registerBootIntroDepthMaterial(material, layer = "mid") {
+    if (!material || material.userData?.emptinesBootIntroDepthCaptured) {
+      return;
+    }
+    material.userData.emptinesBootIntroDepthCaptured = true;
+    const record = {
+      material,
+      color: material.color?.isColor ? material.color.clone() : null,
+      emissive: material.emissive?.isColor ? material.emissive.clone() : null,
+      emissiveIntensity:
+        "emissiveIntensity" in material && Number.isFinite(Number(material.emissiveIntensity))
+          ? Number(material.emissiveIntensity)
+          : 0,
+      opacity: Number.isFinite(Number(material.opacity)) ? Number(material.opacity) : 1
+    };
+    if (layer === "near") {
+      this.bootIntroNearMaterials.push(record);
+      return;
+    }
+    this.bootIntroMidMaterials.push(record);
+  }
+
+  registerBootIntroDepthMeshMaterials(root, layer = "mid") {
+    if (!root?.traverse) {
+      return;
+    }
+    root.traverse((child) => {
+      if (!child?.isMesh || !child.material) {
+        return;
+      }
+      if (Array.isArray(child.material)) {
+        for (const material of child.material) {
+          this.registerBootIntroDepthMaterial(material, layer);
+        }
+        return;
+      }
+      this.registerBootIntroDepthMaterial(child.material, layer);
+    });
+  }
+
+  createBootIntroAirHazeTexture() {
+    const canvas = document.createElement("canvas");
+    canvas.width = this.mobileEnabled ? 512 : 768;
+    canvas.height = this.mobileEnabled ? 512 : 768;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return null;
+    }
+
+    const { width, height } = canvas;
+    context.clearRect(0, 0, width, height);
+    const centerX = width * 0.5;
+    const centerY = height * 0.58;
+    const radius = Math.max(width, height) * 0.48;
+    const radial = context.createRadialGradient(centerX, centerY, radius * 0.1, centerX, centerY, radius);
+    radial.addColorStop(0, "rgba(236, 245, 255, 0.52)");
+    radial.addColorStop(0.48, "rgba(174, 194, 212, 0.24)");
+    radial.addColorStop(1, "rgba(96, 112, 130, 0)");
+    context.fillStyle = radial;
+    context.fillRect(0, 0, width, height);
+
+    const rand = (x, y = 0, z = 0) => {
+      const value = Math.sin(x * 127.1 + y * 311.7 + z * 74.7) * 43758.5453123;
+      return value - Math.floor(value);
+    };
+    context.lineCap = "round";
+    for (let i = 0; i < 42; i += 1) {
+      const y = height * (0.22 + rand(i, 0.3, 0.9) * 0.52);
+      const startX = -width * (0.08 + rand(i, 1.1, 0.3) * 0.12);
+      const endX = width * (1.04 + rand(i, 1.7, 0.8) * 0.16);
+      const bend = (rand(i, 2.2, 1.4) - 0.5) * height * 0.06;
+      context.strokeStyle = `rgba(210, 224, 238, ${(0.018 + rand(i, 3.4, 1.2) * 0.03).toFixed(3)})`;
+      context.lineWidth = 14 + rand(i, 2.7, 0.4) * 28;
+      context.beginPath();
+      context.moveTo(startX, y);
+      context.quadraticCurveTo(width * 0.5, y + bend, endX, y + bend * 0.4);
+      context.stroke();
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.generateMipmaps = false;
+    texture.needsUpdate = true;
+    return texture;
+  }
+
+  createBootIntroAirHazeLayer(forwardDirection) {
+    const texture = this.createBootIntroAirHazeTexture();
+    if (!texture) {
+      return null;
+    }
+    const group = new THREE.Group();
+    group.name = "boot_intro_air_haze";
+    const forward = forwardDirection?.clone?.() ?? new THREE.Vector3(0, 0, 1);
+    forward.y = 0;
+    if (forward.lengthSq() < 0.0001) {
+      forward.set(0, 0, 1);
+    } else {
+      forward.normalize();
+    }
+    const right = new THREE.Vector3(forward.z, 0, -forward.x).normalize();
+    const spawn = this.bridgeApproachSpawn?.clone?.() ?? new THREE.Vector3(0, 0, -98);
+    const planes = [
+      { distance: 16, y: this.mobileEnabled ? 5.8 : 7.2, width: this.mobileEnabled ? 44 : 58, height: this.mobileEnabled ? 18 : 24, opacity: 0.26 },
+      { distance: 34, y: this.mobileEnabled ? 8.6 : 10.4, width: this.mobileEnabled ? 74 : 92, height: this.mobileEnabled ? 24 : 32, opacity: 0.22 }
+    ];
+
+    for (const plane of planes) {
+      const material = new THREE.MeshBasicMaterial({
+        map: texture,
+        color: 0x92a7b9,
+        transparent: true,
+        opacity: plane.opacity,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        fog: false,
+        toneMapped: false
+      });
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(plane.width, plane.height), material);
+      const center = spawn.clone().addScaledVector(forward, plane.distance);
+      mesh.position.set(center.x, plane.y, center.z);
+      mesh.rotation.y = Math.atan2(forward.x, forward.z) + Math.PI;
+      mesh.renderOrder = 12;
+      group.add(mesh);
+      this.bootIntroAirHazeMaterials.push({
+        material,
+        color: material.color.clone(),
+        opacity: material.opacity
+      });
+    }
+
+    const floorMaterial = new THREE.MeshBasicMaterial({
+      map: texture,
+      color: 0xa8b8c6,
+      transparent: true,
+      opacity: 0.18,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      fog: false,
+      toneMapped: false
+    });
+    const floorMist = new THREE.Mesh(
+      new THREE.PlaneGeometry(this.mobileEnabled ? 84 : 126, this.mobileEnabled ? 30 : 42),
+      floorMaterial
+    );
+    const floorCenter = spawn.clone().addScaledVector(forward, 28).addScaledVector(right, 0.8);
+    floorMist.position.set(floorCenter.x, 1.6, floorCenter.z);
+    floorMist.rotation.x = -Math.PI / 2;
+    floorMist.rotation.z = Math.atan2(forward.x, forward.z);
+    floorMist.renderOrder = 11;
+    group.add(floorMist);
+    this.bootIntroAirHazeMaterials.push({
+      material: floorMaterial,
+      color: floorMaterial.color.clone(),
+      opacity: floorMaterial.opacity
+    });
+
+    return group;
+  }
+
+  resolveBootIntroPhaseState(rawProgress) {
+    const progress = THREE.MathUtils.clamp(rawProgress, 0, 1);
+    let phase =
+      this.bootIntroPhaseSequence[this.bootIntroPhaseSequence.length - 1] ??
+      { id: "day", start: 0, end: 1, from: "day", to: "day" };
+    for (const candidate of this.bootIntroPhaseSequence) {
+      if (progress <= candidate.end + 0.0001) {
+        phase = candidate;
+        break;
+      }
+    }
+
+    const fromState = this.bootIntroAtmosphereStates[phase.from] ?? this.bootIntroAtmosphereStates.night;
+    const toState = this.bootIntroAtmosphereStates[phase.to] ?? fromState;
+    const localProgress = phase.end <= phase.start
+      ? 1
+      : THREE.MathUtils.smoothstep(progress, phase.start, phase.end);
+    const lerpNumber = (fromValue, toValue) =>
+      THREE.MathUtils.lerp(Number(fromValue) || 0, Number(toValue) || 0, localProgress);
+    const lerpColor = (fromColor, toColor) =>
+      fromColor.clone().lerp(toColor, localProgress);
+    const lerpDirection = (fromDirection, toDirection) =>
+      fromDirection.clone().lerp(toDirection, localProgress).normalize();
+
+    return {
+      phaseId: phase.id,
+      progress,
+      localProgress,
+      headline: String(toState.headline ?? ""),
+      subtitle: String(toState.subtitle ?? ""),
+      skyColor: lerpColor(fromState.skyColor, toState.skyColor),
+      fogColor: lerpColor(fromState.fogColor, toState.fogColor),
+      fogDensity: lerpNumber(fromState.fogDensity, toState.fogDensity),
+      fogNear: lerpNumber(fromState.fogNear, toState.fogNear),
+      fogFar: lerpNumber(fromState.fogFar, toState.fogFar),
+      sunDirection: lerpDirection(fromState.sunDirection, toState.sunDirection),
+      sunIntensity: lerpNumber(fromState.sunIntensity, toState.sunIntensity),
+      sunColor: lerpColor(fromState.sunColor, toState.sunColor),
+      hemiSkyColor: lerpColor(fromState.hemiSkyColor, toState.hemiSkyColor),
+      hemiGroundColor: lerpColor(fromState.hemiGroundColor, toState.hemiGroundColor),
+      hemiIntensity: lerpNumber(fromState.hemiIntensity, toState.hemiIntensity),
+      fillColor: lerpColor(fromState.fillColor, toState.fillColor),
+      fillIntensity: lerpNumber(fromState.fillIntensity, toState.fillIntensity),
+      exposure: lerpNumber(fromState.exposure, toState.exposure),
+      cloudTint: lerpColor(fromState.cloudTint, toState.cloudTint),
+      cloudTintMix: lerpNumber(fromState.cloudTintMix, toState.cloudTintMix),
+      cloudOpacityScale: lerpNumber(fromState.cloudOpacityScale, toState.cloudOpacityScale),
+      cloudBrightness: lerpNumber(fromState.cloudBrightness, toState.cloudBrightness),
+      cityBaseOpacity: lerpNumber(fromState.cityBaseOpacity, toState.cityBaseOpacity),
+      cityBaseBrightness: lerpNumber(fromState.cityBaseBrightness, toState.cityBaseBrightness),
+      cityAtmosphereBlend: lerpNumber(fromState.cityAtmosphereBlend, toState.cityAtmosphereBlend),
+      cityGlowOpacity: lerpNumber(fromState.cityGlowOpacity, toState.cityGlowOpacity),
+      cityGlowBrightness: lerpNumber(fromState.cityGlowBrightness, toState.cityGlowBrightness),
+      cityDistrictBrightness: lerpNumber(fromState.cityDistrictBrightness, toState.cityDistrictBrightness),
+      cityDistrictDetail: lerpNumber(fromState.cityDistrictDetail, toState.cityDistrictDetail),
+      cityDistrictAtmosphereBlend: lerpNumber(
+        fromState.cityDistrictAtmosphereBlend,
+        toState.cityDistrictAtmosphereBlend
+      ),
+      nearBrightness: lerpNumber(fromState.nearBrightness, toState.nearBrightness),
+      nearAtmosphereBlend: lerpNumber(fromState.nearAtmosphereBlend, toState.nearAtmosphereBlend),
+      nearEmissiveScale: lerpNumber(fromState.nearEmissiveScale, toState.nearEmissiveScale),
+      midBrightness: lerpNumber(fromState.midBrightness, toState.midBrightness),
+      midAtmosphereBlend: lerpNumber(fromState.midAtmosphereBlend, toState.midAtmosphereBlend),
+      midEmissiveScale: lerpNumber(fromState.midEmissiveScale, toState.midEmissiveScale),
+      airHazeColor: lerpColor(fromState.airHazeColor, toState.airHazeColor),
+      airHazeOpacity: lerpNumber(fromState.airHazeOpacity, toState.airHazeOpacity),
+      airHazeBrightness: lerpNumber(fromState.airHazeBrightness, toState.airHazeBrightness),
+      cameraLookYOffset: lerpNumber(fromState.cameraLookYOffset, toState.cameraLookYOffset),
+      cameraLookLateralOffset: lerpNumber(fromState.cameraLookLateralOffset, toState.cameraLookLateralOffset),
+      cameraLookForwardOffset: lerpNumber(fromState.cameraLookForwardOffset, toState.cameraLookForwardOffset),
+      cameraPitch: lerpNumber(fromState.cameraPitch, toState.cameraPitch)
+    };
+  }
+
+  syncBootIntroPhasePresentation(stageState) {
+    if (!stageState || !this.bootIntroRevealActive) {
+      return;
+    }
+    if (this.bootIntroCurrentPhaseId === stageState.phaseId) {
+      return;
+    }
+    this.bootIntroCurrentPhaseId = stageState.phaseId;
+    if (stageState.headline || stageState.subtitle) {
+      this.setFlowHeadline(stageState.headline || "시야 동기화", stageState.subtitle || "");
+      this.hud.setStatus(this.getStatusText());
+    }
+  }
+
+  updateBootIntroCloudVisuals(stageState) {
+    if (!this.cloudVisualMaterials.length) {
+      return;
+    }
+
+    for (const record of this.cloudVisualMaterials) {
+      const material = record.material;
+      if (!material) {
+        continue;
+      }
+      material.opacity = THREE.MathUtils.clamp(
+        record.opacity * (Number(stageState?.cloudOpacityScale) || 1),
+        0,
+        1
+      );
+      if (record.color?.isColor && material.color?.isColor) {
+        material.color.copy(record.color);
+        material.color.lerp(stageState?.cloudTint ?? this.bootIntroSkyDayColor, stageState?.cloudTintMix ?? 0);
+        material.color.multiplyScalar(Number(stageState?.cloudBrightness) || 1);
+      }
+    }
+  }
+
+  updateBootIntroDepthMaterials(stageState) {
+    const applyLayer = (records, brightness, atmosphereBlend, emissiveScale) => {
+      for (const record of records) {
+        const material = record.material;
+        if (!material) {
+          continue;
+        }
+        if (record.color?.isColor && material.color?.isColor) {
+          material.color.copy(record.color);
+          material.color.lerp(
+            stageState?.fogColor ?? this.bootIntroFogNightColor,
+            THREE.MathUtils.clamp(Number(atmosphereBlend) || 0, 0, 1)
+          );
+          material.color.multiplyScalar(Number(brightness) || 1);
+        }
+        if (record.emissive?.isColor && material.emissive?.isColor) {
+          material.emissive.copy(record.emissive);
+          material.emissive.multiplyScalar(Number(emissiveScale) || 0);
+        }
+        if ("emissiveIntensity" in material) {
+          material.emissiveIntensity = record.emissiveIntensity * (Number(emissiveScale) || 0);
+        }
+        if ("opacity" in material && Number.isFinite(record.opacity)) {
+          material.opacity = record.opacity;
+        }
+        material.needsUpdate = true;
+      }
+    };
+
+    applyLayer(
+      this.bootIntroNearMaterials,
+      stageState?.nearBrightness,
+      stageState?.nearAtmosphereBlend,
+      stageState?.nearEmissiveScale
+    );
+    applyLayer(
+      this.bootIntroMidMaterials,
+      stageState?.midBrightness,
+      stageState?.midAtmosphereBlend,
+      stageState?.midEmissiveScale
+    );
+
+    for (const record of this.bootIntroAirHazeMaterials) {
+      const material = record.material;
+      if (!material) {
+        continue;
+      }
+      if (record.color?.isColor && material.color?.isColor) {
+        material.color.copy(record.color);
+        material.color.lerp(stageState?.airHazeColor ?? this.bootIntroFogNightColor, 0.72);
+        material.color.multiplyScalar(Number(stageState?.airHazeBrightness) || 1);
+      }
+      material.opacity = THREE.MathUtils.clamp(
+        record.opacity * (Number(stageState?.airHazeOpacity) || 0),
+        0,
+        1
+      );
+    }
+  }
+
+  applyFutureCityBackdropReveal(stageState) {
+    for (const record of this.futureCityBackdropBaseMaterials) {
+      const material = record.material;
+      if (!material) {
+        continue;
+      }
+      material.opacity = THREE.MathUtils.clamp(
+        record.opacity * Math.max(0.015, Number(stageState?.cityBaseOpacity) || 0),
+        0,
+        1
+      );
+      if (record.color?.isColor && material.color?.isColor) {
+        material.color.copy(record.color);
+        material.color.lerp(
+          stageState?.fogColor ?? this.bootIntroFogNightColor,
+          THREE.MathUtils.clamp(Number(stageState?.cityAtmosphereBlend) || 0, 0, 1)
+        );
+        material.color.multiplyScalar(Number(stageState?.cityBaseBrightness) || 1);
+      }
+    }
+
+    for (const record of this.futureCityBackdropGlowMaterials) {
+      const material = record.material;
+      if (!material) {
+        continue;
+      }
+      material.opacity = THREE.MathUtils.clamp(
+        record.opacity * (Number(stageState?.cityGlowOpacity) || 0),
+        0,
+        1
+      );
+      if (record.color?.isColor && material.color?.isColor) {
+        material.color.copy(record.color);
+        material.color.multiplyScalar(Number(stageState?.cityGlowBrightness) || 1);
+      }
+    }
+
+    for (const record of this.futureCityDistrictBaseMaterials) {
+      const material = record.material;
+      if (!material) {
+        continue;
+      }
+      if (record.color?.isColor && material.color?.isColor) {
+        material.color.copy(record.color);
+        material.color.lerp(
+          stageState?.fogColor ?? this.bootIntroFogNightColor,
+          THREE.MathUtils.clamp(Number(stageState?.cityDistrictAtmosphereBlend) || 0, 0, 1)
+        );
+        material.color.multiplyScalar(Number(stageState?.cityDistrictBrightness) || 1);
+      }
+      if (record.emissive?.isColor && material.emissive?.isColor) {
+        material.emissive.copy(record.emissive);
+        material.emissive.multiplyScalar(Number(stageState?.cityDistrictDetail) || 0);
+      }
+      if ("emissiveIntensity" in material) {
+        material.emissiveIntensity = record.emissiveIntensity * (Number(stageState?.cityDistrictDetail) || 0);
+      }
+      if ("opacity" in material && Number.isFinite(record.opacity)) {
+        material.opacity = record.opacity;
+      }
+      material.needsUpdate = true;
+    }
+
+    for (const record of this.futureCityDistrictGlowMaterials) {
+      const material = record.material;
+      if (!material) {
+        continue;
+      }
+      if (record.color?.isColor && material.color?.isColor) {
+        material.color.copy(record.color);
+        material.color.multiplyScalar(Number(stageState?.cityGlowBrightness) || 1);
+      }
+      if ("opacity" in material) {
+        material.opacity = THREE.MathUtils.clamp(
+          record.opacity * (Number(stageState?.cityDistrictDetail) || 0),
+          0,
+          1
+        );
+      }
+      material.needsUpdate = true;
+    }
+
+    if (this.futureCityBackdropDistrictGroup) {
+      this.futureCityBackdropDistrictGroup.visible = true;
+    }
+  }
+
+  applyBootIntroWorldReveal(rawProgress) {
+    const progress = THREE.MathUtils.clamp(rawProgress, 0, 1);
+    const stageState = this.resolveBootIntroPhaseState(progress);
+    this.syncBootIntroPhasePresentation(stageState);
+    const skyConfig = this.worldContent.sky ?? {};
+
+    if (this.scene.background?.isColor) {
+      this.scene.background.copy(stageState.skyColor);
+    }
+
+    if (this.scene.fog?.isFogExp2) {
+      this.scene.fog.color.copy(stageState.fogColor);
+      this.scene.fog.density = stageState.fogDensity;
+    } else if (this.scene.fog) {
+      this.scene.fog.color.copy(stageState.fogColor);
+      this.scene.fog.near = stageState.fogNear;
+      this.scene.fog.far = stageState.fogFar;
+    }
+
+    if (this.skyDome?.material?.uniforms?.sunPosition?.value) {
+      const uniforms = this.skyDome.material.uniforms;
+      this.skySun.copy(stageState.sunDirection).multiplyScalar(Number(skyConfig.scale) || 450000);
+      uniforms.sunPosition.value.copy(this.skySun);
+      uniforms.turbidity.value = THREE.MathUtils.lerp(0.78, Number(skyConfig.turbidity) || 1.85, progress);
+      uniforms.rayleigh.value = THREE.MathUtils.lerp(0.16, Number(skyConfig.rayleigh) || 2.95, progress);
+      uniforms.mieCoefficient.value = THREE.MathUtils.lerp(
+        0.0054,
+        Number(skyConfig.mieCoefficient) || 0.0028,
+        progress
+      );
+      uniforms.mieDirectionalG.value = THREE.MathUtils.lerp(
+        0.92,
+        Number(skyConfig.mieDirectionalG) || 0.79,
+        progress
+      );
+    }
+
+    if (this.hemiLight) {
+      this.hemiLight.intensity = stageState.hemiIntensity;
+      this.hemiLight.color.copy(stageState.hemiSkyColor);
+      this.hemiLight.groundColor.copy(stageState.hemiGroundColor);
+    }
+
+    if (this.sunLight) {
+      this.sunLight.position.copy(stageState.sunDirection).multiplyScalar(this.sunLightBaseDistance || 160);
+      this.sunLight.intensity = stageState.sunIntensity;
+      this.sunLight.color.copy(stageState.sunColor);
+      if (this.sunLight.shadow) {
+        this.sunLight.shadow.needsUpdate = progress > 0.44;
+      }
+    }
+
+    if (this.fillLight) {
+      this.fillLight.position
+        .copy(stageState.sunDirection)
+        .multiplyScalar(-(this.fillLightBaseDistance || 96) * 0.58)
+        .setY((this.fillLightBaseDistance || 96) * 0.32);
+      this.fillLight.intensity = stageState.fillIntensity;
+      this.fillLight.color.copy(stageState.fillColor);
+    }
+
+    this.renderer.toneMappingExposure = stageState.exposure;
+    this.updateBootIntroCloudVisuals(stageState);
+    this.updateBootIntroDepthMaterials(stageState);
+    this.applyFutureCityBackdropReveal(stageState);
+    return stageState;
+  }
+
+  getCloudSpriteTexture(kind = "main", variant = 0) {
+    const rawKind = String(kind ?? "main").trim().toLowerCase();
+    const normalizedKind =
+      rawKind === "shadow"
+        ? "shadow"
+        : rawKind === "cirrus"
+          ? "cirrus"
+          : "main";
+    const safeVariant = Math.max(0, Math.trunc(Number(variant) || 0));
+    const resolutionKey = this.mobileEnabled ? "mobile" : "desktop";
+    const sunDirection = this.skySun.lengthSq() > 0.0001
+      ? this.skySun.clone().normalize()
+      : new THREE.Vector3(0.48, 0.78, 0.24);
+    const sunSide = sunDirection.x >= 0 ? "right" : "left";
+    const cacheKey = `${normalizedKind}|${safeVariant}|${sunSide}|${resolutionKey}`;
+    const cached = this.cloudSpriteTextureCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = normalizedKind === "cirrus" ? 512 : 448;
+    canvas.height = normalizedKind === "cirrus" ? 224 : 320;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return null;
+    }
+
+    const width = canvas.width;
+    const height = canvas.height;
+    const seedBase = safeVariant * 19 + (normalizedKind === "shadow" ? 43 : normalizedKind === "cirrus" ? 71 : 11);
+    const rand = (x, y = 0, z = 0) => {
+      const value = Math.sin(x * 127.1 + y * 311.7 + z * 74.7 + seedBase * 13.37) * 43758.5453123;
+      return value - Math.floor(value);
+    };
+    const sunBias = sunSide === "right" ? 1 : -1;
+
+    context.clearRect(0, 0, width, height);
+
+    const smoothstep = (edge0, edge1, value) => {
+      const safeRange = Math.max(0.0001, edge1 - edge0);
+      const t = THREE.MathUtils.clamp((value - edge0) / safeRange, 0, 1);
+      return t * t * (3 - 2 * t);
+    };
+    const mixChannel = (from, to, factor) => from + (to - from) * factor;
+    const sampleNoise = (x, y) => {
+      const baseX = Math.floor(x);
+      const baseY = Math.floor(y);
+      const fracX = x - baseX;
+      const fracY = y - baseY;
+      const sx = fracX * fracX * (3 - 2 * fracX);
+      const sy = fracY * fracY * (3 - 2 * fracY);
+      const n00 = rand(baseX, baseY, 0.37);
+      const n10 = rand(baseX + 1, baseY, 0.37);
+      const n01 = rand(baseX, baseY + 1, 0.37);
+      const n11 = rand(baseX + 1, baseY + 1, 0.37);
+      const ix0 = n00 + (n10 - n00) * sx;
+      const ix1 = n01 + (n11 - n01) * sx;
+      return ix0 + (ix1 - ix0) * sy;
+    };
+    const fbm = (x, y, octaves = 4) => {
+      let value = 0;
+      let amplitude = 0.55;
+      let frequency = 1;
+      let totalAmplitude = 0;
+      for (let octave = 0; octave < octaves; octave += 1) {
+        value += sampleNoise(x * frequency, y * frequency) * amplitude;
+        totalAmplitude += amplitude;
+        amplitude *= 0.5;
+        frequency *= 2.08;
+      }
+      return totalAmplitude > 0 ? value / totalAmplitude : 0;
+    };
+    const drawSoftEllipse = (cx, cy, radiusX, radiusY, rotation, colorStops) => {
+      context.save();
+      context.translate(cx, cy);
+      context.rotate(rotation);
+      context.scale(radiusX, radiusY);
+      const gradient = context.createRadialGradient(0, 0, 0.12, 0, 0, 1);
+      for (const [stop, color] of colorStops) {
+        gradient.addColorStop(stop, color);
+      }
+      context.fillStyle = gradient;
+      context.beginPath();
+      context.arc(0, 0, 1, 0, Math.PI * 2);
+      context.fill();
+      context.restore();
+    };
+    const applyOrganicShaping = () => {
+      const imageData = context.getImageData(0, 0, width, height);
+      const data = imageData.data;
+      for (let y = 0; y < height; y += 1) {
+        const ny = y / Math.max(1, height - 1);
+        for (let x = 0; x < width; x += 1) {
+          const nx = x / Math.max(1, width - 1);
+          const index = (y * width + x) * 4;
+          const alpha = data[index + 3] / 255;
+          if (alpha <= 0.001) {
+            continue;
+          }
+
+          const centeredX = nx * 2 - 1;
+          const centeredY = ny * 2 - 1;
+          const radial = Math.sqrt(centeredX * centeredX * 0.94 + centeredY * centeredY * 1.16);
+          const detailNoise = fbm(nx * 5.8 + safeVariant * 0.31, ny * 6.3 + seedBase * 0.021, 4);
+          const macroNoise = fbm(nx * 2.2 + seedBase * 0.014, ny * 2.7 + safeVariant * 0.23, 3);
+          const edgeFactor = smoothstep(0.42, normalizedKind === "cirrus" ? 1.08 : 0.96, radial);
+          const upperFeather = normalizedKind === "cirrus" ? 0 : smoothstep(0.72, 1, ny) * 0.05;
+          const alphaLoss = edgeFactor * (0.08 + detailNoise * 0.28) + upperFeather;
+          const preservedAlpha = normalizedKind === "cirrus"
+            ? alpha * (0.9 + macroNoise * 0.08)
+            : alpha * Math.max(0.18, 1 - alphaLoss);
+          const clampedAlpha = THREE.MathUtils.clamp(preservedAlpha, 0, 1);
+
+          const sunExposure = smoothstep(0.18, 0.96, sunBias > 0 ? nx : 1 - nx) * (1 - ny * 0.62);
+          const warmLift = normalizedKind === "shadow"
+            ? 0
+            : sunExposure * (0.05 + detailNoise * 0.06);
+          const coolUnderside = normalizedKind === "cirrus"
+            ? 0
+            : smoothstep(0.44, 1, ny) * (0.04 + (1 - macroNoise) * 0.04);
+          data[index] = Math.round(mixChannel(data[index], 255, warmLift));
+          data[index + 1] = Math.round(mixChannel(data[index + 1], 249, warmLift * 0.92));
+          data[index + 2] = Math.round(
+            mixChannel(
+              mixChannel(data[index + 2], 240, warmLift * 0.88),
+              normalizedKind === "shadow" ? 176 : 214,
+              coolUnderside
+            )
+          );
+          data[index + 3] = Math.round(clampedAlpha * 255);
+        }
+      }
+      context.putImageData(imageData, 0, 0);
+    };
+
+    if (normalizedKind === "cirrus") {
+      const streakCount = 5 + safeVariant;
+      for (let index = 0; index < streakCount; index += 1) {
+        const streakWidth = width * (0.18 + rand(index, 1.2) * 0.3);
+        const streakHeight = height * (0.045 + rand(index, 2.3) * 0.045);
+        const cx = width * (0.14 + rand(index, 3.4) * 0.72);
+        const cy = height * (0.26 + rand(index, 4.1) * 0.42);
+        const rotation = sunBias * (0.1 + rand(index, 5.2) * 0.16) + (rand(index, 6.3) - 0.5) * 0.18;
+        drawSoftEllipse(cx, cy, streakWidth, streakHeight, rotation, [
+          [0, "rgba(255, 255, 255, 0.28)"],
+          [0.38, "rgba(245, 249, 255, 0.16)"],
+          [1, "rgba(255, 255, 255, 0)"]
+        ]);
+        drawSoftEllipse(
+          cx + sunBias * streakWidth * (0.06 + rand(index, 7.1) * 0.06),
+          cy - streakHeight * (0.08 + rand(index, 8.1) * 0.08),
+          streakWidth * (0.68 + rand(index, 9.1) * 0.18),
+          streakHeight * (0.54 + rand(index, 10.1) * 0.12),
+          rotation + (rand(index, 11.1) - 0.5) * 0.06,
+          [
+            [0, "rgba(255, 251, 242, 0.16)"],
+            [0.5, "rgba(244, 248, 255, 0.08)"],
+            [1, "rgba(255, 255, 255, 0)"]
+          ]
+        );
+      }
+
+      context.globalCompositeOperation = "screen";
+      const highLight = context.createLinearGradient(
+        sunSide === "right" ? width * 0.2 : width * 0.8,
+        0,
+        sunSide === "right" ? width : 0,
+        height
+      );
+      highLight.addColorStop(0, "rgba(255, 255, 255, 0.12)");
+      highLight.addColorStop(1, "rgba(255, 255, 255, 0)");
+      context.fillStyle = highLight;
+      context.fillRect(0, 0, width, height);
+      context.globalCompositeOperation = "source-over";
+    } else {
+      const lobeCount = normalizedKind === "shadow" ? 8 : 11 + safeVariant * 2;
+      for (let index = 0; index < lobeCount; index += 1) {
+        const cx = width * (0.16 + rand(index, 1.1) * 0.68);
+        const cy = height * (normalizedKind === "shadow" ? 0.58 : 0.5) + (rand(index, 2.1) - 0.5) * height * (normalizedKind === "shadow" ? 0.14 : 0.2);
+        const radiusX = width * 0.1 + rand(index, 3.1) * width * (normalizedKind === "shadow" ? 0.08 : 0.12);
+        const radiusY = radiusX * (normalizedKind === "shadow" ? 0.36 : 0.58) + rand(index, 4.1) * height * 0.04;
+        const rotation = (rand(index, 5.1) - 0.5) * 0.34 + sunBias * 0.04;
+        const alpha = normalizedKind === "shadow"
+          ? 0.18 + rand(index, 6.1) * 0.12
+          : 0.3 + rand(index, 7.1) * 0.24;
+        const innerColor = normalizedKind === "shadow"
+          ? `rgba(104, 124, 146, ${alpha.toFixed(3)})`
+          : `rgba(255, 255, 255, ${alpha.toFixed(3)})`;
+        const midColor = normalizedKind === "shadow"
+          ? `rgba(132, 150, 170, ${(alpha * 0.64).toFixed(3)})`
+          : `rgba(244, 249, 255, ${(alpha * 0.7).toFixed(3)})`;
+        drawSoftEllipse(cx, cy, radiusX, radiusY, rotation, [
+          [0, innerColor],
+          [0.5, midColor],
+          [1, "rgba(255, 255, 255, 0)"]
+        ]);
+      }
+
+      if (normalizedKind === "main") {
+        const shelfCount = 4;
+        for (let index = 0; index < shelfCount; index += 1) {
+          drawSoftEllipse(
+            width * (0.24 + rand(index, 20.1) * 0.52),
+            height * (0.62 + rand(index, 21.1) * 0.06),
+            width * (0.16 + rand(index, 22.1) * 0.08),
+            height * (0.05 + rand(index, 23.1) * 0.018),
+            (rand(index, 24.1) - 0.5) * 0.08,
+            [
+              [0, "rgba(230, 238, 248, 0.14)"],
+              [0.58, "rgba(220, 232, 244, 0.08)"],
+              [1, "rgba(255, 255, 255, 0)"]
+            ]
+          );
+        }
+      }
+
+      context.globalCompositeOperation = "destination-out";
+      const cutoutCount = normalizedKind === "shadow" ? 4 : 8;
+      for (let index = 0; index < cutoutCount; index += 1) {
+        const cx = width * (0.16 + rand(index, 8.1) * 0.68);
+        const cy = height * (0.38 + rand(index, 9.1) * 0.34);
+        const radiusX = width * (0.04 + rand(index, 10.1) * 0.05);
+        const radiusY = radiusX * (0.72 + rand(index, 11.1) * 0.24);
+        drawSoftEllipse(cx, cy, radiusX, radiusY, (rand(index, 12.1) - 0.5) * 0.4, [
+          [0, "rgba(0, 0, 0, 0.12)"],
+          [0.65, "rgba(0, 0, 0, 0.04)"],
+          [1, "rgba(0, 0, 0, 0)"]
+        ]);
+      }
+      context.globalCompositeOperation = "source-over";
+
+      if (normalizedKind === "main") {
+        const highlight = context.createLinearGradient(
+          sunSide === "right" ? width * 0.1 : width * 0.9,
+          height * 0.12,
+          sunSide === "right" ? width : 0,
+          height * 0.9
+        );
+        highlight.addColorStop(0, "rgba(255, 252, 242, 0.2)");
+        highlight.addColorStop(0.45, "rgba(247, 250, 255, 0.08)");
+        highlight.addColorStop(1, "rgba(255, 255, 255, 0)");
+        context.globalCompositeOperation = "screen";
+        context.fillStyle = highlight;
+        context.fillRect(0, 0, width, height);
+
+        const underside = context.createLinearGradient(0, height * 0.42, 0, height);
+        underside.addColorStop(0, "rgba(0, 0, 0, 0)");
+        underside.addColorStop(1, "rgba(120, 148, 178, 0.14)");
+        context.globalCompositeOperation = "multiply";
+        context.fillStyle = underside;
+        context.fillRect(0, 0, width, height);
+        context.globalCompositeOperation = "source-over";
+      } else {
+        const feather = context.createLinearGradient(0, height * 0.4, 0, height);
+        feather.addColorStop(0, "rgba(170, 195, 220, 0)");
+        feather.addColorStop(1, "rgba(110, 132, 156, 0.16)");
+        context.fillStyle = feather;
+        context.fillRect(0, 0, width, height);
+      }
+    }
+
+    applyOrganicShaping();
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.generateMipmaps = true;
+    texture.anisotropy = this.mobileEnabled
+      ? Math.min(4, this.renderer?.capabilities?.getMaxAnisotropy?.() || 1)
+      : Math.min(8, this.renderer?.capabilities?.getMaxAnisotropy?.() || 1);
+    texture.needsUpdate = true;
+    this.cloudSpriteTextureCache.set(cacheKey, texture);
+    return texture;
+  }
+
   setupCloudLayer() {
     if (this.cloudLayer) {
       this.scene.remove(this.cloudLayer);
@@ -15206,6 +17478,7 @@ export class GameRuntime {
       this.cloudLayer = null;
     }
     this.cloudParticles.length = 0;
+    this.cloudVisualMaterials.length = 0;
 
     const cloudConfig = this.worldContent.clouds;
     if (!cloudConfig?.enabled) {
@@ -15213,22 +17486,17 @@ export class GameRuntime {
     }
 
     const group = new THREE.Group();
-    const puffGeometry = new THREE.SphereGeometry(
-      1,
-      this.mobileEnabled ? 8 : 10,
-      this.mobileEnabled ? 6 : 8
-    );
-    const puffMaterial = new THREE.MeshStandardMaterial({
-      color: cloudConfig.color,
-      roughness: 1,
-      metalness: 0,
-      envMapIntensity: 0,
-      emissive: cloudConfig.emissive ?? 0x0,
-      emissiveIntensity: Number(cloudConfig.emissiveIntensity) || 0,
-      transparent: true,
-      opacity: cloudConfig.opacity,
-      depthWrite: false
-    });
+    const mainTextures = [
+      this.getCloudSpriteTexture("main", 0),
+      this.getCloudSpriteTexture("main", 1),
+      this.getCloudSpriteTexture("main", 2),
+      this.getCloudSpriteTexture("main", 3)
+    ].filter(Boolean);
+    const shadowTexture = this.getCloudSpriteTexture("shadow", 0);
+    const cirrusTexture = this.getCloudSpriteTexture("cirrus", 0);
+    if (mainTextures.length === 0 || !shadowTexture || !cirrusTexture) {
+      return;
+    }
 
     const baseCount = Math.max(1, Math.trunc(cloudConfig.count));
     const mobileCountScale = Number(cloudConfig.mobileCountScale) || 0.55;
@@ -15247,44 +17515,341 @@ export class GameRuntime {
     const maxPuffs = Math.max(minPuffs, Math.trunc(Number(cloudConfig.maxPuffs) || 8));
     const puffSpread = Math.max(0.8, Number(cloudConfig.puffSpread) || 1.8);
     const puffHeightSpread = Math.max(0.04, Number(cloudConfig.puffHeightSpread) || 0.18);
+    const cloudOpacity = THREE.MathUtils.clamp(Number(cloudConfig.opacity) || 0.68, 0.2, 0.92);
+    const sunBias = this.skySun.x >= 0 ? 1 : -1;
+    const skyColor = new THREE.Color(this.worldContent.skyColor ?? 0xa8d4f5);
+    const baseColor = new THREE.Color(cloudConfig.color ?? 0xffffff)
+      .lerp(skyColor, 0.06);
+    const sunWarmColor = new THREE.Color(0xfff5e8);
+    const sunCoolColor = new THREE.Color(0xe2edf8);
+    const shadowColor = baseColor
+      .clone()
+      .lerp(skyColor, 0.58)
+      .multiplyScalar(0.8);
+    const windAngle = Number.isFinite(Number(cloudConfig.windAngle))
+      ? Number(cloudConfig.windAngle)
+      : Math.atan2(0.35, sunBias * 0.92);
+    const windVariance = Math.max(0.05, Number(cloudConfig.windVariance) || 0.32);
+    const cirrusCount = Math.max(
+      this.mobileEnabled ? 2 : 3,
+      Math.round((Number(cloudConfig.cirrusCount) || (this.mobileEnabled ? 3 : 5)) * (this.mobileEnabled ? 0.72 : 1))
+    );
+    const distantCount = Math.max(
+      this.mobileEnabled ? 2 : 3,
+      Math.round((Number(cloudConfig.distantCount) || (this.mobileEnabled ? 4 : 6)) * (this.mobileEnabled ? 0.6 : 1))
+    );
+    const distantHeightBoost = Math.max(16, Number(cloudConfig.distantHeightBoost) || 34);
+    const distantOpacityScale = THREE.MathUtils.clamp(Number(cloudConfig.distantOpacityScale) || 0.76, 0.2, 1);
 
     for (let i = 0; i < count; i += 1) {
       const cloud = new THREE.Group();
-      const puffCount = minPuffs + Math.floor(Math.random() * (maxPuffs - minPuffs + 1));
+      const puffCountRaw = minPuffs + Math.floor(Math.random() * (maxPuffs - minPuffs + 1));
+      const puffCount = this.mobileEnabled
+        ? Math.max(minPuffs, Math.round(puffCountRaw * 0.72))
+        : puffCountRaw;
+      const cloudSpan = minScale + Math.random() * Math.max(1, maxScale - minScale);
+      const archetypeRoll = Math.random();
+      const cloudFamily = archetypeRoll < 0.34 ? "wide" : archetypeRoll < 0.74 ? "layered" : "towering";
+      const widthStretch = cloudFamily === "wide"
+        ? 1.38 + Math.random() * 0.34
+        : cloudFamily === "towering"
+          ? 1.02 + Math.random() * 0.18
+          : 1.14 + Math.random() * 0.28;
+      const depthStretch = cloudFamily === "wide"
+        ? 0.52 + Math.random() * 0.12
+        : cloudFamily === "towering"
+          ? 0.74 + Math.random() * 0.18
+          : 0.62 + Math.random() * 0.16;
+      const verticalLiftScale = cloudFamily === "towering" ? 0.92 : cloudFamily === "wide" ? 0.42 : 0.62;
+      const shadowLayers = this.mobileEnabled ? 2 : cloudFamily === "towering" ? 4 : 3;
+      const rimLayers = this.mobileEnabled ? 1 : cloudFamily === "towering" ? 2 : 1;
+
+      for (let s = 0; s < shadowLayers; s += 1) {
+        const shadowMaterial = new THREE.SpriteMaterial({
+          map: shadowTexture,
+          color: shadowColor.clone().lerp(baseColor, Math.random() * 0.06),
+          transparent: true,
+          opacity: cloudOpacity * (0.12 + Math.random() * 0.07),
+          depthWrite: false,
+          fog: true
+        });
+        this.registerCloudVisualMaterial(shadowMaterial);
+        shadowMaterial.rotation = (Math.random() - 0.5) * 0.35;
+        const shadowSprite = new THREE.Sprite(shadowMaterial);
+        const shadowWidth = cloudSpan * (1.08 + Math.random() * 0.4) * widthStretch;
+        const shadowHeight = shadowWidth * (cloudFamily === "wide" ? 0.26 : 0.3 + Math.random() * 0.08);
+        shadowSprite.position.set(
+          (Math.random() * 2 - 1) * cloudSpan * 0.18,
+          -cloudSpan * (cloudFamily === "wide" ? 0.04 : 0.06 + Math.random() * 0.04),
+          (Math.random() * 2 - 1) * cloudSpan * 0.1
+        );
+        shadowSprite.scale.set(shadowWidth, shadowHeight, 1);
+        cloud.add(shadowSprite);
+      }
 
       for (let p = 0; p < puffCount; p += 1) {
-        const puff = new THREE.Mesh(puffGeometry, puffMaterial);
-        const angle = (p / puffCount) * Math.PI * 2 + Math.random() * 0.7;
-        const radial = (0.35 + Math.random() * 0.9) * puffSpread;
-        const offsetX = Math.cos(angle) * radial + (Math.random() - 0.5) * 0.45;
-        const offsetY = (Math.random() - 0.5) * puffHeightSpread;
-        const offsetZ = Math.sin(angle) * radial * 0.56 + (Math.random() - 0.5) * 0.34;
-        puff.position.set(offsetX, offsetY, offsetZ);
-        puff.scale.set(
-          0.9 + Math.random() * 0.58,
-          0.34 + Math.random() * 0.22,
-          0.68 + Math.random() * 0.52
+        const angle = (p / puffCount) * Math.PI * 2 + Math.random() * 0.9;
+        const radial = (0.15 + Math.random() * 0.52) * puffSpread * cloudSpan * 0.34;
+        const offsetX = Math.cos(angle) * radial * widthStretch + (Math.random() - 0.5) * cloudSpan * 0.12;
+        const liftNoise = cloudFamily === "towering"
+          ? Math.pow(Math.random(), 0.86)
+          : Math.pow(Math.random(), 1.65);
+        const offsetY = cloudSpan * (0.01 + liftNoise * puffHeightSpread * verticalLiftScale);
+        const offsetZ = Math.sin(angle) * radial * depthStretch * 0.42 + (Math.random() - 0.5) * cloudSpan * 0.08;
+        const puffMaterial = new THREE.SpriteMaterial({
+          map: mainTextures[(p + i) % mainTextures.length],
+          color: baseColor
+            .clone()
+            .lerp(sunWarmColor, 0.08 + Math.random() * 0.08)
+            .lerp(new THREE.Color(0xffffff), 0.06 + Math.random() * 0.08),
+          transparent: true,
+          opacity: cloudOpacity * (0.38 + Math.random() * 0.18),
+          depthWrite: false,
+          fog: true
+        });
+        this.registerCloudVisualMaterial(puffMaterial);
+        puffMaterial.rotation = (Math.random() - 0.5) * 0.22;
+        const puff = new THREE.Sprite(puffMaterial);
+        const puffWidth = cloudSpan * (0.46 + Math.random() * 0.32) * widthStretch;
+        const puffHeight = puffWidth * (
+          cloudFamily === "wide"
+            ? 0.4 + Math.random() * 0.12
+            : cloudFamily === "towering"
+              ? 0.58 + Math.random() * 0.18
+              : 0.46 + Math.random() * 0.16
         );
+        puff.position.set(offsetX, offsetY, offsetZ);
+        puff.scale.set(puffWidth, puffHeight, 1);
         cloud.add(puff);
       }
 
-      const cloudScale = minScale + Math.random() * Math.max(1, maxScale - minScale);
-      cloud.scale.set(cloudScale, cloudScale * 0.3, cloudScale * 0.82);
+      const baseShelfMaterial = new THREE.SpriteMaterial({
+        map: shadowTexture,
+        color: shadowColor.clone().lerp(sunCoolColor, 0.08),
+        transparent: true,
+        opacity: cloudOpacity * (cloudFamily === "wide" ? 0.18 : 0.14),
+        depthWrite: false,
+        fog: true
+      });
+      this.registerCloudVisualMaterial(baseShelfMaterial);
+      const baseShelf = new THREE.Sprite(baseShelfMaterial);
+      baseShelf.position.set(
+        0,
+        -cloudSpan * (cloudFamily === "towering" ? 0.02 : 0.01),
+        0
+      );
+      baseShelf.scale.set(
+        cloudSpan * (cloudFamily === "wide" ? 1.32 : 1.08) * widthStretch,
+        cloudSpan * (cloudFamily === "wide" ? 0.18 : 0.14),
+        1
+      );
+      cloud.add(baseShelf);
+
+      const capMaterial = new THREE.SpriteMaterial({
+        map: mainTextures[(i + 1) % mainTextures.length],
+        color: baseColor.clone().lerp(sunWarmColor, 0.2).lerp(new THREE.Color(0xffffff), 0.08),
+        transparent: true,
+        opacity: cloudOpacity * 0.48,
+        depthWrite: false,
+        fog: true
+      });
+      this.registerCloudVisualMaterial(capMaterial);
+      const capSprite = new THREE.Sprite(capMaterial);
+      capSprite.position.set(
+        0,
+        cloudSpan * (
+          cloudFamily === "towering"
+            ? 0.12 + Math.random() * 0.08
+            : 0.07 + Math.random() * 0.04
+        ),
+        (Math.random() - 0.5) * cloudSpan * 0.05
+      );
+      capSprite.scale.set(
+        cloudSpan * (cloudFamily === "wide" ? 1.14 : 1 + Math.random() * 0.16) * widthStretch,
+        cloudSpan * (
+          cloudFamily === "wide"
+            ? 0.42 + Math.random() * 0.07
+            : cloudFamily === "towering"
+              ? 0.68 + Math.random() * 0.12
+              : 0.54 + Math.random() * 0.08
+        ),
+        1
+      );
+      cloud.add(capSprite);
+
+      for (let rimIndex = 0; rimIndex < rimLayers; rimIndex += 1) {
+        const rimMaterial = new THREE.SpriteMaterial({
+          map: mainTextures[(i + rimIndex + 2) % mainTextures.length],
+          color: baseColor.clone().lerp(sunWarmColor, 0.34),
+          transparent: true,
+          opacity: cloudOpacity * (0.08 + Math.random() * 0.04),
+          depthWrite: false,
+          fog: true,
+          blending: THREE.AdditiveBlending
+        });
+        this.registerCloudVisualMaterial(rimMaterial);
+        const rimSprite = new THREE.Sprite(rimMaterial);
+        rimSprite.position.set(
+          sunBias * cloudSpan * (0.12 + Math.random() * 0.06),
+          cloudSpan * (0.05 + Math.random() * 0.05),
+          (Math.random() - 0.5) * cloudSpan * 0.04
+        );
+        rimSprite.scale.set(
+          cloudSpan * (0.78 + Math.random() * 0.18) * widthStretch,
+          cloudSpan * (cloudFamily === "wide" ? 0.18 : 0.24 + Math.random() * 0.06),
+          1
+        );
+        cloud.add(rimSprite);
+      }
+
+      if (!this.mobileEnabled) {
+        const wispCount = 2 + Math.floor(Math.random() * 2);
+        for (let w = 0; w < wispCount; w += 1) {
+          const wispMaterial = new THREE.SpriteMaterial({
+            map: mainTextures[(w + i) % mainTextures.length],
+            color: baseColor.clone().lerp(sunCoolColor, 0.18).lerp(new THREE.Color(0xffffff), 0.12),
+            transparent: true,
+            opacity: cloudOpacity * (0.12 + Math.random() * 0.05),
+            depthWrite: false,
+            fog: true
+          });
+          this.registerCloudVisualMaterial(wispMaterial);
+          const wisp = new THREE.Sprite(wispMaterial);
+          const wispWidth = cloudSpan * (0.72 + Math.random() * 0.24) * widthStretch;
+          wisp.position.set(
+            (Math.random() * 2 - 1) * cloudSpan * 0.28,
+            -cloudSpan * (0.015 + Math.random() * 0.045),
+            (Math.random() * 2 - 1) * cloudSpan * 0.1
+          );
+          wisp.scale.set(wispWidth, wispWidth * (0.2 + Math.random() * 0.06), 1);
+          cloud.add(wisp);
+        }
+      }
+
       cloud.rotation.y = Math.random() * Math.PI * 2;
+      const baseY = minHeight + Math.random() * Math.max(1, maxHeight - minHeight);
       cloud.position.set(
         (Math.random() * 2 - 1) * halfArea,
-        minHeight + Math.random() * Math.max(1, maxHeight - minHeight),
+        baseY,
         (Math.random() * 2 - 1) * halfArea
       );
 
       group.add(cloud);
 
       const driftSpeed = driftMin + Math.random() * Math.max(0.05, driftMax - driftMin);
-      const driftAngle = Math.random() * Math.PI * 2;
+      const driftAngle = windAngle + (Math.random() - 0.5) * windVariance;
       this.cloudParticles.push({
         mesh: cloud,
         driftX: Math.cos(driftAngle) * driftSpeed,
         driftZ: Math.sin(driftAngle) * driftSpeed,
+        baseY,
+        bobPhase: Math.random() * Math.PI * 2,
+        bobAmplitude: Math.max(0.4, cloudSpan * (this.mobileEnabled ? 0.012 : 0.018)),
+        turnSpeed: (Math.random() - 0.5) * (this.mobileEnabled ? 0.01 : 0.016),
+        halfArea
+      });
+    }
+
+    for (let index = 0; index < cirrusCount; index += 1) {
+      const veil = new THREE.Group();
+      const veilLayers = this.mobileEnabled ? 1 : 2;
+      const veilWidth = maxScale * (2.2 + Math.random() * 0.9);
+      for (let layerIndex = 0; layerIndex < veilLayers; layerIndex += 1) {
+        const veilMaterial = new THREE.SpriteMaterial({
+          map: cirrusTexture,
+          color: baseColor.clone().lerp(new THREE.Color(0xe8f2ff), 0.28),
+          transparent: true,
+          opacity: cloudOpacity * (0.11 + Math.random() * 0.05),
+          depthWrite: false,
+          fog: true
+        });
+        this.registerCloudVisualMaterial(veilMaterial);
+        veilMaterial.rotation = sunBias * 0.1 + (Math.random() - 0.5) * 0.12;
+        const veilSprite = new THREE.Sprite(veilMaterial);
+        veilSprite.position.set(
+          (Math.random() * 2 - 1) * veilWidth * 0.18,
+          (Math.random() - 0.5) * maxScale * 0.05,
+          (Math.random() * 2 - 1) * veilWidth * 0.08
+        );
+        veilSprite.scale.set(
+          veilWidth * (0.9 + Math.random() * 0.24),
+          veilWidth * (0.28 + Math.random() * 0.05),
+          1
+        );
+        veil.add(veilSprite);
+      }
+
+      const veilY = maxHeight + 28 + Math.random() * 42;
+      veil.position.set(
+        (Math.random() * 2 - 1) * halfArea,
+        veilY,
+        (Math.random() * 2 - 1) * halfArea
+      );
+      group.add(veil);
+
+      const veilSpeed = driftMin * (0.45 + Math.random() * 0.18);
+      const veilAngle = windAngle + (Math.random() - 0.5) * (windVariance * 0.35);
+      this.cloudParticles.push({
+        mesh: veil,
+        driftX: Math.cos(veilAngle) * veilSpeed,
+        driftZ: Math.sin(veilAngle) * veilSpeed,
+        baseY: veilY,
+        bobPhase: Math.random() * Math.PI * 2,
+        bobAmplitude: Math.max(0.18, maxScale * 0.006),
+        turnSpeed: (Math.random() - 0.5) * 0.006,
+        halfArea
+      });
+    }
+
+    for (let index = 0; index < distantCount; index += 1) {
+      const bank = new THREE.Group();
+      const ringDistance = halfArea * (0.56 + Math.random() * 0.34);
+      const ringAngle = Math.random() * Math.PI * 2;
+      const bankWidth = maxScale * (3.4 + Math.random() * 1.5);
+      const bankLayers = this.mobileEnabled ? 1 : 3;
+      for (let layerIndex = 0; layerIndex < bankLayers; layerIndex += 1) {
+        const bankMaterial = new THREE.SpriteMaterial({
+          map: layerIndex === 0 ? cirrusTexture : mainTextures[(index + layerIndex) % mainTextures.length],
+          color: baseColor.clone().lerp(skyColor, 0.2).lerp(sunWarmColor, layerIndex === 0 ? 0.1 : 0.04),
+          transparent: true,
+          opacity: cloudOpacity * distantOpacityScale * (layerIndex === 0 ? 0.14 : 0.1 + Math.random() * 0.04),
+          depthWrite: false,
+          fog: true
+        });
+        this.registerCloudVisualMaterial(bankMaterial);
+        bankMaterial.rotation = sunBias * 0.05 + (Math.random() - 0.5) * 0.08;
+        const bankSprite = new THREE.Sprite(bankMaterial);
+        bankSprite.position.set(
+          (Math.random() - 0.5) * bankWidth * 0.16,
+          (Math.random() - 0.5) * maxScale * 0.04,
+          (Math.random() - 0.5) * bankWidth * 0.04
+        );
+        bankSprite.scale.set(
+          bankWidth * (0.94 + Math.random() * 0.18),
+          bankWidth * (layerIndex === 0 ? 0.2 : 0.26 + Math.random() * 0.04),
+          1
+        );
+        bank.add(bankSprite);
+      }
+
+      const bankY = minHeight + distantHeightBoost + Math.random() * Math.max(14, maxHeight - minHeight * 0.28);
+      bank.position.set(
+        Math.cos(ringAngle) * ringDistance,
+        bankY,
+        Math.sin(ringAngle) * ringDistance
+      );
+      group.add(bank);
+
+      const bankSpeed = driftMin * (0.28 + Math.random() * 0.12);
+      const bankAngle = windAngle + (Math.random() - 0.5) * (windVariance * 0.24);
+      this.cloudParticles.push({
+        mesh: bank,
+        driftX: Math.cos(bankAngle) * bankSpeed,
+        driftZ: Math.sin(bankAngle) * bankSpeed,
+        baseY: bankY,
+        bobPhase: Math.random() * Math.PI * 2,
+        bobAmplitude: Math.max(0.12, maxScale * 0.0036),
+        turnSpeed: (Math.random() - 0.5) * 0.003,
         halfArea
       });
     }
@@ -15301,6 +17866,8 @@ export class GameRuntime {
     for (const cloud of this.cloudParticles) {
       cloud.mesh.position.x += cloud.driftX * delta;
       cloud.mesh.position.z += cloud.driftZ * delta;
+      cloud.mesh.position.y = cloud.baseY + Math.sin(this.flowClock * 0.045 + cloud.bobPhase) * cloud.bobAmplitude;
+      cloud.mesh.rotation.y += cloud.turnSpeed * delta;
 
       if (cloud.mesh.position.x > cloud.halfArea) {
         cloud.mesh.position.x = -cloud.halfArea;
@@ -16315,6 +18882,17 @@ export class GameRuntime {
       } else {
         this.chalkPointer.set(0, 0);
       }
+      if (
+        event.button === 0 &&
+        !this.canDrawChalk() &&
+        !this.promoPlacementPreviewActive &&
+        !this.hostCustomBlockPlacementPreviewActive &&
+        !this.flyModeActive &&
+        this.tryInteractWithNpcFromPointer(event.clientX, event.clientY, this.pointerLocked)
+      ) {
+        event.preventDefault();
+        return;
+      }
       if (event.button !== 0 || !this.canDrawChalk()) {
         return;
       }
@@ -16378,6 +18956,10 @@ export class GameRuntime {
           this.chalkDrawingActive = true;
           this.chalkLastStamp = null;
           this.tryDrawChalkMark();
+          return;
+        }
+        if (this.tryInteractWithNpcFromPointer(touch.clientX, touch.clientY, false)) {
+          event.preventDefault();
           return;
         }
         if (this.mobileEnabled && this.mobileLookTouchId === null) {
@@ -16691,6 +19273,31 @@ export class GameRuntime {
         }
       });
     }
+    if (this.promoScaleYInputEl) {
+      this.promoScaleYInputEl.addEventListener("input", () => {
+        const value = Number(this.promoScaleYInputEl?.value);
+        if (this.promoScaleYValueEl && Number.isFinite(value)) {
+          this.promoScaleYValueEl.textContent = `${value.toFixed(2)}x`;
+        }
+        if (
+          this.mobilePromoScaleYInputEl &&
+          Number.isFinite(value) &&
+          document.activeElement !== this.mobilePromoScaleYInputEl
+        ) {
+          this.mobilePromoScaleYInputEl.value = value.toFixed(2);
+        }
+        if (this.mobilePromoScaleYValueEl && Number.isFinite(value)) {
+          this.mobilePromoScaleYValueEl.textContent = `${value.toFixed(2)}x`;
+        }
+        if (this.promoPlacementPreviewActive) {
+          this.promoPlacementPreviewCurrentScaleY = Number.isFinite(value)
+            ? value
+            : this.promoPlacementPreviewCurrentScaleY;
+          this.updatePromoPlacementPreview();
+          this.syncPromoPanelUi();
+        }
+      });
+    }
     if (this.mobilePromoScaleInputEl) {
       this.mobilePromoScaleInputEl.addEventListener("input", () => {
         const value = Number(this.mobilePromoScaleInputEl?.value);
@@ -16708,6 +19315,28 @@ export class GameRuntime {
         }
         if (this.promoPlacementPreviewActive) {
           this.promoPlacementPreviewCurrentScale = value;
+          this.updatePromoPlacementPreview();
+          this.syncPromoPanelUi();
+        }
+      });
+    }
+    if (this.mobilePromoScaleYInputEl) {
+      this.mobilePromoScaleYInputEl.addEventListener("input", () => {
+        const value = Number(this.mobilePromoScaleYInputEl?.value);
+        if (!Number.isFinite(value)) {
+          return;
+        }
+        if (this.promoScaleYInputEl && document.activeElement !== this.promoScaleYInputEl) {
+          this.promoScaleYInputEl.value = value.toFixed(2);
+        }
+        if (this.promoScaleYValueEl) {
+          this.promoScaleYValueEl.textContent = `${value.toFixed(2)}x`;
+        }
+        if (this.mobilePromoScaleYValueEl) {
+          this.mobilePromoScaleYValueEl.textContent = `${value.toFixed(2)}x`;
+        }
+        if (this.promoPlacementPreviewActive) {
+          this.promoPlacementPreviewCurrentScaleY = value;
           this.updatePromoPlacementPreview();
           this.syncPromoPanelUi();
         }
@@ -17410,20 +20039,26 @@ export class GameRuntime {
     if (!this.npcChoiceGateEl) {
       this.npcChoiceGateEl = document.getElementById("npc-choice-gate");
     }
-    if (!this.npcChoiceNicknameBtnEl) {
-      this.npcChoiceNicknameBtnEl = document.getElementById("npc-choice-nickname");
+    if (!this.npcChoiceNameEl) {
+      this.npcChoiceNameEl = document.getElementById("npc-choice-name");
     }
-    if (!this.npcChoiceGuideBtnEl) {
-      this.npcChoiceGuideBtnEl = document.getElementById("npc-choice-guide");
+    if (!this.npcChoiceTitleEl) {
+      this.npcChoiceTitleEl = document.getElementById("npc-choice-title");
     }
-    if (!this.npcChoicePlayBtnEl) {
-      this.npcChoicePlayBtnEl = document.getElementById("npc-choice-play");
+    if (!this.npcChoiceCopyEl) {
+      this.npcChoiceCopyEl = document.getElementById("npc-choice-copy");
     }
-    if (!this.introVideoOverlayEl) {
-      this.introVideoOverlayEl = document.getElementById("intro-video-overlay");
+    if (!this.npcChoiceSourcesEl) {
+      this.npcChoiceSourcesEl = document.getElementById("npc-choice-sources");
     }
-    if (!this.introVideoEl) {
-      this.introVideoEl = document.getElementById("intro-video");
+    if (!this.npcChoiceActionsEl) {
+      this.npcChoiceActionsEl = document.getElementById("npc-choice-actions");
+    }
+    if (!this.npcChoiceBackBtnEl) {
+      this.npcChoiceBackBtnEl = document.getElementById("npc-choice-back");
+    }
+    if (!this.npcChoiceCloseBtnEl) {
+      this.npcChoiceCloseBtnEl = document.getElementById("npc-choice-close");
     }
     if (!this.portalTransitionEl) {
       this.portalTransitionEl = document.getElementById("portal-transition");
@@ -17590,6 +20225,12 @@ export class GameRuntime {
     }
     if (!this.mobilePromoScaleValueEl) {
       this.mobilePromoScaleValueEl = document.getElementById("mobile-promo-scale-value");
+    }
+    if (!this.mobilePromoScaleYInputEl) {
+      this.mobilePromoScaleYInputEl = document.getElementById("mobile-promo-scale-y");
+    }
+    if (!this.mobilePromoScaleYValueEl) {
+      this.mobilePromoScaleYValueEl = document.getElementById("mobile-promo-scale-y-value");
     }
     if (!this.mobileRotateOverlayEl) {
       this.mobileRotateOverlayEl = document.getElementById("mobile-rotate-overlay");
@@ -17774,6 +20415,12 @@ export class GameRuntime {
     }
     if (!this.promoScaleValueEl) {
       this.promoScaleValueEl = document.getElementById("promo-scale-value");
+    }
+    if (!this.promoScaleYInputEl) {
+      this.promoScaleYInputEl = document.getElementById("promo-scale-y");
+    }
+    if (!this.promoScaleYValueEl) {
+      this.promoScaleYValueEl = document.getElementById("promo-scale-y-value");
     }
     if (!this.promoTypeSelectEl) {
       this.promoTypeSelectEl = document.getElementById("promo-shape");
@@ -18491,7 +21138,6 @@ export class GameRuntime {
       }
       this.updateSurfacePainterSaveAvailability();
       this.startNetworkPing();
-      this.requestHostClaim();
       this.syncPromoPanelUi();
     });
 
@@ -19462,6 +22108,7 @@ export class GameRuntime {
       this.updateMovement(movementRemaining);
     }
     this.updateHubFlow(safeDelta);
+    this.updateCityNpcBehaviors(safeDelta);
     this.updateChalkPickupPrompt(safeDelta);
     this.updateSurfacePaintPrompt(safeDelta);
     this.updatePortalTimeBillboard(safeDelta);
@@ -20708,7 +23355,17 @@ export class GameRuntime {
       this.networkConnected && this.isRoomHost ? `${text} / 호스트` : text;
 
     if (this.hubFlowEnabled) {
+      if (this.isNpcChoiceGateOpen()) {
+        return this.networkConnected
+          ? withHostTag("온라인 / NPC 대화")
+          : "오프라인 / NPC 대화";
+      }
       if (this.flowStage === "boot_intro") {
+        if (this.bootIntroRevealActive) {
+          return this.networkConnected
+            ? withHostTag("온라인 / 시야 동기화")
+            : "오프라인 / 시야 동기화";
+        }
         return this.networkConnected
           ? withHostTag("온라인 / 입장 확인")
           : "오프라인 / 입장 확인";
@@ -21421,8 +24078,11 @@ export class GameRuntime {
     const previousZ = Number(mesh.position.z) || 0;
     mesh.position.x = this.objEditorDragTargetWorld.x;
     mesh.position.z = this.objEditorDragTargetWorld.z;
+    const persistSelection =
+      entry.isHostCustomPaintBlock === true ||
+      OBJECT_POSITION_PERSISTED_FIXED_ID_SET.has(String(entry.id ?? "").trim());
     if (Math.abs(mesh.position.x - previousX) > 0.0005 || Math.abs(mesh.position.z - previousZ) > 0.0005) {
-      if (entry.isHostCustomPaintBlock === true) {
+      if (persistSelection) {
         this.markObjectStateDirty();
       }
     }
@@ -21441,14 +24101,17 @@ export class GameRuntime {
     const previousY = Number(entry.mesh.position.y) || 0;
     const nextY = previousY + (Number(deltaY) || 0);
     entry.mesh.position.y = THREE.MathUtils.clamp(nextY, -10, 260);
+    const persistSelection =
+      entry.isHostCustomPaintBlock === true ||
+      OBJECT_POSITION_PERSISTED_FIXED_ID_SET.has(String(entry.id ?? "").trim());
     this.updateMovableObjectCollider(entry);
     this.updateSecurityTestLabelForEntry(entry);
     this.syncPortalAnchorsFromMovableObjects();
     this.updateObjEditorInfoEl(entry);
-    if (Math.abs(entry.mesh.position.y - previousY) > 0.0005 && entry.isHostCustomPaintBlock === true) {
+    if (Math.abs(entry.mesh.position.y - previousY) > 0.0005 && persistSelection) {
       this.markObjectStateDirty();
     }
-    if (entry.isHostCustomPaintBlock === true) {
+    if (persistSelection) {
       this.saveObjectPositions();
     }
     return true;
@@ -21483,11 +24146,14 @@ export class GameRuntime {
     }
 
     entry.mesh.rotation.y = nextYaw;
+    const persistSelection =
+      entry.isHostCustomPaintBlock === true ||
+      OBJECT_POSITION_PERSISTED_FIXED_ID_SET.has(String(entry.id ?? "").trim());
     this.updateMovableObjectCollider(entry);
     this.updateSecurityTestLabelForEntry(entry);
     this.syncPortalAnchorsFromMovableObjects({ force: true });
     this.updateObjEditorInfoEl(entry);
-    if (entry.isHostCustomPaintBlock === true) {
+    if (persistSelection) {
       this.markObjectStateDirty();
       this.saveObjectPositions();
     }
@@ -21523,13 +24189,22 @@ export class GameRuntime {
 
   collectObjectPositionsPayload() {
     const payload = {};
-    for (const entry of this.getVisibleHostCustomPaintBlockEntries()) {
+    for (const entry of this.movableObjects) {
       if (!entry?.mesh || !entry?.id) {
+        continue;
+      }
+      const objectId = String(entry.id ?? "").trim();
+      const isHostCustom = HOST_CUSTOM_BLOCK_ID_PATTERN.test(objectId);
+      const isPersistedFixed = OBJECT_POSITION_PERSISTED_FIXED_ID_SET.has(objectId);
+      if (!isHostCustom && !isPersistedFixed) {
+        continue;
+      }
+      if (isHostCustom && entry.mesh.visible !== true) {
         continue;
       }
       const pos = entry.mesh.position;
       const scale = entry.mesh.scale;
-      payload[entry.id] = {
+      payload[objectId] = {
         x: Math.round((Number(pos.x) || 0) * 1000) / 1000,
         y: Math.round((Number(pos.y) || 0) * 1000) / 1000,
         z: Math.round((Number(pos.z) || 0) * 1000) / 1000,
@@ -21548,7 +24223,9 @@ export class GameRuntime {
     const filtered = {};
     for (const [rawId, rawEntry] of Object.entries(source)) {
       const id = String(rawId ?? "").trim();
-      if (!HOST_CUSTOM_BLOCK_ID_PATTERN.test(id) || !rawEntry || typeof rawEntry !== "object") {
+      const isHostCustom = HOST_CUSTOM_BLOCK_ID_PATTERN.test(id);
+      const isPersistedFixed = OBJECT_POSITION_PERSISTED_FIXED_ID_SET.has(id);
+      if ((!isHostCustom && !isPersistedFixed) || !rawEntry || typeof rawEntry !== "object") {
         continue;
       }
       filtered[id] = rawEntry;

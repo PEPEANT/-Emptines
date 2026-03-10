@@ -947,6 +947,14 @@ canvas {
   box-shadow: 0 16px 38px rgba(2, 8, 14, 0.5);
 }
 
+.npc-choice-name {
+  margin: 0;
+  color: #7dcfff;
+  font: 700 0.74rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
 #npc-choice-title {
   margin: 0;
   color: #ebf8ff;
@@ -961,19 +969,28 @@ canvas {
   letter-spacing: 0.03em;
 }
 
+.npc-choice-sources {
+  margin: 0;
+  color: #8ab6d8;
+  font: 600 0.7rem/1.35 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.05em;
+}
+
 #npc-choice-actions {
   display: grid;
   gap: 8px;
 }
 
 #npc-choice-actions button {
-  height: 42px;
+  min-height: 42px;
+  padding: 10px 12px;
   border: 1px solid rgba(179, 220, 250, 0.82);
   border-radius: 9px;
   background: linear-gradient(140deg, rgba(20, 53, 83, 0.95), rgba(9, 22, 35, 0.98));
   color: #e8f7ff;
-  font: 700 0.78rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  font: 700 0.78rem/1.25 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
   letter-spacing: 0.05em;
+  text-align: left;
   cursor: pointer;
 }
 
@@ -981,22 +998,29 @@ canvas {
   border-color: rgba(198, 231, 255, 0.95);
 }
 
-#intro-video-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 89;
-  display: grid;
-  place-items: center;
-  background: rgba(2, 8, 14, 0.97);
+#npc-choice-actions button.npc-choice-primary {
+  border-color: rgba(130, 214, 255, 0.95);
+  background: linear-gradient(140deg, rgba(26, 82, 128, 0.96), rgba(10, 31, 52, 0.99));
 }
 
-#intro-video {
-  width: min(96vw, 1120px);
-  height: min(92vh, 630px);
-  object-fit: contain;
-  border: 1px solid rgba(165, 205, 236, 0.52);
-  border-radius: 10px;
-  background: #000;
+#npc-choice-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+#npc-choice-footer button {
+  min-width: 96px;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid rgba(176, 214, 242, 0.74);
+  border-radius: 9px;
+  background: rgba(11, 24, 38, 0.95);
+  color: #dff2ff;
+  font: 700 0.75rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.05em;
+  cursor: pointer;
 }
 
 #mobile-rotate-overlay {
@@ -1117,14 +1141,16 @@ canvas {
   letter-spacing: 0.04em;
   text-align: center;
   opacity: 0;
+  visibility: hidden;
   transform: translate(-50%, 8px);
-  transition: opacity 180ms ease, transform 180ms ease;
+  transition: opacity 180ms ease, transform 180ms ease, visibility 180ms ease;
   pointer-events: none;
   box-shadow: 0 10px 24px rgba(8, 2, 3, 0.35);
 }
 
 #boundary-warning.on {
   opacity: 1;
+  visibility: visible;
   transform: translate(-50%, 0);
 }
 
@@ -1547,25 +1573,34 @@ canvas {
   min-width: min(90vw, 320px);
   padding: 7px 11px;
   border: 1px solid rgba(172, 204, 233, 0.66);
-  border-radius: 999px;
+  border-radius: 14px;
   background: rgba(10, 24, 39, 0.9);
   display: grid;
-  grid-template-columns: auto minmax(110px, 1fr) auto;
-  align-items: center;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 6px;
   z-index: 67;
   pointer-events: auto;
 }
 
+.mobile-promo-scale-row {
+  display: grid;
+  grid-template-columns: auto minmax(110px, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
 #mobile-promo-scale-wrap label,
-#mobile-promo-scale-value {
+#mobile-promo-scale-value,
+#mobile-promo-scale-y-value {
   color: #e1f1ff;
   font: 700 0.58rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
-#mobile-promo-scale {
+#mobile-promo-scale,
+#mobile-promo-scale-y {
   width: 100%;
 }
 
@@ -1688,7 +1723,8 @@ body:not(.is-mobile-ui) #promo-place-btn {
   letter-spacing: 0.05em;
 }
 
-#promo-scale {
+#promo-scale,
+#promo-scale-y {
   width: 100%;
 }
 
@@ -1758,7 +1794,8 @@ body:not(.is-mobile-ui) #promo-place-btn {
   background: rgba(8, 18, 28, 0.96);
 }
 
-#promo-scale-value {
+#promo-scale-value,
+#promo-scale-y-value {
   color: #dff3ff;
   font: 700 0.58rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
   letter-spacing: 0.04em;
@@ -1852,6 +1889,7 @@ body:not(.is-mobile-ui) #promo-place-btn {
 #promo-link-url:disabled,
 #promo-shape:disabled,
 #promo-scale:disabled,
+#promo-scale-y:disabled,
 #promo-draw-color:disabled,
 #promo-draw-bg:disabled,
 #promo-draw-size:disabled {
@@ -2757,7 +2795,8 @@ body.is-mobile-ui #mobile-move-stick {
   }
 
   #mobile-promo-scale-wrap label,
-  #mobile-promo-scale-value {
+  #mobile-promo-scale-value,
+  #mobile-promo-scale-y-value {
     font-size: 0.54rem;
     letter-spacing: 0.04em;
   }
