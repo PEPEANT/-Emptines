@@ -9,9 +9,11 @@
 2. `CANONICAL_DOCS.md`
 3. `WHITEPAPER.md`
 4. `WORLD_LORE.md`
-5. `C:\Users\rneet\OneDrive\Desktop\UGC\AGENTS.md`
-6. `C:\Users\rneet\OneDrive\Desktop\UGC\ugc-rules.yaml`
-7. `README.md`
+5. `C:\Users\rneet\OneDrive\Desktop\DIS\EM\CONTINUITY_CONTRACT.md`
+6. `C:\Users\rneet\OneDrive\Desktop\DIS\EM\IMPLEMENTATION_CONTRACT.md`
+7. `C:\Users\rneet\OneDrive\Desktop\UGC\AGENTS.md`
+8. `C:\Users\rneet\OneDrive\Desktop\UGC\ugc-rules.yaml`
+9. `README.md`
 
 주의:
 - `docs/ugc`만 단독으로 읽고 판단하지 않는다.
@@ -28,12 +30,18 @@
   - 장기 비전, 핵심 정의, 철학, 설계 원칙을 담는다.
 - `WORLD_LORE.md`
   - 공간 의미, 구역 역할, 포탈 의미, 운영 세계관을 담는다.
+- `C:\Users\rneet\OneDrive\Desktop\DIS\EM\CONTINUITY_CONTRACT.md`
+  - 포털, 닉네임, 작품, 세션의 연속성 목표를 담는다.
+- `C:\Users\rneet\OneDrive\Desktop\DIS\EM\IMPLEMENTATION_CONTRACT.md`
+  - 목표 시스템과 현재 구현 상태를 구분하는 규칙을 담는다.
 - `C:\Users\rneet\OneDrive\Desktop\UGC\AGENTS.md`
   - UGC 제작과 운영 판단 기준을 담는다.
 - `C:\Users\rneet\OneDrive\Desktop\UGC\ugc-rules.yaml`
   - UGC 세부 규칙과 제한을 담는다.
 - `README.md`
   - 런타임 실행, 배포, 검증, 개발 흐름을 설명한다.
+- `docs/CORE_MEMORY_STATUS.md`
+  - 공개 `main` 기준의 코어 메모리 현재 구현과 목표 모델을 고정한다.
 
 ## 해석 우선순위
 
@@ -79,3 +87,8 @@ EM 정본 기준으로 문서 중복/충돌 정리해줘.
 핵심 정의 문장은 유지하고, 같은 뜻의 반복은 줄이고,
 WHITEPAPER / WORLD_LORE / UGC / 구현 문서의 역할 경계를 명확히 나눠줘.
 ```
+
+## 현재 구현 상태 메모
+
+- `docs/CORE_MEMORY_STATUS.md`
+  - `gray_block` 코어 승격의 현재 공개 구현과 목표 모델을 운영/AI 관점에서 짧게 고정한다.

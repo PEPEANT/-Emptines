@@ -44,6 +44,7 @@ function parseSeconds(raw, fallback, min = 0.1) {
 }
 
 const ENTRY_BGM_URL = new URL("../../../mp3/TSUKUYOMI.mp3", import.meta.url).href;
+const NPC_GREETING_POSTER_URL = new URL("../../../mp4/play/01_poster.png", import.meta.url).href;
 const AD_BILLBOARD_IMAGE_URL = new URL("../../../png/AD.41415786.1.png", import.meta.url).href;
 const PORTAL_TOP_AD_IMAGE_URL = new URL("../../../png/Gemini01.png", import.meta.url).href;
 const FUTURE_CITY_FIXED_BILLBOARD_IMAGE_URLS = Object.freeze([
@@ -205,6 +206,34 @@ function resolveRuntimeAssetUrl(relativePath) {
   return `/${normalized}`;
 }
 
+const OPENING_VIDEO_OVERLAY_SEQUENCE = Object.freeze([
+  new URL("../../../mp4/play/play2.webm", import.meta.url).href,
+  new URL("../../../mp4/play/play2.mp4", import.meta.url).href
+]);
+const NPC_GREETING_VIDEO_SEQUENCE = Object.freeze([
+  Object.freeze([
+    new URL("../../../mp4/play/01.mp4", import.meta.url).href,
+    new URL("../../../mp4/play/01.webm", import.meta.url).href
+  ]),
+  Object.freeze([
+    new URL("../../../mp4/play/02.mp4", import.meta.url).href,
+    new URL("../../../mp4/play/02.webm", import.meta.url).href
+  ])
+]);
+const NPC_GREETING_VIDEO_CLIP_FREEZE_AT_SECONDS = Object.freeze([null, null]);
+const NPC_GREETING_VIDEO_PLAYBACK_RATE = 1;
+const NPC_GREETING_SCREEN_HEIGHT = 2.36;
+const NPC_GREETING_SCREEN_FOOT_OFFSET = 0.18;
+const NPC_GREETING_SCREEN_Z_OFFSET = 1.34;
+const NPC_GREETING_SCREEN_BRIGHTNESS = 1.72;
+const NPC_GREETING_CHROMA_KEY_COLOR = new THREE.Color(0x00ff00);
+const NPC_GREETING_CHROMA_THRESHOLD = 0.09;
+const NPC_GREETING_CHROMA_SMOOTHNESS = 0.06;
+const NPC_GREETING_CHROMA_DESPILL = 0.38;
+const NPC_TITLE_LABELS_ENABLED = true;
+const NPC_DIALOGUE_CHAT_ECHO_ENABLED = false;
+const SPAWN_PORTAL_VEIL_ENABLED = false;
+
 export class GameRuntime {
   constructor(mount, options = {}) {
     this.mount = mount;
@@ -284,6 +313,8 @@ export class GameRuntime {
     this.skySun = new THREE.Vector3();
     this.cloudLayer = null;
     this.cloudParticles = [];
+    this.starField = null;
+    this.starMaterial = null;
     this.cloudMainSpriteTexture = null;
     this.cloudShadowSpriteTexture = null;
     this.cloudSpriteTextureCache = new Map();
@@ -455,6 +486,7 @@ export class GameRuntime {
     this.promoLinkPromptUpdateClock = 0;
     this.promoLinkPromptUpdateInterval = this.mobileEnabled ? 0.24 : 0.12;
     this.promoPlacementPreviewActive = false;
+    this.promoPlacementPreviewRepositionOwn = false;
     this.promoPlacementPreviewMesh = null;
     this.promoPlacementPreviewCurrentScale = PROMO_DEFAULT_SCALE;
     this.promoPlacementPreviewCurrentScaleY = PROMO_DEFAULT_SCALE;
@@ -869,6 +901,8 @@ export class GameRuntime {
     this.nicknameFormEl = document.getElementById("nickname-form");
     this.nicknameInputEl = document.getElementById("nickname-input");
     this.nicknameErrorEl = document.getElementById("nickname-error");
+    this.openingVideoGateEl = document.getElementById("opening-video-gate");
+    this.openingVideoEl = document.getElementById("opening-video");
     this.npcChoiceGateEl = document.getElementById("npc-choice-gate");
     this.npcChoiceNameEl = document.getElementById("npc-choice-name");
     this.npcChoiceTitleEl = document.getElementById("npc-choice-title");
@@ -978,6 +1012,8 @@ export class GameRuntime {
     this.bootIntroPending = this.hubFlowEnabled;
     this.bootIntroVideoPlaying = false;
     this.bootIntroRevealActive = false;
+    this.bootIntroRevealDeferred = false;
+    this.bootIntroAutoCameraEnabled = this.hubFlowEnabled;
     this.bootIntroRevealElapsed = 0;
     this.bootIntroCurrentPhaseId = "night";
     this.entryMusicAudioEl = null;
@@ -1220,24 +1256,25 @@ export class GameRuntime {
     ]);
     this.bridgeApproachSpawn = parseVec3(
       bridgeConfig?.approachSpawn,
-      [0, GAME_CONSTANTS.PLAYER_HEIGHT, -98]
+      [0, GAME_CONSTANTS.PLAYER_HEIGHT, -124]
     );
     this.bridgeSpawn = parseVec3(
       bridgeConfig?.spawn,
       [0, GAME_CONSTANTS.PLAYER_HEIGHT, -86]
     );
-    this.bridgeNpcPosition = parseVec3(bridgeConfig?.npcPosition, [0, 0, -92]);
+    this.bridgeNpcPosition = parseVec3(bridgeConfig?.npcPosition, [0, 0, -112]);
     this.bridgeNpcScale = THREE.MathUtils.clamp(
       Number(bridgeConfig?.npcScale) || 1.34,
       0.85,
       1.8
     );
-    this.bridgeNpcTriggerRadius = Math.max(2.5, Number(bridgeConfig?.npcTriggerRadius) || 5);
+    this.bridgeNpcTriggerRadius = Math.max(2.5, Number(bridgeConfig?.npcTriggerRadius) || 8.2);
     this.hubNpcPlacements = this.resolveHubNpcPlacements(hubFlowConfig);
     this.bridgeMirrorPosition = parseVec3(bridgeConfig?.mirrorPosition, [0, 1.72, -76]);
     this.bridgeMirrorLookSeconds = parseSeconds(bridgeConfig?.mirrorLookSeconds, 1.5, 0.4);
     this.mirrorLookClock = 0;
     this.bridgeNpcPlayApproved = false;
+    this.bridgeIntroNameConfirmed = false;
     this.bridgeNpcPromptCooldownUntil = 0;
     this.bridgeNpcChoiceCooldownUntil = 0;
     this.bridgeCityEntry = parseVec3(
@@ -1324,6 +1361,7 @@ export class GameRuntime {
     this.spawnPortalVeilGroup = null;
     this.spawnPortalVeilWorldZ = this.bridgeNpcPosition.z;
     this.spawnPortalVeilMaterial = null;
+    this.spawnPortalVeilMaterials = [];
     this.spawnPortalVeilCanvas = null;
     this.spawnPortalVeilContext = null;
     this.spawnPortalVeilBaseTexture = null;
@@ -1378,8 +1416,12 @@ export class GameRuntime {
     this.npcGreetingPlaybackDuration = 4.8;
     this.npcGreetingVideoEl = null;
     this.npcGreetingVideoTexture = null;
+    this.npcGreetingPosterTexture = null;
+    this.npcGreetingPosterLoading = false;
     this.npcGreetingPlayed = false;
     this.npcGreetingMidpointTriggered = false;
+    this.openingVideoPlaybackToken = 0;
+    this.bootIntroMediaPrimed = false;
     this.npcWelcomeBubbleLabel = null;
     this.activeNpcDialogueNpcId = "";
     this.activeNpcDialogueNodeId = "";
@@ -1515,6 +1557,7 @@ export class GameRuntime {
 
     this.setupSky(sun.position.clone().normalize());
     this.setupCloudLayer();
+    this.setupStarField();
 
     const maxAnisotropy = this.renderer.capabilities.getMaxAnisotropy();
     const anisotropy = this.mobileEnabled ? Math.min(2, maxAnisotropy) : maxAnisotropy;
@@ -1664,6 +1707,11 @@ export class GameRuntime {
       this.npcGreetingVideoTexture.dispose();
       this.npcGreetingVideoTexture = null;
     }
+    if (this.npcGreetingPosterTexture) {
+      this.npcGreetingPosterTexture.dispose();
+      this.npcGreetingPosterTexture = null;
+    }
+    this.npcGreetingPosterLoading = false;
     this.npcGreetingScreen = null;
     this.npcGreetingPlaybackActive = false;
     this.npcGreetingPlaybackClock = 0;
@@ -1734,6 +1782,7 @@ export class GameRuntime {
     };
     this.spawnPortalVeilGroup = null;
     this.spawnPortalVeilMaterial = null;
+    this.spawnPortalVeilMaterials.length = 0;
     this.spawnPortalVeilWorldZ = this.bridgeNpcPosition.z;
     this.spawnPortalVeilRevealStarted = false;
     this.spawnPortalVeilRevealClock = 0;
@@ -1788,6 +1837,7 @@ export class GameRuntime {
     this.portalBillboardGroup = null;
     this.spawnPortalVeilGroup = null;
     this.spawnPortalVeilMaterial = null;
+    this.spawnPortalVeilMaterials.length = 0;
     this.spawnPortalVeilWorldZ = this.bridgeNpcPosition.z;
     this.spawnPortalVeilBaseTexture = null;
     this.spawnPortalVeilTexture = null;
@@ -1827,6 +1877,8 @@ export class GameRuntime {
     this.npcGreetingScreen = null;
     this.npcGreetingPlaybackActive = false;
     this.npcGreetingPlaybackClock = 0;
+    this.npcGreetingPosterTexture = null;
+    this.npcGreetingPosterLoading = false;
     this.npcWelcomeBubbleLabel = null;
     this.mirrorGateGroup = null;
     this.mirrorGatePanel = null;
@@ -3279,149 +3331,70 @@ export class GameRuntime {
 
     const npcGuide = new THREE.Group();
     npcGuide.position.set(this.bridgeNpcPosition.x, 0, this.bridgeNpcPosition.z);
+    const npcGuideVisualZOffset = 0.34;
     const npcTempleGate = this.createKoreanTempleGateMesh({
-      includePortal: true,
-      trackPortalRefs: true
+      includePortal: false,
+      trackPortalRefs: false
     });
-    npcTempleGate.position.set(0, 0, 0.34);
-    const spawnPortalVeil = new THREE.Group();
-    spawnPortalVeil.position.set(0, this.mobileEnabled ? 8.4 : 10.8, npcTempleGate.position.z - 0.03);
+    npcTempleGate.position.set(0, 0, npcGuideVisualZOffset);
+    const spawnPortalVeil = SPAWN_PORTAL_VEIL_ENABLED ? new THREE.Group() : null;
+    if (spawnPortalVeil) {
+      spawnPortalVeil.position.set(0, this.mobileEnabled ? 8.4 : 10.8, npcGuideVisualZOffset - 0.03);
+    }
     const npcAvatarGroup = new THREE.Group();
     npcAvatarGroup.scale.setScalar(this.bridgeNpcScale);
-    const veilWidth = this.mobileEnabled ? 84 : 122;
-    const veilHeight = this.mobileEnabled ? 48 : 70;
-    const veilTexture = this.createSpawnPortalVeilTexture();
-    const veilMaterial = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      map: veilTexture,
-      roughness: 0.62,
-      metalness: 0.1,
-      emissive: 0x000000,
-      emissiveIntensity: 0,
-      transparent: true,
-      opacity: 0.98,
-      depthWrite: true,
-      side: THREE.DoubleSide
-    });
-    const veilCore = new THREE.Mesh(
-      new THREE.PlaneGeometry(veilWidth, veilHeight),
-      veilMaterial
-    );
-    veilCore.renderOrder = 18;
-    spawnPortalVeil.add(veilCore);
+    this.spawnPortalVeilMaterials.length = 0;
+    let veilMaterial = null;
+    if (spawnPortalVeil) {
+      const veilWidth = this.mobileEnabled ? 84 : 122;
+      const veilHeight = this.mobileEnabled ? 48 : 70;
+      const veilTexture = this.createSpawnPortalVeilTexture();
+      const veilLayerSpecs = [
+        { scaleX: 1, scaleY: 1, y: 0, z: 0, opacity: 0.94, color: 0xffffff, emissive: 0x10263a, rotation: 0 },
+        { scaleX: 0.94, scaleY: 0.88, y: 1.3, z: -0.45, opacity: 0.68, color: 0xe4f3ff, emissive: 0x15364d, rotation: -0.04 },
+        { scaleX: 1.08, scaleY: 0.96, y: -0.9, z: 0.52, opacity: 0.5, color: 0xd3ebff, emissive: 0x0c2133, rotation: 0.03 }
+      ];
+      veilLayerSpecs.forEach((layerSpec, layerIndex) => {
+        const layerMaterial = new THREE.MeshStandardMaterial({
+          color: layerSpec.color,
+          map: veilTexture,
+          roughness: 0.82,
+          metalness: 0.04,
+          emissive: layerSpec.emissive,
+          emissiveIntensity: 0.04 + layerIndex * 0.03,
+          transparent: true,
+          opacity: layerSpec.opacity,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+          fog: true
+        });
+        layerMaterial.userData.emptinesVeilBaseOpacity = layerSpec.opacity;
+        layerMaterial.userData.emptinesVeilBaseEmissiveIntensity = layerMaterial.emissiveIntensity;
+        layerMaterial.userData.emptinesVeilRevealEmissiveIntensity = 0.16 + layerIndex * 0.05;
+        const layerMesh = new THREE.Mesh(
+          new THREE.PlaneGeometry(veilWidth * layerSpec.scaleX, veilHeight * layerSpec.scaleY),
+          layerMaterial
+        );
+        layerMesh.position.set(0, layerSpec.y, layerSpec.z);
+        layerMesh.rotation.z = layerSpec.rotation;
+        layerMesh.renderOrder = 18 + layerIndex;
+        layerMesh.frustumCulled = false;
+        spawnPortalVeil.add(layerMesh);
+        this.spawnPortalVeilMaterials.push(layerMaterial);
+      });
+      veilMaterial = this.spawnPortalVeilMaterials[0] ?? null;
+    }
 
-    const npcBody = new THREE.Mesh(
-      new THREE.CapsuleGeometry(0.32, 0.86, 4, 8),
-      new THREE.MeshStandardMaterial({
-        color: 0x516578,
-        roughness: 0.44,
-        metalness: 0.18,
-        emissive: 0x2a4159,
-        emissiveIntensity: 0.26
-      })
-    );
-    npcBody.position.y = 0.92;
-    npcBody.castShadow = !this.mobileEnabled;
-    npcBody.receiveShadow = true;
-
-    const npcHead = new THREE.Mesh(
-      new THREE.SphereGeometry(0.24, 14, 14),
-      new THREE.MeshStandardMaterial({
-        color: 0x84a4c2,
-        roughness: 0.3,
-        metalness: 0.18,
-        emissive: 0x3d6184,
-        emissiveIntensity: 0.32
-      })
-    );
-    npcHead.position.y = 1.65;
-    npcHead.castShadow = !this.mobileEnabled;
-    npcHead.receiveShadow = true;
-
-    const npcPad = new THREE.Mesh(
-      new THREE.RingGeometry(0.82, 1.18, this.mobileEnabled ? 24 : 36),
-      new THREE.MeshBasicMaterial({
-        color: 0x9ad6ff,
-        transparent: true,
-        opacity: 0.78,
-        side: THREE.DoubleSide,
-        depthWrite: false
-      })
-    );
-    npcPad.rotation.x = -Math.PI / 2;
-    npcPad.position.y = 0.04;
-
-    const npcHoloFloor = new THREE.Mesh(
-      new THREE.CircleGeometry(2.12, this.mobileEnabled ? 28 : 48),
-      new THREE.MeshBasicMaterial({
-        color: 0x67dfff,
-        transparent: true,
-        opacity: 0.18,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending
-      })
-    );
-    npcHoloFloor.rotation.x = -Math.PI / 2;
-    npcHoloFloor.position.y = 0.028;
-
-    const npcHoloRing = new THREE.Mesh(
-      new THREE.RingGeometry(1.34, 2.18, this.mobileEnabled ? 28 : 52),
-      new THREE.MeshBasicMaterial({
-        color: 0x9cefff,
-        transparent: true,
-        opacity: 0.42,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending
-      })
-    );
-    npcHoloRing.rotation.x = -Math.PI / 2;
-    npcHoloRing.position.y = 0.032;
-
-    const npcHoloBeam = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.56, 1.16, 2.34, this.mobileEnabled ? 12 : 18, 1, true),
-      new THREE.MeshBasicMaterial({
-        color: 0x6ad7ff,
-        transparent: true,
-        opacity: 0.14,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending
-      })
-    );
-    npcHoloBeam.position.y = 1.2;
-
-    const npcHoloFrame = new THREE.LineSegments(
-      new THREE.EdgesGeometry(new THREE.PlaneGeometry(1.56, 2.52)),
-      new THREE.LineBasicMaterial({
-        color: 0xa2f0ff,
-        transparent: true,
-        opacity: 0.88,
-        blending: THREE.AdditiveBlending
-      })
-    );
-    npcHoloFrame.position.set(0, 1.48, -0.45);
-    npcHoloFrame.rotation.y = Math.PI;
-    npcHoloFrame.renderOrder = 13;
-    npcHoloFrame.frustumCulled = false;
-
-    npcAvatarGroup.add(
-      npcHoloFloor,
-      npcHoloRing,
-      npcHoloBeam,
-      npcBody,
-      npcHead,
-      npcPad,
-      npcHoloFrame
-    );
-    this.attachNpcTitleLabel(npcAvatarGroup, this.getNpcDefinition("bridge_gatekeeper"), 2.58);
     const npcGreetingScreen = this.createNpcGreetingScreen();
     npcAvatarGroup.add(npcGreetingScreen);
     this.registerNpcInteraction("bridge_gatekeeper", npcAvatarGroup, {
       interactionRadius: this.bridgeNpcTriggerRadius
     });
-    npcGuide.add(npcTempleGate, spawnPortalVeil, npcAvatarGroup);
+    if (spawnPortalVeil) {
+      npcGuide.add(npcTempleGate, spawnPortalVeil, npcAvatarGroup);
+    } else {
+      npcGuide.add(npcTempleGate, npcAvatarGroup);
+    }
     this.npcWelcomeBubbleLabel = null;
 
     const mirrorGate = new THREE.Group();
@@ -3969,7 +3942,7 @@ export class GameRuntime {
     this.portalBillboardGroup = portalBillboard;
     this.spawnPortalVeilGroup = spawnPortalVeil;
     this.spawnPortalVeilMaterial = veilMaterial;
-    this.spawnPortalVeilWorldZ = npcGuide.position.z + npcTempleGate.position.z;
+    this.spawnPortalVeilWorldZ = npcGuide.position.z + npcGuideVisualZOffset;
     this.spawnPortalVeilRevealStarted = false;
     this.spawnPortalVeilRevealClock = 0;
     this.npcGreetingMidpointTriggered = false;
@@ -6211,7 +6184,7 @@ export class GameRuntime {
       forward.normalize();
     }
     const right = new THREE.Vector3(forward.z, 0, -forward.x).normalize();
-    const spawnBase = this.bridgeApproachSpawn?.clone?.() ?? new THREE.Vector3(0, 0, -98);
+    const spawnBase = this.bridgeApproachSpawn?.clone?.() ?? new THREE.Vector3(0, 0, -104);
     spawnBase.y = 0;
 
     const centerDistance = this.mobileEnabled ? 258 : 292;
@@ -6573,7 +6546,7 @@ export class GameRuntime {
     const baseCenter = center.clone().addScaledVector(forward, this.mobileEnabled ? -54 : -48);
     const topBillboardForwardOffset = this.mobileEnabled ? 9 : 14;
     const styleCycle = ["cyan", "slate", "amber"];
-    const spawnFacingTarget = this.bridgeApproachSpawn?.clone?.() ?? new THREE.Vector3(0, 0, -98);
+    const spawnFacingTarget = this.bridgeApproachSpawn?.clone?.() ?? new THREE.Vector3(0, 0, -104);
     spawnFacingTarget.y = 0;
 
     for (let index = 0; index < assetUrls.length; index += 1) {
@@ -8732,8 +8705,8 @@ export class GameRuntime {
   handleSurfacePainterDeleteAction() {
     const promoOwnerKey = this.getSurfacePainterPromoOwnerKey();
     if (promoOwnerKey) {
-      // Mobile flow: deleting from the painter should not reopen the legacy promo panel.
-      this.requestPromoRemoveFromSurfacePainter({ startPlacementPreview: false });
+      // Deleting a promo surface should fully reset it and immediately return to fresh placement.
+      this.requestPromoRemoveFromSurfacePainter({ startPlacementPreview: true });
       return;
     }
     this.clearSurfacePainterCanvas();
@@ -9474,12 +9447,12 @@ export class GameRuntime {
 
     const requestedZone = this.normalizeRoomZone(this.requestedEntryZone, "");
     const explicitLobbyEntry = requestedZone === "lobby";
-    const forceBridgeIntro =
+    const explicitBridgeIntro =
       explicitLobbyEntry ||
       this.parseQueryFlag("bridge_intro") ||
       this.parseQueryFlag("bridgeIntro");
 
-    // Open-room default: enter straight into the public city plaza unless bridge intro is requested.
+    // The void is a start gate, not a passive lobby. Direct plaza entry is only for explicit rejoin paths.
     let savedNickname = "";
     try { savedNickname = String(localStorage.getItem("emptines_nickname") ?? "").trim(); } catch (_) {}
     if (savedNickname.length >= 2) {
@@ -9514,29 +9487,8 @@ export class GameRuntime {
         return;
       }
     }
-    if (!forceBridgeIntro) {
-      this.pendingPlayerNameSync = true;
-      this.pendingAuthoritativeStateSync = true;
-      this.flowStage = "city_live";
-      this.bridgeNpcPlayApproved = true;
-      this.playerPosition.copy(this.citySpawn);
-      this.yaw = this.getLookYaw(this.citySpawn, this.cityLookTarget);
-      this.pitch = -0.02;
-      this.hubFlowUiEl?.classList.add("hidden");
-      this.hideNicknameGate();
-      this.hideNpcChoiceGate();
-      this.setMirrorGateVisible(false);
-      this.bootIntroCurrentPhaseId = "day";
-      this.bootIntroRevealActive = false;
-      this.bootIntroRevealElapsed = this.bootIntroRevealDuration;
-      this.bootIntroVideoPlaying = false;
-      this.applyBootIntroWorldReveal(1);
-      this.lastSafePosition.copy(this.playerPosition);
-      this.ensureEntryMusicPlayback();
-      return;
-    }
     const allowFastCityRejoin =
-      !explicitLobbyEntry &&
+      !explicitBridgeIntro &&
       (this.parseQueryFlag("skip_bridge") ||
         this.parseQueryFlag("skipBridge") ||
         this.parseQueryFlag("rejoin_city") ||
@@ -9580,13 +9532,15 @@ export class GameRuntime {
     this.portalPhase = "cooldown";
     this.portalPhaseClock = this.portalCooldownSeconds;
     this.bridgeNpcPlayApproved = true;
+    this.bridgeIntroNameConfirmed = false;
     this.hideNpcChoiceGate();
+    this.hideNicknameGate();
     this.setMirrorGateVisible(false);
-    this.setFlowHeadline("입장 확인", "임시 닉네임을 입력하고 시작하세요.");
-    this.applyBootIntroWorldReveal(0);
+    this.lastSafePosition.copy(this.playerPosition);
+    this.setFlowHeadline("입장 확인", "임시 닉네임을 정하고 시작하세요.");
     this.hud.setStatus(this.getStatusText());
     this.showNicknameGate();
-    this.lastSafePosition.copy(this.playerPosition);
+    this.syncGameplayUiForFlow();
   }
 
   bindHubFlowUiEvents() {
@@ -9603,7 +9557,7 @@ export class GameRuntime {
       this.navigateNpcDialogueBack();
     });
     this.npcChoiceCloseBtnEl?.addEventListener("click", () => {
-      this.hideNpcChoiceGate();
+      this.handleNpcDialogueDismiss();
     });
   }
 
@@ -9633,6 +9587,13 @@ export class GameRuntime {
     if (this.npcChoiceActionsEl) {
       this.npcChoiceActionsEl.replaceChildren();
     }
+    if (this.npcChoiceNameEl) {
+      this.npcChoiceNameEl.textContent = "";
+      this.npcChoiceNameEl.classList.remove("hidden");
+    }
+    if (this.npcChoiceCloseBtnEl) {
+      this.npcChoiceCloseBtnEl.textContent = "닫기";
+    }
     this.syncMobileUiState();
     this.hud.setStatus(this.getStatusText());
   }
@@ -9651,6 +9612,31 @@ export class GameRuntime {
     this.openNpcDialogue(this.activeNpcDialogueNpcId, targetNodeId, { preserveHistory: true });
   }
 
+  shouldPromptBridgeNickname() {
+    const currentName = String(this.localPlayerName ?? "").trim();
+    return (
+      !currentName ||
+      /^player(?:_\d+)?$/i.test(currentName) ||
+      currentName === "플레이어" ||
+      currentName === "게스트"
+    );
+  }
+
+  handleNpcDialogueDismiss() {
+    const shouldOpenBridgeNicknameGate =
+      this.activeNpcDialogueNpcId === "bridge_gatekeeper" &&
+      this.flowStage === "bridge_approach" &&
+      !this.bridgeIntroNameConfirmed &&
+      this.shouldPromptBridgeNickname();
+    this.hideNpcChoiceGate();
+    if (!shouldOpenBridgeNicknameGate) {
+      return;
+    }
+    this.setFlowHeadline("입장 확인", "임시 닉네임을 입력하세요.");
+    this.showNicknameGate();
+    this.hud.setStatus(this.getStatusText());
+  }
+
   renderNpcDialogueNode(npcId, nodeId) {
     const definition = this.getNpcDefinition(npcId);
     const node = this.getNpcDialogueNode(npcId, nodeId);
@@ -9666,8 +9652,10 @@ export class GameRuntime {
     this.activeNpcDialogueNpcId = npcId;
     this.activeNpcDialogueNodeId = node.id;
 
+    const displayName = String(definition.displayName ?? "").trim();
     if (this.npcChoiceNameEl) {
-      this.npcChoiceNameEl.textContent = definition.displayName;
+      this.npcChoiceNameEl.textContent = displayName;
+      this.npcChoiceNameEl.classList.toggle("hidden", !displayName);
     }
     if (this.npcChoiceTitleEl) {
       this.npcChoiceTitleEl.textContent = node.title;
@@ -9695,6 +9683,10 @@ export class GameRuntime {
         this.npcChoiceActionsEl.appendChild(button);
       });
     }
+    if (this.npcChoiceCloseBtnEl) {
+      this.npcChoiceCloseBtnEl.textContent =
+        npcId === "bridge_gatekeeper" && node.options.length === 0 ? "계속" : "닫기";
+    }
 
     if (this.npcChoiceBackBtnEl) {
       const canGoBack =
@@ -9703,8 +9695,8 @@ export class GameRuntime {
       this.npcChoiceBackBtnEl.classList.toggle("hidden", !canGoBack);
     }
 
-    if (node.chatEcho) {
-      this.appendChatLine("", `${definition.displayName}: ${replyText}`, "system");
+    if (NPC_DIALOGUE_CHAT_ECHO_ENABLED && node.chatEcho) {
+      this.appendChatLine("", displayName ? `${displayName}: ${replyText}` : replyText, "system");
     }
 
     return true;
@@ -9753,7 +9745,7 @@ export class GameRuntime {
       return;
     }
     const label = String(option.label ?? "").trim();
-    if (label) {
+    if (NPC_DIALOGUE_CHAT_ECHO_ENABLED && label) {
       this.appendChatLine(this.localPlayerName, label, "self");
     }
     if (option.action === "open_nickname_gate") {
@@ -9764,7 +9756,7 @@ export class GameRuntime {
       return;
     }
     if (option.action === "close_dialogue" || option.closeAfterSelect) {
-      this.hideNpcChoiceGate();
+      this.handleNpcDialogueDismiss();
       return;
     }
     if (option.nextNodeId) {
@@ -9913,6 +9905,8 @@ export class GameRuntime {
     this.bootIntroPending = false;
     this.bootIntroVideoPlaying = false;
     this.bootIntroRevealActive = false;
+    this.bootIntroRevealDeferred = false;
+    this.bootIntroAutoCameraEnabled = false;
     this.bootIntroRevealElapsed = this.bootIntroRevealDuration;
     this.bootIntroCurrentPhaseId = "day";
     this.applyBootIntroWorldReveal(1);
@@ -9936,30 +9930,180 @@ export class GameRuntime {
     this.playNpcGreeting();
   }
 
-  startBootIntroWorldReveal() {
-    if (!this.hubFlowEnabled) {
-      this.beginBridgeApproachFlow();
+  beginBootIntroVisibleReveal() {
+    if (!this.hubFlowEnabled || this.flowStage !== "boot_intro") {
       return;
     }
-    this.bootIntroVideoPlaying = true;
+    if (this.bootIntroRevealActive) {
+      return;
+    }
+    this.bootIntroRevealDeferred = false;
     this.bootIntroRevealActive = true;
+    this.bootIntroAutoCameraEnabled = true;
     this.bootIntroRevealElapsed = 0;
     this.bootIntroCurrentPhaseId = "";
-    this.keys.clear();
-    this.chalkDrawingActive = false;
-    this.chalkLastStamp = null;
     this.setFlowHeadline("시야 동기화", "밤이 걷히며 시뮬라크 시티가 열립니다.");
     this.applyBootIntroWorldReveal(0);
     this.hud.setStatus(this.getStatusText());
     this.syncGameplayUiForFlow();
   }
 
+  startBootIntroWorldReveal() {
+    if (!this.hubFlowEnabled) {
+      this.beginBridgeApproachFlow();
+      return;
+    }
+    this.bootIntroVideoPlaying = true;
+    this.bootIntroRevealActive = false;
+    this.bootIntroRevealDeferred = false;
+    this.bootIntroAutoCameraEnabled = true;
+    this.bootIntroRevealElapsed = 0;
+    this.bootIntroCurrentPhaseId = "night";
+    this.keys.clear();
+    this.chalkDrawingActive = false;
+    this.chalkLastStamp = null;
+    this.setFlowHeadline("오프닝 재생", "오프닝이 끝나면 밤이 걷히며 시뮬라크 시티가 열립니다.");
+    this.applyBootIntroWorldReveal(0);
+    this.hud.setStatus(this.getStatusText());
+    this.syncGameplayUiForFlow();
+    const greetingPlaybackMode = this.playNpcGreeting({
+      onFirstClipEnded: () => {
+        if (this.flowStage !== "boot_intro" || !this.bootIntroRevealDeferred) {
+          return;
+        }
+        this.beginBootIntroVisibleReveal();
+      }
+    });
+    if (greetingPlaybackMode === "screen" || greetingPlaybackMode === "overlay") {
+      this.bootIntroRevealDeferred = true;
+    } else {
+      this.beginBootIntroVisibleReveal();
+    }
+  }
+
+  startBootIntroOpeningSequence() {
+    if (!this.hubFlowEnabled || this.flowStage !== "boot_intro") {
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      if (!this.hubFlowEnabled || this.flowStage !== "boot_intro" || !this.bridgeIntroNameConfirmed) {
+        return;
+      }
+      const overlayStarted = this.playOpeningVideoOverlay(OPENING_VIDEO_OVERLAY_SEQUENCE, {
+        muted: false,
+        playbackRate: 1,
+        onEnded: () => {
+          if (!this.hubFlowEnabled || this.flowStage !== "boot_intro" || !this.bridgeIntroNameConfirmed) {
+            return;
+          }
+          this.startBootIntroWorldReveal();
+        }
+      });
+      if (!overlayStarted) {
+        this.startBootIntroWorldReveal();
+      }
+    });
+  }
+
+  primeBootIntroMediaOnStartInteraction() {
+    if (this.bootIntroMediaPrimed) {
+      return;
+    }
+
+    const primeVideoElement = (sourceUrl) => {
+      const normalizedSources = (Array.isArray(sourceUrl) ? sourceUrl : [sourceUrl])
+        .map((candidate) => String(candidate ?? "").trim())
+        .filter(Boolean);
+      if (!normalizedSources.length) {
+        return;
+      }
+      const video = document.createElement("video");
+
+      try {
+        video.onended = null;
+        video.onerror = null;
+        video.ontimeupdate = null;
+        video.onplaying = null;
+        video.onloadedmetadata = null;
+        video.pause();
+        video.removeAttribute("src");
+        video.replaceChildren();
+        video.load();
+      } catch {
+        // ignore stale media cleanup failures
+      }
+
+      video.preload = "auto";
+      video.autoplay = false;
+      video.playsInline = true;
+      video.muted = true;
+      video.defaultMuted = true;
+      video.volume = 0;
+      video.loop = false;
+      video.crossOrigin = "anonymous";
+      video.disablePictureInPicture = true;
+      video.setAttribute("playsinline", "true");
+      video.setAttribute("webkit-playsinline", "true");
+      video.setAttribute("disableremoteplayback", "true");
+      video.setAttribute("muted", "true");
+
+      if (normalizedSources.length === 1) {
+        video.src = normalizedSources[0];
+      } else {
+        normalizedSources.forEach((sourceUrlValue) => {
+          const sourceNode = document.createElement("source");
+          sourceNode.src = sourceUrlValue;
+          const lowerSourceUrl = sourceUrlValue.toLowerCase();
+          if (lowerSourceUrl.endsWith(".webm")) {
+            sourceNode.type = "video/webm";
+          } else if (lowerSourceUrl.endsWith(".mp4")) {
+            sourceNode.type = "video/mp4";
+          }
+          video.appendChild(sourceNode);
+        });
+        video.load();
+      }
+
+      const resetVideo = () => {
+        try {
+          video.pause();
+          video.currentTime = 0;
+        } catch {
+          // ignore seek cleanup failures
+        }
+        video.removeAttribute("src");
+        video.replaceChildren();
+        video.load();
+        video.muted = false;
+        video.defaultMuted = false;
+        video.volume = 1;
+        video.removeAttribute("muted");
+      };
+
+      video.play().then(
+        () => {
+          resetVideo();
+        },
+        () => {
+          resetVideo();
+        }
+      );
+    };
+
+    primeVideoElement(OPENING_VIDEO_OVERLAY_SEQUENCE);
+    primeVideoElement(NPC_GREETING_VIDEO_SEQUENCE[0]);
+    this.bootIntroMediaPrimed = true;
+  }
+
   finishBootIntroWorldReveal() {
     this.bootIntroRevealActive = false;
+    this.bootIntroRevealDeferred = false;
     this.bootIntroVideoPlaying = false;
+    this.bootIntroAutoCameraEnabled = false;
     this.bootIntroRevealElapsed = this.bootIntroRevealDuration;
     this.bootIntroCurrentPhaseId = "day";
     this.applyBootIntroWorldReveal(1);
+    this.ensureEntryMusicPlayback();
     this.beginBridgeApproachFlow();
   }
 
@@ -9980,24 +10124,26 @@ export class GameRuntime {
     );
     const stageState = this.applyBootIntroWorldReveal(progress);
 
-    const lookEase = 1 - Math.exp(-Math.max(0, delta) * 1.6);
-    this.bootIntroLookTarget.copy(this.cityLookTarget);
-    this.bootIntroLookTarget.y += Number(stageState?.cameraLookYOffset) || 0;
-    this.bootIntroLookTarget.addScaledVector(
-      this.bootIntroLookRight,
-      Number(stageState?.cameraLookLateralOffset) || 0
-    );
-    this.bootIntroLookTarget.addScaledVector(
-      this.bootIntroLookForward,
-      Number(stageState?.cameraLookForwardOffset) || 0
-    );
-    const targetYaw = this.getLookYaw(this.playerPosition, this.bootIntroLookTarget);
-    this.yaw = lerpAngle(this.yaw, targetYaw, lookEase);
-    this.pitch = THREE.MathUtils.lerp(
-      this.pitch,
-      Number(stageState?.cameraPitch) || -0.045,
-      lookEase * 0.92
-    );
+    if (this.bootIntroAutoCameraEnabled) {
+      const lookEase = 1 - Math.exp(-Math.max(0, delta) * 1.6);
+      this.bootIntroLookTarget.copy(this.cityLookTarget);
+      this.bootIntroLookTarget.y += Number(stageState?.cameraLookYOffset) || 0;
+      this.bootIntroLookTarget.addScaledVector(
+        this.bootIntroLookRight,
+        Number(stageState?.cameraLookLateralOffset) || 0
+      );
+      this.bootIntroLookTarget.addScaledVector(
+        this.bootIntroLookForward,
+        Number(stageState?.cameraLookForwardOffset) || 0
+      );
+      const targetYaw = this.getLookYaw(this.playerPosition, this.bootIntroLookTarget);
+      this.yaw = lerpAngle(this.yaw, targetYaw, lookEase);
+      this.pitch = THREE.MathUtils.lerp(
+        this.pitch,
+        Number(stageState?.cameraPitch) || -0.045,
+        lookEase * 0.92
+      );
+    }
 
     if (progress >= 0.999) {
       this.finishBootIntroWorldReveal();
@@ -10008,16 +10154,18 @@ export class GameRuntime {
     if (this.hubFlowEnabled && this.flowStage === "boot_intro") {
       const rawBootName = String(this.nicknameInputEl?.value ?? "").trim();
       this.requestFullscreenOnMobileStartInteraction();
+      this.primeBootIntroMediaOnStartInteraction();
       this.primeEntryMusicOnMobileStartInteraction();
       const nextName = rawBootName.length > 0 ? this.formatPlayerName(rawBootName) : "게스트";
       this.localPlayerName = nextName;
+      this.bridgeIntroNameConfirmed = true;
       if (rawBootName.length >= 2) {
         try { localStorage.setItem("emptines_nickname", nextName); } catch (_) {}
       }
       this.pendingPlayerNameSync = true;
       this.syncPlayerNameIfConnected();
       this.hideNicknameGate();
-      this.startBootIntroWorldReveal();
+      this.startBootIntroOpeningSequence();
       return;
     }
 
@@ -10035,6 +10183,7 @@ export class GameRuntime {
 
     const nextName = this.formatPlayerName(raw);
     this.localPlayerName = nextName;
+    this.bridgeIntroNameConfirmed = true;
     this.pendingPlayerNameSync = true;
     this.syncPlayerNameIfConnected();
     try { localStorage.setItem("emptines_nickname", nextName); } catch (_) {}
@@ -10154,7 +10303,6 @@ export class GameRuntime {
       !this.promoPanelMobileOpen &&
       this.canMovePlayer() &&
       !this.surfacePainterOpen &&
-      !this.bootIntroVideoPlaying &&
       this.flowStage !== "portal_transfer" &&
       (this.nicknameGateEl?.classList.contains("hidden") ?? true) &&
       (this.npcChoiceGateEl?.classList.contains("hidden") ?? true);
@@ -10256,6 +10404,13 @@ export class GameRuntime {
     this.mobileLookLastX = touch.clientX;
     this.mobileLookLastY = touch.clientY;
     this.lastLookInputAtMs = typeof performance !== "undefined" ? performance.now() : Date.now();
+    if (
+      this.hubFlowEnabled &&
+      this.flowStage === "boot_intro" &&
+      (this.bootIntroVideoPlaying || this.bootIntroRevealActive || this.bootIntroRevealDeferred)
+    ) {
+      this.bootIntroAutoCameraEnabled = false;
+    }
 
     // Increase mobile drag sensitivity to reduce sluggish camera response.
     this.yaw -= deltaX * 0.005;
@@ -10272,6 +10427,13 @@ export class GameRuntime {
     }
     this.pendingMouseLookDeltaX = 0;
     this.pendingMouseLookDeltaY = 0;
+    if (
+      this.hubFlowEnabled &&
+      this.flowStage === "boot_intro" &&
+      (this.bootIntroVideoPlaying || this.bootIntroRevealActive || this.bootIntroRevealDeferred)
+    ) {
+      this.bootIntroAutoCameraEnabled = false;
+    }
 
     const sensitivityX = this.mobileEnabled ? 0.0018 : 0.0023;
     const sensitivityY = this.mobileEnabled ? 0.0016 : 0.002;
@@ -10302,18 +10464,13 @@ export class GameRuntime {
   }
 
   createNpcGreetingScreen() {
+    const material = this.createNpcGreetingScreenMaterial();
     const screen = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.42, 2.38),
-      new THREE.MeshBasicMaterial({
-        color: 0xa9d9ff,
-        transparent: true,
-        opacity: 0.02,
-        depthWrite: false,
-        toneMapped: false,
-        blending: THREE.AdditiveBlending
-      })
+      new THREE.PlaneGeometry(1, 1),
+      material
     );
-    screen.position.set(0, 1.48, -0.42);
+    this.npcGreetingScreen = screen;
+    this.updateNpcGreetingScreenLayout();
     screen.rotation.y = Math.PI;
     screen.renderOrder = 12;
     screen.frustumCulled = false;
@@ -10322,8 +10479,155 @@ export class GameRuntime {
     this.npcGreetingPlaybackClock = 0;
     this.npcGreetingVideoEl = null;
     this.npcGreetingVideoTexture = null;
-    this.npcGreetingScreen = screen;
+    this.ensureNpcGreetingPosterTexture();
     return screen;
+  }
+
+  createNpcGreetingScreenMaterial() {
+    const uniforms = {
+      videoMap: { value: null },
+      useVideoMap: { value: 0 },
+      tintColor: { value: new THREE.Color(0xffffff) },
+      screenOpacity: { value: 0 },
+      videoBrightness: { value: NPC_GREETING_SCREEN_BRIGHTNESS },
+      chromaKeyColor: { value: NPC_GREETING_CHROMA_KEY_COLOR.clone() },
+      chromaThreshold: { value: NPC_GREETING_CHROMA_THRESHOLD },
+      chromaSmoothness: { value: NPC_GREETING_CHROMA_SMOOTHNESS },
+      chromaDespill: { value: NPC_GREETING_CHROMA_DESPILL }
+    };
+    const material = new THREE.ShaderMaterial({
+      uniforms,
+      transparent: true,
+      depthTest: true,
+      depthWrite: true,
+      toneMapped: false,
+      side: THREE.DoubleSide,
+      vertexShader: `
+varying vec2 vUv;
+
+void main() {
+  vUv = uv;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}
+      `,
+      fragmentShader: `
+uniform sampler2D videoMap;
+uniform float useVideoMap;
+uniform vec3 tintColor;
+uniform float screenOpacity;
+uniform float videoBrightness;
+uniform vec3 chromaKeyColor;
+uniform float chromaThreshold;
+uniform float chromaSmoothness;
+uniform float chromaDespill;
+
+varying vec2 vUv;
+
+void main() {
+  vec4 color = vec4(tintColor, screenOpacity);
+
+  if (useVideoMap > 0.5) {
+    vec4 sampledColor = texture2D(videoMap, vUv);
+    float maxOther = max(sampledColor.r, sampledColor.b);
+    float greenDominance = sampledColor.g - maxOther;
+    float greenPresence = smoothstep(0.12, 0.34, sampledColor.g);
+    float keyMask = smoothstep(
+      chromaThreshold - chromaSmoothness,
+      chromaThreshold + chromaSmoothness,
+      greenDominance
+    );
+    keyMask *= greenPresence;
+    float chromaAlpha = 1.0 - keyMask;
+    float greenBias = max(greenDominance, 0.0);
+    sampledColor.rb += greenBias * chromaDespill;
+    sampledColor.g *= 1.0 - greenBias * 0.45;
+    color = sampledColor;
+    color.rgb *= tintColor * videoBrightness;
+    color.a *= screenOpacity * chromaAlpha;
+  }
+
+  if (color.a <= 0.01) {
+    discard;
+  }
+
+  gl_FragColor = color;
+}
+      `
+    });
+    material.userData.npcGreetingScreenUniforms = uniforms;
+    return material;
+  }
+
+  ensureNpcGreetingPosterTexture() {
+    if (this.npcGreetingPosterTexture || this.npcGreetingPosterLoading) {
+      return;
+    }
+    this.npcGreetingPosterLoading = true;
+    const loader = new THREE.TextureLoader();
+    loader.load(
+      NPC_GREETING_POSTER_URL,
+      (texture) => {
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.minFilter = THREE.LinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        texture.generateMipmaps = false;
+        this.npcGreetingPosterTexture = texture;
+        this.npcGreetingPosterLoading = false;
+      },
+      undefined,
+      () => {
+        this.npcGreetingPosterLoading = false;
+      }
+    );
+  }
+
+  getNpcGreetingScreenMaterial() {
+    const material =
+      this.npcGreetingScreen && !Array.isArray(this.npcGreetingScreen.material)
+        ? this.npcGreetingScreen.material
+        : null;
+    if (!material?.userData?.npcGreetingScreenUniforms) {
+      return null;
+    }
+    return material;
+  }
+
+  setNpcGreetingScreenVisuals({ map, color, opacity } = {}) {
+    const material = this.getNpcGreetingScreenMaterial();
+    if (!material) {
+      return material;
+    }
+    const uniforms = material.userData.npcGreetingScreenUniforms;
+    if (map !== undefined) {
+      uniforms.videoMap.value = map ?? null;
+      uniforms.useVideoMap.value = map ? 1 : 0;
+    }
+    if (color !== undefined) {
+      if (color?.isColor) {
+        uniforms.tintColor.value.copy(color);
+      } else if (color != null) {
+        uniforms.tintColor.value.set(color);
+      }
+    }
+    if (opacity !== undefined) {
+      uniforms.screenOpacity.value = THREE.MathUtils.clamp(Number(opacity) || 0, 0, 1);
+    }
+    return material;
+  }
+
+  updateNpcGreetingScreenLayout(videoWidth = 1, videoHeight = 1) {
+    if (!this.npcGreetingScreen) {
+      return;
+    }
+    const resolvedWidth = Math.max(1, Number(videoWidth) || 1);
+    const resolvedHeight = Math.max(1, Number(videoHeight) || 1);
+    const aspect = THREE.MathUtils.clamp(resolvedWidth / resolvedHeight, 0.45, 1.8);
+    this.npcGreetingScreen.scale.set(NPC_GREETING_SCREEN_HEIGHT * aspect, NPC_GREETING_SCREEN_HEIGHT, 1);
+    this.npcGreetingScreen.position.set(
+      0,
+      NPC_GREETING_SCREEN_HEIGHT * 0.5 + NPC_GREETING_SCREEN_FOOT_OFFSET,
+      NPC_GREETING_SCREEN_Z_OFFSET
+    );
   }
 
   hasSeenNpcGreetingInSession() {
@@ -10349,106 +10653,159 @@ export class GameRuntime {
     }
   }
 
-  disposeNpcGreetingVideoPlayback({ disposeTexture = true } = {}) {
-    if (this.npcGreetingVideoEl) {
-      this.npcGreetingVideoEl.onended = null;
-      this.npcGreetingVideoEl.onerror = null;
-      this.npcGreetingVideoEl.ontimeupdate = null;
-      this.npcGreetingVideoEl.pause();
-      this.npcGreetingVideoEl.removeAttribute("src");
-      this.npcGreetingVideoEl.load();
-      this.npcGreetingVideoEl = null;
-    }
-    if (disposeTexture && this.npcGreetingVideoTexture) {
-      this.npcGreetingVideoTexture.dispose();
-      this.npcGreetingVideoTexture = null;
-    }
+  isOpeningVideoGateOpen() {
+    return Boolean(this.openingVideoGateEl && !this.openingVideoGateEl.classList.contains("hidden"));
   }
 
-  playNpcGreetingVideoOnScreen(
+  showOpeningVideoGate() {
+    if (!this.openingVideoGateEl) {
+      return false;
+    }
+    this.openingVideoGateEl.classList.remove("hidden");
+    this.openingVideoGateEl.setAttribute("aria-hidden", "false");
+    if (document.pointerLockElement === this.renderer.domElement) {
+      document.exitPointerLock?.();
+    }
+    this.syncMobileUiState();
+    return true;
+  }
+
+  hideOpeningVideoGate() {
+    if (!this.openingVideoGateEl) {
+      return;
+    }
+    this.openingVideoGateEl.classList.add("hidden");
+    this.openingVideoGateEl.setAttribute("aria-hidden", "true");
+    this.syncMobileUiState();
+  }
+
+  disposeOpeningVideoPlayback() {
+    this.openingVideoPlaybackToken += 1;
+    const video = this.openingVideoEl;
+    if (!video) {
+      this.hideOpeningVideoGate();
+      return;
+    }
+    video.onended = null;
+    video.onerror = null;
+    video.ontimeupdate = null;
+    video.onplaying = null;
+    video.onloadedmetadata = null;
+    video.pause();
+    video.removeAttribute("src");
+    video.replaceChildren();
+    video.load();
+    this.hideOpeningVideoGate();
+  }
+
+  applyVideoPlaybackRate(video, playbackRate = 1) {
+    if (!video) {
+      return 1;
+    }
+    const resolvedPlaybackRate = THREE.MathUtils.clamp(Number(playbackRate) || 1, 0.25, 4);
+    video.playbackRate = resolvedPlaybackRate;
+    video.defaultPlaybackRate = resolvedPlaybackRate;
+    return resolvedPlaybackRate;
+  }
+
+  playOpeningVideoOverlay(
     sourceUrl,
-    { freezeOnEnd = false, triggerHalfwayOnEnd = false, onHalfway = null, onEnded = null } = {}
+    {
+      triggerHalfwayOnEnd = false,
+      onHalfway = null,
+      onStarted = null,
+      onEnded = null,
+      muted = false,
+      playbackRate = 1
+    } = {}
   ) {
-    const normalizedSource = String(sourceUrl ?? "").trim();
-    if (!normalizedSource) {
+    const normalizedSources = (Array.isArray(sourceUrl) ? sourceUrl : [sourceUrl])
+      .map((candidate) => String(candidate ?? "").trim())
+      .filter(Boolean);
+    const video = this.openingVideoEl;
+    if (!video || !normalizedSources.length || !this.showOpeningVideoGate()) {
       return false;
     }
 
-    const screenMaterial =
-      this.npcGreetingScreen && !Array.isArray(this.npcGreetingScreen.material)
-        ? this.npcGreetingScreen.material
-        : null;
-    if (!screenMaterial) {
-      return false;
-    }
+    this.disposeOpeningVideoPlayback();
+    this.showOpeningVideoGate();
+    const playbackToken = this.openingVideoPlaybackToken + 1;
+    this.openingVideoPlaybackToken = playbackToken;
 
-    this.disposeNpcGreetingVideoPlayback();
-
-    const video = document.createElement("video");
     video.preload = "auto";
+    video.autoplay = true;
     video.playsInline = true;
-    video.muted = false;
-    video.volume = 1;
+    video.muted = muted;
+    video.defaultMuted = muted;
+    video.volume = muted ? 0 : 1;
     video.loop = false;
-    video.crossOrigin = "anonymous";
     video.disablePictureInPicture = true;
+    video.controls = false;
     video.setAttribute("playsinline", "true");
     video.setAttribute("webkit-playsinline", "true");
     video.setAttribute("disableremoteplayback", "true");
-    video.src = normalizedSource;
+    video.setAttribute("autoplay", "true");
+    if (muted) {
+      video.setAttribute("muted", "true");
+    } else {
+      video.removeAttribute("muted");
+    }
+    if (normalizedSources.length === 1) {
+      video.src = normalizedSources[0];
+    } else {
+      normalizedSources.forEach((sourceUrlValue) => {
+        const sourceNode = document.createElement("source");
+        sourceNode.src = sourceUrlValue;
+        const lowerSourceUrl = sourceUrlValue.toLowerCase();
+        if (lowerSourceUrl.endsWith(".webm")) {
+          sourceNode.type = "video/webm";
+        } else if (lowerSourceUrl.endsWith(".mp4")) {
+          sourceNode.type = "video/mp4";
+        }
+        video.appendChild(sourceNode);
+      });
+      video.load();
+    }
     video.currentTime = 0;
-
-    const texture = new THREE.VideoTexture(video);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.minFilter = THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    texture.generateMipmaps = false;
-
-    screenMaterial.map = texture;
-    screenMaterial.color.setHex(0xffffff);
-    screenMaterial.opacity = 1;
-    screenMaterial.needsUpdate = true;
-    this.npcGreetingScreen.visible = true;
-
-    this.npcGreetingVideoEl = video;
-    this.npcGreetingVideoTexture = texture;
+    const resolvedPlaybackRate = this.applyVideoPlaybackRate(video, playbackRate);
 
     let halfwayTriggered = false;
-    const runHalfway = () => {
-      if (halfwayTriggered) {
-        return;
-      }
-      halfwayTriggered = true;
-      onHalfway?.();
-    };
-
+    let started = false;
     const finishPlayback = ({ triggerHalfway = false } = {}) => {
-      if (this.npcGreetingVideoEl !== video) {
+      if (this.openingVideoPlaybackToken !== playbackToken) {
         return;
       }
-      if (triggerHalfway) {
-        runHalfway();
+      if (triggerHalfway && !halfwayTriggered) {
+        halfwayTriggered = true;
+        onHalfway?.();
       }
-      video.onended = null;
-      video.onerror = null;
-      video.ontimeupdate = null;
-      if (freezeOnEnd) {
-        this.freezeVideoOnLastFrame(video, texture);
-      } else {
-        video.pause();
-      }
+      this.disposeOpeningVideoPlayback();
       onEnded?.();
     };
 
     video.ontimeupdate = () => {
-      if (halfwayTriggered) {
+      if (this.openingVideoPlaybackToken !== playbackToken || halfwayTriggered) {
         return;
       }
       if (Number.isFinite(video.duration) && video.duration > 0 && video.currentTime >= video.duration * 0.5) {
-        runHalfway();
+        halfwayTriggered = true;
+        onHalfway?.();
       }
     };
-
+    video.onplaying = () => {
+      if (this.openingVideoPlaybackToken !== playbackToken || started) {
+        return;
+      }
+      this.applyVideoPlaybackRate(video, resolvedPlaybackRate);
+      started = true;
+      onStarted?.();
+    };
+    video.onloadedmetadata = () => {
+      if (this.openingVideoPlaybackToken !== playbackToken) {
+        return;
+      }
+      this.applyVideoPlaybackRate(video, resolvedPlaybackRate);
+    };
     video.onended = () => {
       finishPlayback({ triggerHalfway: triggerHalfwayOnEnd });
     };
@@ -10457,8 +10814,9 @@ export class GameRuntime {
     };
 
     video.play().catch(() => {
-      // Fallback for strict autoplay policies: retry muted before giving up.
       video.muted = true;
+      video.defaultMuted = true;
+      video.volume = 0;
       video.currentTime = 0;
       video.play().then(
         () => {},
@@ -10471,38 +10829,366 @@ export class GameRuntime {
     return true;
   }
 
+  disposeNpcGreetingVideoPlayback({ disposeTexture = true } = {}) {
+    if (this.npcGreetingVideoEl) {
+      this.npcGreetingVideoEl.onended = null;
+      this.npcGreetingVideoEl.onerror = null;
+      this.npcGreetingVideoEl.ontimeupdate = null;
+      this.npcGreetingVideoEl.onloadedmetadata = null;
+      this.npcGreetingVideoEl.pause();
+      this.npcGreetingVideoEl.removeAttribute("src");
+      this.npcGreetingVideoEl.replaceChildren();
+      this.npcGreetingVideoEl.load();
+      this.npcGreetingVideoEl = null;
+    }
+    if (disposeTexture && this.npcGreetingVideoTexture) {
+      this.npcGreetingVideoTexture.dispose();
+      this.npcGreetingVideoTexture = null;
+    }
+  }
+
+  playNpcGreetingVideoOnScreen(
+    sourceUrl,
+    {
+      freezeOnEnd = false,
+      clipFreezeAtSeconds = null,
+      triggerHalfwayOnEnd = false,
+      onClipEnded = null,
+      onHalfway = null,
+      onStarted = null,
+      onEnded = null,
+      muted = false,
+      playbackRate = 1
+    } = {}
+  ) {
+    const rawSources = Array.isArray(sourceUrl) ? sourceUrl : [sourceUrl];
+    const hasNestedSequence = rawSources.some((candidate) => Array.isArray(candidate));
+    const normalizedSequence = (hasNestedSequence ? rawSources : [rawSources])
+      .map((clipSources) => (Array.isArray(clipSources) ? clipSources : [clipSources]))
+      .map((clipSources) =>
+        clipSources.map((candidate) => String(candidate ?? "").trim()).filter(Boolean)
+      )
+      .filter((clipSources) => clipSources.length > 0);
+    if (!normalizedSequence.length) {
+      return false;
+    }
+
+    const screenMaterial = this.getNpcGreetingScreenMaterial();
+    if (!screenMaterial) {
+      return false;
+    }
+
+    this.disposeNpcGreetingVideoPlayback();
+    this.updateNpcGreetingScreenLayout();
+
+    let activeClipIndex = 0;
+    let currentVideo = null;
+    let currentTexture = null;
+    let halfwayTriggered = false;
+    let started = false;
+
+    const runStarted = () => {
+      if (started) {
+        return;
+      }
+      started = true;
+      onStarted?.();
+    };
+    const runHalfway = () => {
+      if (halfwayTriggered) {
+        return;
+      }
+      halfwayTriggered = true;
+      onHalfway?.();
+    };
+    const applyHalfwayProgress = (clipIndex, clipProgress = 0) => {
+      if (halfwayTriggered || normalizedSequence.length <= 0) {
+        return;
+      }
+      const overallProgress = THREE.MathUtils.clamp(
+        (clipIndex + THREE.MathUtils.clamp(clipProgress, 0, 1)) / normalizedSequence.length,
+        0,
+        1
+      );
+      if (overallProgress >= 0.5) {
+        runHalfway();
+      }
+    };
+    const clearClipResources = (video, texture, { clearMap = true } = {}) => {
+      if (video) {
+        video.onended = null;
+        video.onerror = null;
+        video.ontimeupdate = null;
+        video.onplaying = null;
+        video.onloadedmetadata = null;
+        video.pause();
+        video.removeAttribute("src");
+        video.replaceChildren();
+        video.load();
+      }
+      if (clearMap && texture && this.npcGreetingVideoTexture === texture) {
+        this.setNpcGreetingScreenVisuals({ map: null });
+      }
+      texture?.dispose?.();
+      if (this.npcGreetingVideoEl === video) {
+        this.npcGreetingVideoEl = null;
+      }
+      if (this.npcGreetingVideoTexture === texture) {
+        this.npcGreetingVideoTexture = null;
+      }
+    };
+    const finishPlayback = ({ triggerHalfway = false, keepFrame = false, keepFrameAt = null } = {}) => {
+      const video = currentVideo;
+      const texture = currentTexture;
+      if (!video) {
+        return;
+      }
+      if (triggerHalfway) {
+        runHalfway();
+      }
+      video.onended = null;
+      video.onerror = null;
+      video.ontimeupdate = null;
+      video.onplaying = null;
+      video.onloadedmetadata = null;
+      if (keepFrame) {
+        this.freezeVideoOnLastFrame(video, texture, keepFrameAt);
+      } else {
+        clearClipResources(video, texture);
+        currentVideo = null;
+        currentTexture = null;
+      }
+      onEnded?.();
+    };
+    const startClip = (clipIndex) => {
+      const normalizedSources = normalizedSequence[clipIndex] ?? null;
+      if (!normalizedSources?.length) {
+        finishPlayback({ triggerHalfway: false, keepFrame: false });
+        return;
+      }
+
+      activeClipIndex = clipIndex;
+      let clipSettled = false;
+      const freezeAtSecondsRaw = Array.isArray(clipFreezeAtSeconds)
+        ? Number(clipFreezeAtSeconds[clipIndex])
+        : NaN;
+      const freezeAtSeconds = Number.isFinite(freezeAtSecondsRaw) && freezeAtSecondsRaw >= 0
+        ? freezeAtSecondsRaw
+        : null;
+      const video = document.createElement("video");
+      video.preload = "auto";
+      video.autoplay = true;
+      video.playsInline = true;
+      video.muted = muted;
+      video.defaultMuted = muted;
+      video.volume = muted ? 0 : 1;
+      video.loop = false;
+      video.crossOrigin = "anonymous";
+      video.disablePictureInPicture = true;
+      video.setAttribute("playsinline", "true");
+      video.setAttribute("webkit-playsinline", "true");
+      video.setAttribute("disableremoteplayback", "true");
+      video.setAttribute("autoplay", "true");
+      if (muted) {
+        video.setAttribute("muted", "true");
+      }
+      if (normalizedSources.length === 1) {
+        video.src = normalizedSources[0];
+      } else {
+        normalizedSources.forEach((sourceUrlValue) => {
+          const sourceNode = document.createElement("source");
+          sourceNode.src = sourceUrlValue;
+          const lowerSourceUrl = sourceUrlValue.toLowerCase();
+          if (lowerSourceUrl.endsWith(".webm")) {
+            sourceNode.type = "video/webm";
+          } else if (lowerSourceUrl.endsWith(".mp4")) {
+            sourceNode.type = "video/mp4";
+          }
+          video.appendChild(sourceNode);
+        });
+        video.load();
+      }
+      video.currentTime = 0;
+      const resolvedPlaybackRate = this.applyVideoPlaybackRate(video, playbackRate);
+
+      const texture = new THREE.VideoTexture(video);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.minFilter = THREE.LinearFilter;
+      texture.magFilter = THREE.LinearFilter;
+      texture.generateMipmaps = false;
+
+      currentVideo = video;
+      currentTexture = texture;
+      this.npcGreetingVideoEl = video;
+      this.npcGreetingVideoTexture = texture;
+      this.setNpcGreetingScreenVisuals({ map: texture, color: 0xffffff, opacity: 1 });
+      this.npcGreetingScreen.visible = true;
+
+      video.onloadedmetadata = () => {
+        if (this.npcGreetingVideoEl !== video) {
+          return;
+        }
+        this.applyVideoPlaybackRate(video, resolvedPlaybackRate);
+        this.updateNpcGreetingScreenLayout(video.videoWidth, video.videoHeight);
+      };
+      video.ontimeupdate = () => {
+        if (this.npcGreetingVideoEl !== video) {
+          return;
+        }
+        if (Number.isFinite(video.duration) && video.duration > 0) {
+          applyHalfwayProgress(activeClipIndex, video.currentTime / video.duration);
+        }
+        if (
+          freezeAtSeconds !== null &&
+          !clipSettled &&
+          video.currentTime >= Math.max(0, freezeAtSeconds - 0.02)
+        ) {
+          clipSettled = true;
+          const nextClipIndex = activeClipIndex + 1;
+          onClipEnded?.({
+            clipIndex: activeClipIndex,
+            clipCount: normalizedSequence.length,
+            isFinalClip: nextClipIndex >= normalizedSequence.length
+          });
+          if (nextClipIndex < normalizedSequence.length) {
+            clearClipResources(video, texture, { clearMap: false });
+            currentVideo = null;
+            currentTexture = null;
+            startClip(nextClipIndex);
+            return;
+          }
+          finishPlayback({
+            triggerHalfway: triggerHalfwayOnEnd,
+            keepFrame: true,
+            keepFrameAt: freezeAtSeconds
+          });
+        }
+      };
+      video.onplaying = () => {
+        if (this.npcGreetingVideoEl !== video) {
+          return;
+        }
+        this.applyVideoPlaybackRate(video, resolvedPlaybackRate);
+        runStarted();
+      };
+      video.onended = () => {
+        if (this.npcGreetingVideoEl !== video) {
+          return;
+        }
+        if (clipSettled) {
+          return;
+        }
+        clipSettled = true;
+        applyHalfwayProgress(activeClipIndex, 1);
+        const nextClipIndex = activeClipIndex + 1;
+        onClipEnded?.({
+          clipIndex: activeClipIndex,
+          clipCount: normalizedSequence.length,
+          isFinalClip: nextClipIndex >= normalizedSequence.length
+        });
+        if (nextClipIndex < normalizedSequence.length) {
+          clearClipResources(video, texture, { clearMap: false });
+          currentVideo = null;
+          currentTexture = null;
+          startClip(nextClipIndex);
+          return;
+        }
+        finishPlayback({ triggerHalfway: triggerHalfwayOnEnd, keepFrame: freezeOnEnd });
+      };
+      video.onerror = () => {
+        if (this.npcGreetingVideoEl !== video) {
+          return;
+        }
+        finishPlayback({ triggerHalfway: false, keepFrame: false });
+      };
+
+      video.play().catch(() => {
+        video.muted = true;
+        video.defaultMuted = true;
+        video.volume = 0;
+        video.currentTime = 0;
+        video.play().then(
+          () => {},
+          () => {
+            if (this.npcGreetingVideoEl === video) {
+              finishPlayback({ triggerHalfway: false, keepFrame: false });
+            }
+          }
+        );
+      });
+    };
+
+    startClip(0);
+
+    return true;
+  }
+
   triggerNpcGreetingMidpointEffects() {
     if (this.npcGreetingMidpointTriggered) {
       return;
     }
     this.npcGreetingMidpointTriggered = true;
-    this.ensureEntryMusicPlayback();
     this.startSpawnPortalVeilRevealVideo();
   }
 
-  playNpcGreeting() {
-    if (!this.hubFlowEnabled || this.npcGreetingPlayed || !this.npcGreetingScreen) {
-      return;
+  playNpcGreeting({ onFirstClipEnded = null, onEnded = null } = {}) {
+    if (
+      !this.hubFlowEnabled ||
+      this.npcGreetingPlayed ||
+      this.npcGreetingVideoEl ||
+      this.isOpeningVideoGateOpen()
+    ) {
+      return "skipped";
+    }
+    this.npcGreetingMidpointTriggered = false;
+    this.disposeNpcGreetingVideoPlayback();
+    const videoStarted = this.playNpcGreetingVideoOnScreen(
+      NPC_GREETING_VIDEO_SEQUENCE,
+        {
+          freezeOnEnd: true,
+          clipFreezeAtSeconds: NPC_GREETING_VIDEO_CLIP_FREEZE_AT_SECONDS,
+          triggerHalfwayOnEnd: true,
+          muted: false,
+          playbackRate: NPC_GREETING_VIDEO_PLAYBACK_RATE,
+        onStarted: () => {
+          this.markNpcGreetingSeenInSession();
+        },
+        onHalfway: () => {
+          this.triggerNpcGreetingMidpointEffects();
+        },
+        onClipEnded: ({ clipIndex }) => {
+          if (clipIndex === 0) {
+            onFirstClipEnded?.();
+          }
+        },
+        onEnded: () => {
+          this.npcGreetingPlaybackActive = false;
+          this.npcGreetingPlaybackClock = this.npcGreetingPlaybackDuration;
+          onEnded?.();
+        }
+      }
+    );
+    if (videoStarted) {
+      this.npcGreetingPlaybackActive = false;
+      this.npcGreetingPlaybackClock = 0;
+      this.npcGreetingScreen.visible = true;
+      return "screen";
     }
     this.markNpcGreetingSeenInSession();
-    this.npcGreetingMidpointTriggered = false;
     this.npcGreetingPlaybackActive = true;
     this.npcGreetingPlaybackClock = 0;
-    this.disposeNpcGreetingVideoPlayback();
-    const material =
-      this.npcGreetingScreen && !Array.isArray(this.npcGreetingScreen.material)
-        ? this.npcGreetingScreen.material
-        : null;
+    const material = this.getNpcGreetingScreenMaterial();
     if (material) {
-      material.map = null;
-      material.color.setHex(0xa9d9ff);
-      material.opacity = 0.04;
-      material.needsUpdate = true;
+      this.setNpcGreetingScreenVisuals({ map: null, color: 0xa9d9ff, opacity: 0.04 });
     }
     this.npcGreetingScreen.visible = true;
+    return "fallback";
   }
 
   createSpawnPortalVeilTexture() {
+    if (!SPAWN_PORTAL_VEIL_ENABLED) {
+      return null;
+    }
     const canvas = document.createElement("canvas");
     canvas.width = this.mobileEnabled ? 1024 : 1536;
     canvas.height = this.mobileEnabled ? 640 : 900;
@@ -10528,6 +11214,9 @@ export class GameRuntime {
   }
 
   drawSpawnPortalVeilTexture(progress = 0) {
+    if (!SPAWN_PORTAL_VEIL_ENABLED) {
+      return;
+    }
     const canvas = this.spawnPortalVeilCanvas;
     const context = this.spawnPortalVeilContext;
     if (!canvas || !context) {
@@ -10536,30 +11225,92 @@ export class GameRuntime {
     const width = canvas.width;
     const height = canvas.height;
     const reveal = THREE.MathUtils.clamp(Number(progress) || 0, 0, 1);
+    const density = 1 - reveal;
     const horizonLift = THREE.MathUtils.smoothstep(reveal, 0.1, 0.9);
     const pulse = 0.5 + 0.5 * Math.sin(this.portalPulseClock * 1.6 + reveal * Math.PI * 0.85);
+    const rand = (seedA, seedB = 0) => {
+      const value = Math.sin(seedA * 127.1 + seedB * 311.7 + 91.37) * 43758.5453123;
+      return value - Math.floor(value);
+    };
+    const drawMistEllipse = ({
+      cx,
+      cy,
+      rx,
+      ry,
+      rotation = 0,
+      innerAlpha = 0.18,
+      outerAlpha = 0.08,
+      composite = "screen",
+      color = [228, 240, 250]
+    } = {}) => {
+      context.save();
+      context.globalCompositeOperation = composite;
+      context.translate(cx, cy);
+      context.rotate(rotation);
+      context.scale(1, Math.max(0.2, ry / Math.max(1, rx)));
+      const gradient = context.createRadialGradient(0, 0, rx * 0.08, 0, 0, rx);
+      gradient.addColorStop(0, `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${innerAlpha.toFixed(3)})`);
+      gradient.addColorStop(0.56, `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${outerAlpha.toFixed(3)})`);
+      gradient.addColorStop(1, `rgba(${color[0]}, ${color[1]}, ${color[2]}, 0)`);
+      context.fillStyle = gradient;
+      context.beginPath();
+      context.arc(0, 0, rx, 0, Math.PI * 2);
+      context.fill();
+      context.restore();
+    };
 
     context.clearRect(0, 0, width, height);
 
     const baseGradient = context.createLinearGradient(0, 0, 0, height);
-    baseGradient.addColorStop(0, "rgba(6, 10, 18, 0.98)");
+    baseGradient.addColorStop(0, "rgba(4, 8, 14, 0)");
     baseGradient.addColorStop(
-      0.55,
-      `rgba(${Math.round(12 + horizonLift * 34)}, ${Math.round(20 + horizonLift * 52)}, ${Math.round(34 + horizonLift * 76)}, 0.96)`
+      0.18,
+      `rgba(${Math.round(12 + horizonLift * 24)}, ${Math.round(20 + horizonLift * 38)}, ${Math.round(34 + horizonLift * 52)}, ${(0.08 + density * 0.16).toFixed(3)})`
+    );
+    baseGradient.addColorStop(
+      0.58,
+      `rgba(${Math.round(24 + horizonLift * 42)}, ${Math.round(38 + horizonLift * 56)}, ${Math.round(56 + horizonLift * 68)}, ${(0.16 + density * 0.24).toFixed(3)})`
     );
     baseGradient.addColorStop(
       1,
-      `rgba(${Math.round(28 + horizonLift * 68)}, ${Math.round(42 + horizonLift * 86)}, ${Math.round(62 + horizonLift * 96)}, 0.86)`
+      `rgba(${Math.round(28 + horizonLift * 68)}, ${Math.round(42 + horizonLift * 86)}, ${Math.round(62 + horizonLift * 96)}, 0)`
     );
     context.fillStyle = baseGradient;
     context.fillRect(0, 0, width, height);
 
-    const mistAlpha = 0.2 + (1 - reveal) * 0.42;
-    context.fillStyle = `rgba(188, 214, 232, ${mistAlpha.toFixed(3)})`;
-    for (let index = 0; index < 11; index += 1) {
-      const y = height * (0.16 + index * 0.078);
-      const wobble = Math.sin(this.portalPulseClock * 0.45 + index * 0.8) * width * 0.015;
-      context.fillRect(wobble, y, width, Math.max(2, height * 0.018));
+    for (let bankIndex = 0; bankIndex < 8; bankIndex += 1) {
+      const cx = width * (0.12 + rand(bankIndex, 1.1) * 0.76);
+      const cy = height * (0.18 + rand(bankIndex, 2.7) * 0.58 - reveal * 0.04);
+      const rx = width * (0.14 + rand(bankIndex, 3.9) * 0.14);
+      const ry = height * (0.08 + rand(bankIndex, 5.3) * 0.09);
+      const alpha = (0.12 + rand(bankIndex, 6.1) * 0.14) * (0.48 + density * 0.92);
+      drawMistEllipse({
+        cx,
+        cy,
+        rx,
+        ry,
+        rotation: (rand(bankIndex, 7.4) - 0.5) * 0.42,
+        innerAlpha: alpha,
+        outerAlpha: alpha * 0.52
+      });
+    }
+
+    for (let wispIndex = 0; wispIndex < 22; wispIndex += 1) {
+      const cx = width * (0.04 + rand(wispIndex, 8.2) * 0.92);
+      const cy = height * (0.16 + rand(wispIndex, 9.6) * 0.66);
+      const rx = width * (0.14 + rand(wispIndex, 10.4) * 0.18);
+      const ry = height * (0.01 + rand(wispIndex, 11.8) * 0.024);
+      const alpha = (0.06 + rand(wispIndex, 12.7) * 0.08) * (0.42 + density * 0.82);
+      drawMistEllipse({
+        cx: cx + Math.sin(this.portalPulseClock * 0.42 + wispIndex * 0.9) * width * 0.02,
+        cy,
+        rx,
+        ry,
+        rotation: (rand(wispIndex, 13.9) - 0.5) * 0.28,
+        innerAlpha: alpha,
+        outerAlpha: alpha * 0.35,
+        color: [210, 228, 241]
+      });
     }
 
     const dawnGlow = context.createRadialGradient(
@@ -10579,17 +11330,64 @@ export class GameRuntime {
     context.fillStyle = dawnGlow;
     context.fillRect(0, 0, width, height);
 
+    for (let gapIndex = 0; gapIndex < 10; gapIndex += 1) {
+      const cx = width * (0.08 + rand(gapIndex, 14.6) * 0.84);
+      const cy = height * (0.12 + rand(gapIndex, 15.9) * 0.7);
+      const rx = width * (0.07 + rand(gapIndex, 16.8) * 0.08 + reveal * 0.03);
+      const ry = height * (0.05 + rand(gapIndex, 17.7) * 0.08 + reveal * 0.02);
+      const alpha = (0.04 + reveal * 0.26) * (0.7 + rand(gapIndex, 18.4) * 0.5);
+      drawMistEllipse({
+        cx,
+        cy,
+        rx,
+        ry,
+        rotation: (rand(gapIndex, 19.3) - 0.5) * 0.52,
+        innerAlpha: alpha,
+        outerAlpha: alpha * 0.75,
+        composite: "destination-out",
+        color: [255, 255, 255]
+      });
+    }
+
+    context.save();
+    context.globalCompositeOperation = "destination-out";
+    const sideFade = context.createLinearGradient(0, 0, width, 0);
+    sideFade.addColorStop(0, "rgba(255,255,255,0.92)");
+    sideFade.addColorStop(0.08, "rgba(255,255,255,0)");
+    sideFade.addColorStop(0.92, "rgba(255,255,255,0)");
+    sideFade.addColorStop(1, "rgba(255,255,255,0.92)");
+    context.fillStyle = sideFade;
+    context.fillRect(0, 0, width, height);
+    const verticalFade = context.createLinearGradient(0, 0, 0, height);
+    verticalFade.addColorStop(0, "rgba(255,255,255,0.98)");
+    verticalFade.addColorStop(0.14, "rgba(255,255,255,0)");
+    verticalFade.addColorStop(0.82, "rgba(255,255,255,0)");
+    verticalFade.addColorStop(1, "rgba(255,255,255,0.86)");
+    context.fillStyle = verticalFade;
+    context.fillRect(0, 0, width, height);
+    context.restore();
+
     if (this.spawnPortalVeilTexture) {
       this.spawnPortalVeilTexture.needsUpdate = true;
     }
   }
 
-  freezeVideoOnLastFrame(video, texture = null) {
+  freezeVideoOnLastFrame(video, texture = null, freezeAtSeconds = null) {
     if (!video) {
       return;
     }
     try {
-      if (Number.isFinite(video.duration) && video.duration > 0) {
+      const explicitFreezeTime = Number(freezeAtSeconds);
+      if (Number.isFinite(explicitFreezeTime) && explicitFreezeTime >= 0) {
+        const maxSeekTime =
+          Number.isFinite(video.duration) && video.duration > 0
+            ? Math.max(0, video.duration - 0.04)
+            : explicitFreezeTime;
+        video.currentTime = Math.min(explicitFreezeTime, maxSeekTime);
+        if (texture) {
+          texture.needsUpdate = true;
+        }
+      } else if (Number.isFinite(video.duration) && video.duration > 0) {
         video.currentTime = Math.max(0, video.duration - 0.04);
         if (texture) {
           texture.needsUpdate = true;
@@ -10602,23 +11400,28 @@ export class GameRuntime {
   }
 
   startSpawnPortalVeilRevealVideo() {
-    if (this.spawnPortalVeilRevealStarted) {
+    if (!SPAWN_PORTAL_VEIL_ENABLED || this.spawnPortalVeilRevealStarted) {
       return;
     }
     this.spawnPortalVeilRevealStarted = true;
     this.spawnPortalVeilRevealClock = 0;
-    if (!this.spawnPortalVeilMaterial) {
+    const veilMaterials = this.spawnPortalVeilMaterials.length
+      ? this.spawnPortalVeilMaterials
+      : this.spawnPortalVeilMaterial
+        ? [this.spawnPortalVeilMaterial]
+        : [];
+    if (!veilMaterials.length) {
       return;
     }
-    this.spawnPortalVeilMaterial.map = this.spawnPortalVeilBaseTexture;
-    this.spawnPortalVeilMaterial.color.setHex(0xffffff);
-    this.spawnPortalVeilMaterial.emissive.setHex(0x10263a);
-    this.spawnPortalVeilMaterial.emissiveIntensity = 0.18;
-    this.spawnPortalVeilMaterial.needsUpdate = true;
+    for (const material of veilMaterials) {
+      material.map = this.spawnPortalVeilBaseTexture;
+      material.emissiveIntensity = Number(material.userData?.emptinesVeilBaseEmissiveIntensity) || 0.04;
+      material.needsUpdate = true;
+    }
   }
 
   attachNpcTitleLabel(root, definition, yOffset = 2.42) {
-    if (!root || !definition) {
+    if (!NPC_TITLE_LABELS_ENABLED || !root || !definition || definition.id === "bridge_gatekeeper") {
       return;
     }
     const title = String(definition.appearance?.titleLabel ?? definition.displayName ?? "").trim();
@@ -10689,71 +11492,17 @@ export class GameRuntime {
     head.castShadow = !this.mobileEnabled;
     head.receiveShadow = true;
 
-    const pad = new THREE.Mesh(
-      new THREE.RingGeometry(0.88, 1.22, this.mobileEnabled ? 24 : 34),
-      new THREE.MeshBasicMaterial({
-        color: appearance.padColor ?? 0xbfe7ff,
-        transparent: true,
-        opacity: 0.68,
-        side: THREE.DoubleSide,
-        depthWrite: false
-      })
-    );
-    pad.rotation.x = -Math.PI / 2;
-    pad.position.y = 0.04;
-
-    const floor = new THREE.Mesh(
-      new THREE.CircleGeometry(1.88, this.mobileEnabled ? 26 : 44),
-      new THREE.MeshBasicMaterial({
-        color: appearance.beamColor ?? 0x86d7ff,
-        transparent: true,
-        opacity: 0.14,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending
-      })
-    );
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.y = 0.028;
-
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(1.18, 1.94, this.mobileEnabled ? 24 : 44),
-      new THREE.MeshBasicMaterial({
-        color: appearance.ringColor ?? 0xe1f7ff,
-        transparent: true,
-        opacity: 0.38,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending
-      })
-    );
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.y = 0.032;
-
-    const beam = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.48, 0.94, 2.1, this.mobileEnabled ? 10 : 14, 1, true),
-      new THREE.MeshBasicMaterial({
-        color: appearance.beamColor ?? 0x86d7ff,
-        transparent: true,
-        opacity: 0.12,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending
-      })
-    );
-    beam.position.y = 1.08;
-
-    npcGroup.add(floor, ring, beam, body, head, pad);
+    npcGroup.add(body, head);
     this.attachNpcTitleLabel(npcGroup, definition, 2.36);
     const runtimeState = this.createCityNpcRuntimeState(definition, placement, npcGroup);
     const entry = this.registerNpcInteraction(npcId, npcGroup, {
       visuals: {
         body,
         head,
-        pad,
-        floor,
-        ring,
-        beam
+        pad: null,
+        floor: null,
+        ring: null,
+        beam: null
       },
       runtimeState,
       interactionRadius: placement.interactionRadius
@@ -11044,21 +11793,38 @@ export class GameRuntime {
 
   updateNpcGreetingScreen(delta) {
     const screen = this.npcGreetingScreen;
-    const material = screen && !Array.isArray(screen.material) ? screen.material : null;
+    const material = this.getNpcGreetingScreenMaterial();
     if (!screen || !material) {
+      return;
+    }
+    this.ensureNpcGreetingPosterTexture();
+    if (this.isOpeningVideoGateOpen()) {
+      screen.visible = false;
+      this.setNpcGreetingScreenVisuals({ opacity: 0 });
+      return;
+    }
+    if (this.npcGreetingVideoEl) {
+      screen.visible = true;
+      this.setNpcGreetingScreenVisuals({ color: 0xffffff, opacity: 1 });
       return;
     }
 
     if (!this.npcGreetingPlaybackActive) {
-      if (!this.npcGreetingPlayed) {
-        screen.visible = false;
-        material.opacity = 0;
+      screen.visible = true;
+      if (this.npcGreetingPosterTexture) {
+        this.setNpcGreetingScreenVisuals({
+          map: this.npcGreetingPosterTexture,
+          color: 0xffffff,
+          opacity: this.npcGreetingPlayed ? 0.94 : 1
+        });
         return;
       }
-      screen.visible = true;
       const idlePulse = 0.5 + 0.5 * Math.sin(this.portalPulseClock * 2.8);
-      material.color.setRGB(0.62 + idlePulse * 0.06, 0.84 + idlePulse * 0.05, 1);
-      material.opacity = 0.06 + idlePulse * 0.035;
+      this.setNpcGreetingScreenVisuals({
+        map: null,
+        color: new THREE.Color(0.62 + idlePulse * 0.06, 0.84 + idlePulse * 0.05, 1),
+        opacity: 0.18 + idlePulse * 0.08
+      });
       return;
     }
 
@@ -11077,8 +11843,10 @@ export class GameRuntime {
     const pulse = 0.5 + 0.5 * Math.sin(this.portalPulseClock * 8.2 + progress * Math.PI * 3.2);
 
     screen.visible = true;
-    material.color.setRGB(0.68 + glow * 0.14, 0.86 + glow * 0.08, 1);
-    material.opacity = 0.08 + glow * 0.22 + pulse * 0.04;
+    this.setNpcGreetingScreenVisuals({
+      color: new THREE.Color(0.68 + glow * 0.14, 0.86 + glow * 0.08, 1),
+      opacity: 0.08 + glow * 0.22 + pulse * 0.04
+    });
 
     if (!this.npcGreetingMidpointTriggered && progress >= 0.42) {
       this.triggerNpcGreetingMidpointEffects();
@@ -11090,7 +11858,15 @@ export class GameRuntime {
   }
 
   updateSpawnPortalVeilTexture(delta = 0) {
-    if (!this.spawnPortalVeilMaterial) {
+    if (!SPAWN_PORTAL_VEIL_ENABLED) {
+      return;
+    }
+    const veilMaterials = this.spawnPortalVeilMaterials.length
+      ? this.spawnPortalVeilMaterials
+      : this.spawnPortalVeilMaterial
+        ? [this.spawnPortalVeilMaterial]
+        : [];
+    if (!veilMaterials.length) {
       return;
     }
     if (this.spawnPortalVeilRevealStarted) {
@@ -11107,9 +11883,19 @@ export class GameRuntime {
         )
       : 0;
     this.drawSpawnPortalVeilTexture(reveal);
-    this.spawnPortalVeilMaterial.opacity = THREE.MathUtils.lerp(0.98, 0.24, reveal);
-    this.spawnPortalVeilMaterial.emissiveIntensity = THREE.MathUtils.lerp(0.04, 0.22, reveal);
-    this.spawnPortalVeilMaterial.needsUpdate = true;
+    veilMaterials.forEach((material, layerIndex) => {
+      const baseOpacity = Number(material.userData?.emptinesVeilBaseOpacity) || 0.92;
+      const baseEmissiveIntensity = Number(material.userData?.emptinesVeilBaseEmissiveIntensity) || 0.04;
+      const revealEmissiveIntensity = Number(material.userData?.emptinesVeilRevealEmissiveIntensity) || 0.16;
+      const layerFade = 1 - THREE.MathUtils.smoothstep(reveal, 0.08 + layerIndex * 0.07, 1);
+      material.opacity = baseOpacity * layerFade;
+      material.emissiveIntensity = THREE.MathUtils.lerp(
+        baseEmissiveIntensity,
+        revealEmissiveIntensity,
+        THREE.MathUtils.smoothstep(reveal, 0.18, 0.88)
+      );
+      material.needsUpdate = true;
+    });
     if (this.spawnPortalVeilTexture) {
       this.spawnPortalVeilTexture.needsUpdate = true;
     }
@@ -11345,6 +12131,9 @@ export class GameRuntime {
     if (!(this.nicknameGateEl?.classList.contains("hidden") ?? true)) {
       return false;
     }
+    if (this.isOpeningVideoGateOpen()) {
+      return false;
+    }
     if (!(this.npcChoiceGateEl?.classList.contains("hidden") ?? true)) {
       return false;
     }
@@ -11352,9 +12141,6 @@ export class GameRuntime {
       return true;
     }
     if (this.flowStage === "portal_transfer") {
-      return false;
-    }
-    if (this.bootIntroVideoPlaying) {
       return false;
     }
     return true;
@@ -11365,6 +12151,9 @@ export class GameRuntime {
       return false;
     }
     if (this.surfacePainterOpen) {
+      return false;
+    }
+    if (this.isOpeningVideoGateOpen()) {
       return false;
     }
     return !this.hubFlowEnabled || this.flowStage === "city_live";
@@ -11597,7 +12386,7 @@ export class GameRuntime {
     }
 
     if (this.flowStage === "boot_intro") {
-      // World-space intro: keep the player fixed while the atmosphere opens.
+      // Keep the night-to-day reveal active while allowing the player to move.
       this.updateBootIntroWorldReveal(delta);
       this.updatePortalVisual();
       return;
@@ -11702,7 +12491,7 @@ export class GameRuntime {
   }
 
   primeEntryMusicOnMobileStartInteraction() {
-    if (!this.mobileEnabled || this.entryMusicStarted) {
+    if (this.entryMusicStarted) {
       return;
     }
     if (!this.entryMusicAudioEl) {
@@ -11811,16 +12600,19 @@ export class GameRuntime {
   }
 
   updateSpawnPortalVeilVisibility(delta = 0) {
-    if (!this.spawnPortalVeilGroup) {
+    if (!SPAWN_PORTAL_VEIL_ENABLED || !this.spawnPortalVeilGroup) {
       return;
     }
 
     const veilZ = Number(this.spawnPortalVeilWorldZ) || this.bridgeNpcPosition.z;
     const passedPortal = this.playerPosition.z >= veilZ + 0.6;
+    const veilFullyRevealed =
+      this.spawnPortalVeilRevealStarted &&
+      this.spawnPortalVeilRevealClock >= this.spawnPortalVeilRevealDuration - 0.02;
     const forceHideByFlow =
       this.flowStage === "city_live" ||
       this.flowStage === "portal_transfer";
-    this.spawnPortalVeilGroup.visible = !forceHideByFlow && !passedPortal;
+    this.spawnPortalVeilGroup.visible = !forceHideByFlow && !passedPortal && !veilFullyRevealed;
     if (this.spawnPortalVeilGroup.visible) {
       this.updateSpawnPortalVeilTexture(delta);
     }
@@ -14187,6 +14979,22 @@ export class GameRuntime {
     return this.promoObjects.get(this.promoOwnerKey) ?? null;
   }
 
+  syncOwnPromoPreviewVisibility() {
+    const ownerKey = String(this.promoOwnerKey ?? "").trim();
+    if (!ownerKey) {
+      return;
+    }
+    const visual = this.promoObjectVisuals.get(ownerKey);
+    if (!visual?.group) {
+      return;
+    }
+    const shouldHide =
+      this.promoPlacementPreviewActive &&
+      this.promoPlacementPreviewRepositionOwn &&
+      Boolean(this.getOwnPromoObject());
+    visual.group.visible = !shouldHide;
+  }
+
   getNearestPromoObject(maxDistance = PROMO_LINK_INTERACT_RADIUS) {
     const maxDistanceSq = maxDistance * maxDistance;
     let nearest = null;
@@ -14861,7 +15669,7 @@ export class GameRuntime {
     const footprintRadius = Math.max(0.7, PROMO_BLOCK_BASE_RADIUS * resolvedScale);
 
     const spawnCenterX = Number(this.bridgeApproachSpawn?.x) || 0;
-    const spawnCenterZ = Number(this.bridgeApproachSpawn?.z) || -98;
+    const spawnCenterZ = Number(this.bridgeApproachSpawn?.z) || -104;
     const spawnRadius = Math.max(10, Number(this.bridgeWidth) * 0.95 + 4) + footprintRadius;
     const spawnDx = x - spawnCenterX;
     const spawnDz = z - spawnCenterZ;
@@ -14870,7 +15678,7 @@ export class GameRuntime {
     }
 
     const ax = Number(this.bridgeSpawn?.x) || 0;
-    const az = Number(this.bridgeSpawn?.z) || -86;
+    const az = Number(this.bridgeSpawn?.z) || -90;
     const bx = Number(this.bridgeCityEntry?.x) || 0;
     const bz = Number(this.bridgeCityEntry?.z) || -18;
     const abx = bx - ax;
@@ -15034,11 +15842,13 @@ export class GameRuntime {
 
   clearPromoPlacementPreview({ syncUi = true } = {}) {
     this.promoPlacementPreviewActive = false;
+    this.promoPlacementPreviewRepositionOwn = false;
     this.promoPlacementPreviewBlockReason = "";
     this.promoPlacementPreviewTransform = null;
     if (this.promoPlacementPreviewMesh) {
       this.promoPlacementPreviewMesh.visible = false;
     }
+    this.syncOwnPromoPreviewVisibility();
     if (syncUi) {
       this.syncPromoPanelUi();
       if (this.mobileEnabled) {
@@ -15052,15 +15862,20 @@ export class GameRuntime {
       if (this.promoPlacementPreviewMesh) {
         this.promoPlacementPreviewMesh.visible = false;
       }
+      this.syncOwnPromoPreviewVisibility();
       return;
     }
     if (!(this.socket && this.networkConnected)) {
       this.clearPromoPlacementPreview({ syncUi: true });
       return;
     }
-    if (this.getOwnPromoObject()) {
+    const ownPromoObject = this.getOwnPromoObject();
+    if (ownPromoObject && !this.promoPlacementPreviewRepositionOwn) {
       this.clearPromoPlacementPreview({ syncUi: true });
       return;
+    }
+    if (!ownPromoObject && this.promoPlacementPreviewRepositionOwn) {
+      this.promoPlacementPreviewRepositionOwn = false;
     }
 
     const preview = this.ensurePromoPlacementPreviewMesh();
@@ -15087,10 +15902,13 @@ export class GameRuntime {
     preview.scale.set(scaleX, scaleY, scaleX);
     preview.visible = true;
     this.setPromoPlacementPreviewTint(Boolean(blockReason));
+    this.syncOwnPromoPreviewVisibility();
   }
 
-  beginPromoPlacementPreview({ announce = true, syncUi = true } = {}) {
-    if (this.getOwnPromoObject()) {
+  beginPromoPlacementPreview({ announce = true, syncUi = true, allowOwnReposition = false } = {}) {
+    const ownPromoObject = this.getOwnPromoObject();
+    const repositionOwn = Boolean(allowOwnReposition && ownPromoObject);
+    if (ownPromoObject && !repositionOwn) {
       return false;
     }
     const policyBlockedReason = this.getPromoActionBlockedReason();
@@ -15107,9 +15925,12 @@ export class GameRuntime {
       this.clearHostCustomBlockPlacementPreview({ syncUi: true });
     }
     if (this.promoPlacementPreviewActive) {
+      this.promoPlacementPreviewRepositionOwn = repositionOwn;
+      this.updatePromoPlacementPreview();
       return true;
     }
     this.promoPlacementPreviewActive = true;
+    this.promoPlacementPreviewRepositionOwn = repositionOwn;
     this.promoPlacementPreviewBlockReason = "";
     this.promoPlacementPreviewTransform = null;
     this.ensurePromoPlacementPreviewMesh();
@@ -15123,7 +15944,9 @@ export class GameRuntime {
     if (announce) {
       this.appendChatLine(
         "",
-        "배치 미리보기 시작: 휠(PC)/크기 슬라이더(모바일) 조절 후 클릭 또는 배치 버튼으로 확정",
+        repositionOwn
+          ? "이동 미리보기 시작: 예전 첫 배치처럼 위치를 맞춘 뒤 클릭으로 확정"
+          : "배치 미리보기 시작: 휠(PC)/크기 슬라이더(모바일) 조절 후 클릭 또는 배치 버튼으로 확정",
         "system"
       );
     }
@@ -15807,10 +16630,11 @@ export class GameRuntime {
       this.promoAllowOthersDrawDraft = null;
     }
     this.rebuildPromoCollisionBoxes();
-    if (this.promoPlacementPreviewActive && this.getOwnPromoObject()) {
+    if (this.promoPlacementPreviewActive && this.getOwnPromoObject() && !this.promoPlacementPreviewRepositionOwn) {
       this.clearPromoPlacementPreview({ syncUi: false });
     }
     this.syncPromoPanelUi();
+    this.syncOwnPromoPreviewVisibility();
     this.updatePromoLinkPrompt(0, true);
   }
 
@@ -16806,7 +17630,7 @@ export class GameRuntime {
       forward.normalize();
     }
     const right = new THREE.Vector3(forward.z, 0, -forward.x).normalize();
-    const spawn = this.bridgeApproachSpawn?.clone?.() ?? new THREE.Vector3(0, 0, -98);
+    const spawn = this.bridgeApproachSpawn?.clone?.() ?? new THREE.Vector3(0, 0, -104);
     const planes = [
       { distance: 16, y: this.mobileEnabled ? 5.8 : 7.2, width: this.mobileEnabled ? 44 : 58, height: this.mobileEnabled ? 18 : 24, opacity: 0.26 },
       { distance: 34, y: this.mobileEnabled ? 8.6 : 10.4, width: this.mobileEnabled ? 74 : 92, height: this.mobileEnabled ? 24 : 32, opacity: 0.22 }
@@ -17187,6 +18011,7 @@ export class GameRuntime {
 
     this.renderer.toneMappingExposure = stageState.exposure;
     this.updateBootIntroCloudVisuals(stageState);
+    this.updateStarField(stageState);
     this.updateBootIntroDepthMaterials(stageState);
     this.applyFutureCityBackdropReveal(stageState);
     return stageState;
@@ -17213,8 +18038,8 @@ export class GameRuntime {
     }
 
     const canvas = document.createElement("canvas");
-    canvas.width = normalizedKind === "cirrus" ? 512 : 448;
-    canvas.height = normalizedKind === "cirrus" ? 224 : 320;
+    canvas.width = normalizedKind === "cirrus" ? 1024 : 896;
+    canvas.height = normalizedKind === "cirrus" ? 448 : 640;
     const context = canvas.getContext("2d");
     if (!context) {
       return null;
@@ -17465,7 +18290,7 @@ export class GameRuntime {
     texture.generateMipmaps = true;
     texture.anisotropy = this.mobileEnabled
       ? Math.min(4, this.renderer?.capabilities?.getMaxAnisotropy?.() || 1)
-      : Math.min(8, this.renderer?.capabilities?.getMaxAnisotropy?.() || 1);
+      : (this.renderer?.capabilities?.getMaxAnisotropy?.() || 1);
     texture.needsUpdate = true;
     this.cloudSpriteTextureCache.set(cacheKey, texture);
     return texture;
@@ -17524,8 +18349,8 @@ export class GameRuntime {
     const sunCoolColor = new THREE.Color(0xe2edf8);
     const shadowColor = baseColor
       .clone()
-      .lerp(skyColor, 0.58)
-      .multiplyScalar(0.8);
+      .lerp(skyColor, 0.12)
+      .multiplyScalar(0.82);
     const windAngle = Number.isFinite(Number(cloudConfig.windAngle))
       ? Number(cloudConfig.windAngle)
       : Math.atan2(0.35, sunBias * 0.92);
@@ -17856,6 +18681,67 @@ export class GameRuntime {
 
     this.cloudLayer = group;
     this.scene.add(this.cloudLayer);
+  }
+
+  setupStarField() {
+    if (this.starField) {
+      this.scene.remove(this.starField);
+      this.starField.geometry.dispose();
+      this.starField = null;
+    }
+    if (this.starMaterial) {
+      this.starMaterial.dispose();
+      this.starMaterial = null;
+    }
+
+    const starCount = this.mobileEnabled ? 500 : 1200;
+    const radius = 480;
+    const positions = new Float32Array(starCount * 3);
+    const colors = new Float32Array(starCount * 3);
+
+    for (let i = 0; i < starCount; i++) {
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(Math.random() * 0.92);
+      positions[i * 3]     = radius * Math.sin(phi) * Math.cos(theta);
+      positions[i * 3 + 1] = radius * Math.cos(phi);
+      positions[i * 3 + 2] = radius * Math.sin(phi) * Math.sin(theta);
+
+      const variant = Math.random();
+      if (variant < 0.6) {
+        colors[i * 3] = 1; colors[i * 3 + 1] = 1; colors[i * 3 + 2] = 1;
+      } else if (variant < 0.82) {
+        colors[i * 3] = 0.82; colors[i * 3 + 1] = 0.91; colors[i * 3 + 2] = 1;
+      } else {
+        colors[i * 3] = 1; colors[i * 3 + 1] = 0.95; colors[i * 3 + 2] = 0.78;
+      }
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+
+    this.starMaterial = new THREE.PointsMaterial({
+      size: this.mobileEnabled ? 1.4 : 1.8,
+      sizeAttenuation: true,
+      transparent: true,
+      opacity: 0,
+      vertexColors: true,
+      depthWrite: false,
+      fog: false
+    });
+
+    this.starField = new THREE.Points(geometry, this.starMaterial);
+    this.starField.renderOrder = -1;
+    this.scene.add(this.starField);
+  }
+
+  updateStarField(stageState) {
+    if (!this.starMaterial) {
+      return;
+    }
+    const cloudOpacity = Number(stageState?.cloudOpacityScale) ?? 1;
+    const starOpacity = THREE.MathUtils.clamp(1.1 - cloudOpacity * 1.3, 0, 1);
+    this.starMaterial.opacity = starOpacity;
   }
 
   updateCloudLayer(delta) {
@@ -18719,7 +19605,8 @@ export class GameRuntime {
 
       if (event.code === "KeyB" && this.canUseGameplayControls() && this.hasChalk) {
         event.preventDefault();
-        this.setActiveTool(this.activeTool === "chalk" ? "move" : "chalk");
+        const nextTool = this.activeTool === "chalk" ? "move" : "chalk";
+        this.setActiveTool(nextTool, { triggerPromoRepositionPreview: nextTool === "move" });
         return;
       }
 
@@ -19152,7 +20039,9 @@ export class GameRuntime {
         if (!button) {
           return;
         }
-        this.setActiveTool(String(button.dataset.tool || "move"));
+        this.setActiveTool(String(button.dataset.tool || "move"), {
+          triggerPromoRepositionPreview: String(button.dataset.tool || "move") === "move"
+        });
       });
     }
 
@@ -20036,6 +20925,12 @@ export class GameRuntime {
     if (!this.nicknameErrorEl) {
       this.nicknameErrorEl = document.getElementById("nickname-error");
     }
+    if (!this.openingVideoGateEl) {
+      this.openingVideoGateEl = document.getElementById("opening-video-gate");
+    }
+    if (!this.openingVideoEl) {
+      this.openingVideoEl = document.getElementById("opening-video");
+    }
     if (!this.npcChoiceGateEl) {
       this.npcChoiceGateEl = document.getElementById("npc-choice-gate");
     }
@@ -20887,7 +21782,8 @@ export class GameRuntime {
     }
   }
 
-  setActiveTool(tool) {
+  setActiveTool(tool, options = {}) {
+    const triggerPromoRepositionPreview = Boolean(options?.triggerPromoRepositionPreview);
     const chalkAllowed = this.isChalkFeatureEnabled() && this.hasChalk;
     const nextTool = tool === "chalk" && chalkAllowed ? "chalk" : "move";
     this.activeTool = nextTool;
@@ -20901,6 +21797,15 @@ export class GameRuntime {
     if (nextTool !== "chalk") {
       this.chalkDrawingActive = false;
       this.chalkLastStamp = null;
+    }
+    if (
+      triggerPromoRepositionPreview &&
+      nextTool === "move" &&
+      !this.surfacePainterOpen &&
+      this.canMovePlayer() &&
+      this.getOwnPromoObject()
+    ) {
+      this.beginPromoPlacementPreview({ announce: true, syncUi: true, allowOwnReposition: true });
     }
   }
 
@@ -21809,6 +22714,8 @@ export class GameRuntime {
     const recentlyMoving = now - this.lastActiveMoveInputAt < 240;
     const inReconnectStateSyncGrace =
       this.pendingAuthoritativeStateSync && now < this.authoritativeSyncGraceUntil;
+    const allowAuthoritativeLookCorrection =
+      !(this.hubFlowEnabled && this.flowStage === "boot_intro");
     const measuredRttMs = Math.max(
       0,
       Number(this.clientRttSmoothedMs) || Number(this.clientRttMs) || 0
@@ -21832,7 +22739,7 @@ export class GameRuntime {
         this.verticalVelocity = 0;
         this.onGround = targetY <= GAME_CONSTANTS.PLAYER_HEIGHT + 0.001;
       }
-      if (!this.pointerLocked && !this.mobileEnabled) {
+      if (allowAuthoritativeLookCorrection && !this.pointerLocked && !this.mobileEnabled) {
         this.yaw = targetYaw;
         this.pitch = targetPitch;
       }
@@ -21912,7 +22819,7 @@ export class GameRuntime {
     }
 
     // Avoid camera tug-of-war while the player is actively looking around.
-    if (!this.pointerLocked && !this.mobileEnabled) {
+    if (allowAuthoritativeLookCorrection && !this.pointerLocked && !this.mobileEnabled) {
       const yawDelta = Math.abs(
         Math.atan2(Math.sin(targetYaw - this.yaw), Math.cos(targetYaw - this.yaw))
       );

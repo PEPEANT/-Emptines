@@ -1,0 +1,89 @@
+{
+  "project": "nexa-hall-50",
+  "status": "scene-ready-assets-pending",
+  "priority_order": [
+    "screen_video_loop",
+    "stage_floor_texture_set",
+    "hall_floor_texture_set",
+    "seat_fabric_texture",
+    "speaker_grille_texture",
+    "ambient_audio_loop"
+  ],
+  "items": [
+    {
+      "id": "screen_video_loop",
+      "type": "video",
+      "target": "stage.screenMat",
+      "required": true,
+      "resolution": "1920x1080",
+      "format": ["mp4", "webm"],
+      "suggested_source": "./assets/video/stage-loop.mp4",
+      "source": "./assets/video/stage-loop.mp4",
+      "status": "pending"
+    },
+    {
+      "id": "stage_floor_texture_set",
+      "type": "pbr-texture-set",
+      "target": "stage and runway materials",
+      "required": true,
+      "files": ["baseColor", "normal", "roughness", "ao"],
+      "suggested_source": {
+        "baseColor": "./assets/textures/stage/stage_color.jpg",
+        "normal": "./assets/textures/stage/stage_normal.jpg",
+        "roughness": "./assets/textures/stage/stage_roughness.jpg"
+      },
+      "source": {
+        "baseColor": "./assets/textures/stage/stage_color.jpg",
+        "normal": "./assets/textures/stage/stage_normal.jpg",
+        "roughness": "./assets/textures/stage/stage_roughness.jpg"
+      },
+      "status": "pending"
+    },
+    {
+      "id": "hall_floor_texture_set",
+      "type": "pbr-texture-set",
+      "target": "main floor material",
+      "required": true,
+      "files": ["baseColor", "normal", "roughness"],
+      "suggested_source": {
+        "baseColor": "./assets/textures/hall/floor_color.jpg",
+        "normal": "./assets/textures/hall/floor_normal.jpg",
+        "roughness": "./assets/textures/hall/floor_roughness.jpg"
+      },
+      "source": {
+        "baseColor": "./assets/textures/hall/floor_color.jpg",
+        "normal": "./assets/textures/hall/floor_normal.jpg",
+        "roughness": "./assets/textures/hall/floor_roughness.jpg"
+      },
+      "status": "pending"
+    },
+    {
+      "id": "seat_fabric_texture",
+      "type": "texture",
+      "target": "seat cushion material",
+      "required": false,
+      "suggested_source": "./assets/textures/seat/fabric_color.jpg",
+      "source": "./assets/textures/seat/fabric_color.jpg",
+      "status": "pending"
+    },
+    {
+      "id": "speaker_grille_texture",
+      "type": "texture",
+      "target": "speaker material",
+      "required": false,
+      "suggested_source": "./assets/textures/stage/speaker_grille.jpg",
+      "source": "./assets/textures/stage/speaker_grille.jpg",
+      "status": "pending"
+    },
+    {
+      "id": "ambient_audio_loop",
+      "type": "audio",
+      "target": "background ambience",
+      "required": false,
+      "format": ["mp3", "ogg"],
+      "suggested_source": "./assets/audio/ambient-loop.mp3",
+      "source": null,
+      "status": "pending"
+    }
+  ]
+}

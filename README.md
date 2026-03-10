@@ -7,6 +7,8 @@
 - 문서 시작점: [`docs/INDEX.md`](./docs/INDEX.md)
 - 백서 정본: `C:\Users\rneet\OneDrive\Desktop\DIS\EM\WHITEPAPER.md`
 - 세계관 정본: `C:\Users\rneet\OneDrive\Desktop\DIS\EM\WORLD_LORE.md`
+- 연속성 계약 정본: `C:\Users\rneet\OneDrive\Desktop\DIS\EM\CONTINUITY_CONTRACT.md`
+- 실구현 계약 정본: `C:\Users\rneet\OneDrive\Desktop\DIS\EM\IMPLEMENTATION_CONTRACT.md`
 - 로컬 백서 미러: [`WHITEPAPER.md`](./WHITEPAPER.md)
 - 로컬 세계관 미러: [`WORLD_LORE.md`](./WORLD_LORE.md)
 - UGC 기준 정본: `C:\Users\rneet\OneDrive\Desktop\UGC\AGENTS.md`
@@ -142,12 +144,11 @@ Copy `.env.example` to `.env` when needed.
 - `DEFAULT_A_ZONE_PORTAL_TARGET_URL` (server env)
   - Default A-zone portal destination (recommended: `https://reclaim-fps.onrender.com/`)
 - `SURFACE_PAINT_STORE_PATH` (server env, strongly recommended on Render)
-  - Persistent save path for edited world state (platforms/ropes/object positions/promo/surface paint)
+  - Persistent save path for edited world state (platforms/ropes/host custom blocks/promo/surface paint)
   - Recommended value on Render Disk: `/var/data/surface-paint.json`
 - `MAP_LAYOUT_VERSION` (server env, optional but recommended)
   - Layout compatibility key for disk snapshots (default: `2026-03-04-layout-v1`)
-  - If this value changes, server skips restoring saved layout objects (platforms/ropes/object positions/promo)
-  - Use this when map geometry/portal placement was changed in code and old snapshot should not override it
+  - Use this when schema-defined map geometry changed in code and older saved layout state should not override it
 - `HOST_CLAIM_KEY` (server env, optional but recommended)
   - Secret key required for `room:host:claim`
 - `SURFACE_PAINT_MODE` (server env, optional)

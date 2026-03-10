@@ -1933,6 +1933,9 @@ export function registerSocketHandlers({
       }
       if (result.changed) {
         roomService.emitPromoObjectsUpdate(room);
+        io.to(room.code).emit("paint:state", {
+          surfaces: roomService.serializeSurfacePaint(room)
+        });
         roomService.emitRoomUpdate(room);
         if (!(await flushPersistentStateIfRequested(payload, ackFn, "promo"))) {
           return;
@@ -1940,7 +1943,8 @@ export function registerSocketHandlers({
       }
       ack(ackFn, {
         ok: true,
-        changed: Boolean(result.changed)
+        changed: Boolean(result.changed),
+        clearedSurfacePaintCount: Math.max(0, Math.trunc(Number(result?.clearedSurfacePaintCount) || 0))
       });
     });
 

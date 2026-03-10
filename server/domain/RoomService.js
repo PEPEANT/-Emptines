@@ -71,7 +71,7 @@ const PROMO_BLOCK_WIDTH = 2.8;
 const PROMO_BLOCK_DEPTH = 1.8;
 const PROMO_BLOCK_BASE_RADIUS = Math.hypot(PROMO_BLOCK_WIDTH * 0.5, PROMO_BLOCK_DEPTH * 0.5);
 const PROMO_BLOCKED_SPAWN_X = 0;
-const PROMO_BLOCKED_SPAWN_Z = -98;
+const PROMO_BLOCKED_SPAWN_Z = -124;
 const PROMO_BLOCKED_SPAWN_RADIUS = 14;
 const PROMO_BLOCKED_BRIDGE_A_X = 0;
 const PROMO_BLOCKED_BRIDGE_A_Z = -86;
@@ -2106,8 +2106,24 @@ export class RoomService {
       return { ok: false, error: "owner denied edits" };
     }
     map.delete(targetOwnerKey);
+    const paintPrefix = `po_${targetOwnerKey}`;
+    let clearedSurfacePaintCount = 0;
+    if (room.surfacePaint instanceof Map) {
+      for (const surfaceId of Array.from(room.surfacePaint.keys())) {
+        const normalizedSurfaceId = normalizeSurfaceId(surfaceId);
+        const matchesPromoSurface =
+          normalizedSurfaceId === paintPrefix ||
+          normalizedSurfaceId.startsWith(`${paintPrefix}:`) ||
+          normalizedSurfaceId.startsWith(`${paintPrefix}_`);
+        if (!normalizedSurfaceId || !matchesPromoSurface) {
+          continue;
+        }
+        room.surfacePaint.delete(surfaceId);
+        clearedSurfacePaintCount += 1;
+      }
+    }
     this.scheduleSurfacePaintSave();
-    return { ok: true, changed: true };
+    return { ok: true, changed: true, clearedSurfacePaintCount };
   }
 
   serializePlatforms(room) {

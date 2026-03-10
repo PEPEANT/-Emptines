@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+  />
+  <title>NEXA HALL 50</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E" />
+  <link rel="stylesheet" href="./style.css" />
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script
+    defer
+    src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"
+  ></script>
+  <script defer src="./app.js"></script>
+</head>
+<body>
+  <main id="app">
+    <aside id="overlay">
+      <section class="panel panel-intro">
+        <h1><span class="live-badge">LIVE</span> NEXA HALL 50</h1>
+        <p>
+          최대 50명 수용 기준의 3D 온라인 공연장입니다.<br />
+          마우스 드래그로 시점을 돌리고, 휠로 확대/축소하세요.
+        </p>
+        <div class="stat-grid">
+          <div class="stat-card">
+            <span class="stat-label">최대 수용</span>
+            <strong id="stat-capacity">50명</strong>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">좌석 배치</span>
+            <strong id="stat-layout">5열 x 10석</strong>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">현재 좌석</span>
+            <strong id="stat-seats">0석</strong>
+          </div>
+        </div>
+      </section>
+      <section class="panel panel-controls">
+        <h2>카메라 프리셋</h2>
+        <div class="preset-grid">
+          <button type="button" data-preset="wide">홀 전체</button>
+          <button type="button" data-preset="stage">무대 클로즈</button>
+          <button type="button" data-preset="audience">객석 중심</button>
+        </div>
+        <button id="return-lobby-btn" class="ghost-btn hidden" type="button">
+          대기방으로 돌아가기
+        </button>
+      </section>
+    </aside>
+
+    <div id="loading" aria-live="polite">공연장 준비 중...</div>
+    <div id="canvas-root" aria-label="3D 공연장 뷰"></div>
+  </main>
+</body>
+</html>

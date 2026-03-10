@@ -1,32 +1,144 @@
 {
   "version": 1,
-  "savedAt": 1772503007084,
+  "savedAt": 1773106039157,
   "defaultRoomCode": "GLOBAL",
-  "surfaces": [
-    {
-      "surfaceId": "city_ad_board_0:pz",
-      "imageDataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WnqJ5wAAAAASUVORK5CYII=",
-      "updatedAt": 1772502963760
+  "layoutVersion": "2026-03-06-layout-v3",
+  "portalTarget": "https://singularity-ox.onrender.com/?v=0.2",
+  "aZonePortalTarget": "https://reclaim-fps.vercel.app/",
+  "surfacePaintCore": {
+    "payloadVersion": 1,
+    "surfaces": []
+  },
+  "chatHistory": [],
+  "portalDisplays": {
+    "portal1": {
+      "mode": "text",
+      "title": "OX 퀴즈 대회",
+      "line2": "포탈 1 링크는 패널에서 변경",
+      "line3": "",
+      "imageDataUrl": "",
+      "updatedAt": 1773065249019
+    },
+    "portal2": {
+      "mode": "text",
+      "title": "포탈 2",
+      "line2": "포탈 2 링크는 패널에서 변경",
+      "line3": "",
+      "imageDataUrl": "",
+      "updatedAt": 1773065249019
+    },
+    "hall": {
+      "mode": "time",
+      "title": "공연장",
+      "line2": "",
+      "line3": "",
+      "imageDataUrl": "",
+      "updatedAt": 1773065249019
     }
-  ],
+  },
+  "mainPortalAd": {
+    "mode": "ad",
+    "imageDataUrl": "",
+    "updatedAt": 1773065249019
+  },
+  "leftBillboard": {
+    "mode": "ad",
+    "imageDataUrl": "",
+    "videoDataUrl": "",
+    "updatedAt": 1773065249019
+  },
+  "rightBillboard": {
+    "mode": "ad",
+    "videoId": "",
+    "videoDataUrl": "",
+    "updatedAt": 1773065249019
+  },
   "platforms": [],
+  "platformRevision": 0,
   "ropes": [],
-  "promoObjects": [
+  "ropeRevision": 0,
+  "promoObjects": [],
+  "surfacePolicies": {
+    "bridgePanelsNz": {
+      "surfacePattern": "bridge_panel_*:*",
+      "allowOthersDraw": false,
+      "updatedAt": 1773065249018
+    },
+    "bridgePanel12Nz": {
+      "surfaceId": "bridge_panel_12:nz",
+      "allowOthersDraw": false,
+      "updatedAt": 1773065249018
+    }
+  },
+  "hostCustomBlocks": [
     {
-      "ownerKey": "OWNERKEY12345",
-      "ownerName": "PLAYER_5820",
-      "x": 3,
-      "y": 1.7,
-      "z": 10,
-      "yaw": 0,
-      "scale": 1,
-      "linkUrl": "https://example.com/",
-      "mediaDataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WnqJ5wAAAAASUVORK5CYII=",
-      "mediaKind": "image",
-      "allowOthersDraw": true,
-      "updatedAt": 1772503006773
+      "id": "hall_venue",
+      "x": -73.343,
+      "y": 0,
+      "z": -3.329,
+      "ry": -1.595,
+      "sx": 1,
+      "sy": 1,
+      "sz": 1,
+      "visible": true
+    },
+    {
+      "id": "plaza_billboard_left",
+      "x": 33.5,
+      "y": 0,
+      "z": 42.5,
+      "ry": -2.356,
+      "sx": 1,
+      "sy": 1,
+      "sz": 1,
+      "visible": true
+    },
+    {
+      "id": "plaza_billboard_right",
+      "x": -33.5,
+      "y": 0,
+      "z": 42.5,
+      "ry": 2.356,
+      "sx": 1,
+      "sy": 1,
+      "sz": 1,
+      "visible": true
+    },
+    {
+      "id": "portal_fps",
+      "x": -0.151,
+      "y": 0,
+      "z": 41.533,
+      "ry": -3.141,
+      "sx": 1.003,
+      "sy": 1.003,
+      "sz": 1.003,
+      "visible": true
+    },
+    {
+      "id": "portal_hall",
+      "x": -60,
+      "y": 0,
+      "z": -4,
+      "ry": 1.6370000000000002,
+      "sx": 1.003,
+      "sy": 1.003,
+      "sz": 1.003,
+      "visible": true
+    },
+    {
+      "id": "portal_ox",
+      "x": 60,
+      "y": 0,
+      "z": -4,
+      "ry": -1.6370000000000002,
+      "sx": 1.003,
+      "sy": 1.003,
+      "sz": 1.003,
+      "visible": true
     }
   ],
+  "objectRevision": 1773106039157,
   "objectEditor": {
     "platformLimit": 400,
     "ropeLimit": 200,

@@ -9,12 +9,37 @@
     <title>Emptines</title>
     <link rel="icon" type="image/png" href="/favicon.png" />
     <style>
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        background:
+          radial-gradient(circle at 50% 38%, rgba(24, 46, 74, 0.32), rgba(4, 7, 14, 0) 38%),
+          #04070e;
+        overflow: hidden;
+      }
+
+      body.app-booting > * {
+        visibility: hidden;
+      }
+
+      body.app-booting::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background:
+          radial-gradient(circle at 50% 38%, rgba(24, 46, 74, 0.32), rgba(4, 7, 14, 0) 38%),
+          #04070e;
+        z-index: 999999;
+      }
+
       .hidden {
         display: none !important;
       }
     </style>
   </head>
-  <body>
+  <body class="app-booting">
     <div id="app"></div>
     <button id="fullscreen-toggle" type="button" aria-pressed="false">전체화면</button>
     <!-- Settings gear — shown only on mobile (body.is-mobile-ui) -->
@@ -342,6 +367,10 @@
       </form>
     </div>
 
+    <div id="opening-video-gate" class="hidden" aria-hidden="true">
+      <video id="opening-video" playsinline muted preload="auto"></video>
+    </div>
+
     <div id="npc-choice-gate" class="hidden" aria-modal="true" role="dialog" aria-labelledby="npc-choice-title">
       <div id="npc-choice-panel">
         <p id="npc-choice-name" class="npc-choice-name">NPC</p>
@@ -575,7 +604,7 @@
         </div>
         <div id="surface-painter-actions">
           <button id="surface-painter-promo-share-toggle" class="hidden" type="button">다른사람 수정: 비허용</button>
-          <button id="surface-painter-export" type="button">PNG 내보내기</button>
+          <button id="surface-painter-export" type="button">저장</button>
           <button id="surface-painter-import" type="button">PNG/JPG 불러오기</button>
           <button id="surface-painter-clear" type="button">삭제</button>
           <button id="surface-painter-cancel" type="button">닫기</button>

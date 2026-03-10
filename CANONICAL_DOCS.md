@@ -16,6 +16,8 @@
 
 - 백서 정본: `C:\Users\rneet\OneDrive\Desktop\DIS\EM\WHITEPAPER.md`
 - 세계관 정본: `C:\Users\rneet\OneDrive\Desktop\DIS\EM\WORLD_LORE.md`
+- 연속성 계약 정본: `C:\Users\rneet\OneDrive\Desktop\DIS\EM\CONTINUITY_CONTRACT.md`
+- 실구현 계약 정본: `C:\Users\rneet\OneDrive\Desktop\DIS\EM\IMPLEMENTATION_CONTRACT.md`
 - UGC 지침 정본: `C:\Users\rneet\OneDrive\Desktop\UGC\AGENTS.md`
 - UGC 규칙 정본: `C:\Users\rneet\OneDrive\Desktop\UGC\ugc-rules.yaml`
 
@@ -28,6 +30,7 @@
 ## 운영 원칙
 
 - 백서와 세계관 수정은 가능하면 `EM`에서 먼저 한다.
+- 연속성과 구현 상태 계약 수정도 가능하면 `EM`에서 먼저 한다.
 - UGC 규칙 수정은 가능하면 `UGC`에서 먼저 한다.
 - 이 저장소는 구현 문구와 런타임 안내를 맡되, 상위 철학을 재정의하지 않는다.
 - 포탈 이동, 닉네임 연속성, 공 구역 UX는 장기적으로 백서 기준에 맞춰 수렴시킨다.

@@ -926,6 +926,25 @@ canvas {
   border-color: rgba(198, 231, 255, 0.95);
 }
 
+#opening-video-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 81;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(circle at center, rgba(10, 20, 30, 0.18), rgba(0, 0, 0, 0.92) 72%),
+    #000;
+  overflow: hidden;
+}
+
+#opening-video {
+  width: 100vw;
+  height: 100vh;
+  object-fit: cover;
+  background: #000;
+}
+
 #npc-choice-gate {
   position: fixed;
   inset: 0;
@@ -3063,6 +3082,7 @@ body.mobile-portrait-lock #promo-link-prompt,
 body.mobile-portrait-lock #player-roster,
 body.mobile-portrait-lock #hub-flow-ui,
 body.mobile-portrait-lock #nickname-gate,
+body.mobile-portrait-lock #opening-video-gate,
 body.mobile-portrait-lock #npc-choice-gate,
 body.mobile-portrait-lock #surface-paint-prompt,
 body.mobile-portrait-lock #chalk-pickup-prompt,

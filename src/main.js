@@ -1,6 +1,10 @@
 import "./styles/main.css";
 import { createGame } from "./game/index.js";
 
+function revealBootUi() {
+  document.body?.classList.remove("app-booting");
+}
+
 function supportsWebGL() {
   try {
     const canvas = document.createElement("canvas");
@@ -15,6 +19,7 @@ function supportsWebGL() {
 }
 
 function showBootError(message) {
+  revealBootUi();
   const root = document.createElement("div");
   root.id = "boot-error";
   root.textContent = message;
@@ -37,6 +42,11 @@ function boot() {
     const game = createGame(mount, { contentPackId: "base-void" });
     game.init();
     window.__emptinesGame = game;
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        revealBootUi();
+      });
+    });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     showBootError(`시작에 실패했습니다: ${detail}`);
