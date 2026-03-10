@@ -34,6 +34,8 @@ const MAX_LEFT_BILLBOARD_IMAGE_CHARS = 4_200_000;
 const MAX_MAIN_PORTAL_AD_IMAGE_CHARS = 4_200_000;
 const MAX_PORTAL_DISPLAY_TITLE_CHARS = 40;
 const MAX_BILLBOARD_VIDEO_DATA_URL_CHARS = 30_000_000;
+const LEGACY_A_ZONE_PORTAL_TARGET_URL = "https://reclaim-fps.vercel.app/";
+const DEFAULT_A_ZONE_PORTAL_TARGET_URL = "https://reclaim-fps.onrender.com/";
 const SURFACE_PAINT_STORE_VERSION = 1;
 const SURFACE_PAINT_CORE_PAYLOAD_VERSION = 1;
 const MAX_SHARED_AUDIO_DATA_URL_CHARS = 12_000_000;
@@ -204,6 +206,10 @@ function normalizeRoomPortalTarget(rawValue, fallback = "") {
     return String(fallback ?? "").trim();
   }
 
+  if (text === LEGACY_A_ZONE_PORTAL_TARGET_URL) {
+    return DEFAULT_A_ZONE_PORTAL_TARGET_URL;
+  }
+
   let parsed;
   try {
     parsed = new URL(text);
@@ -227,6 +233,10 @@ function normalizeRoomPortalTarget(rawValue, fallback = "") {
     parsed.hash = "";
     parsed.searchParams.set("zone", zoneHint);
     return parsed.toString();
+  }
+
+  if (parsed.toString() === LEGACY_A_ZONE_PORTAL_TARGET_URL) {
+    return DEFAULT_A_ZONE_PORTAL_TARGET_URL;
   }
 
   return parsed.toString();
