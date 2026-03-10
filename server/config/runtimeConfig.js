@@ -3,7 +3,7 @@ export const DEFAULT_ROOM_CODE = "GLOBAL";
 export const DEFAULT_PORTAL_TARGET_URL =
   "https://singularity-ox.onrender.com/?v=0.2";
 export const DEFAULT_A_ZONE_PORTAL_TARGET_URL =
-  "https://singularity-ox.onrender.com/?v=0.2";
+  "https://reclaim-fps.onrender.com/";
 export const DEFAULT_SURFACE_PAINT_STORE_PATH = "server/data/surface-paint.json";
 export const DEFAULT_RENDER_SURFACE_PAINT_STORE_PATH = "/var/data/surface-paint.json";
 export const DEFAULT_SURFACE_PAINT_SAVE_DEBOUNCE_MS = 300;

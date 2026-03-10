@@ -221,7 +221,7 @@ export const BASE_VOID_PACK = {
         warningSeconds: 16,
         openSeconds: 24,
         targetUrl: "",
-        aZoneTargetUrl: "https://reclaim-fps.vercel.app/",
+        aZoneTargetUrl: "https://reclaim-fps.onrender.com/",
         // FPS portal defaults to the middle lane so all three portals are visible from spawn.
         aZonePosition: [0, 0.08, -4],
         // Move the live/performance portal to the left side pad so the center lane stays open.
