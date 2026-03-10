@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
@@ -7,6 +7,7 @@
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
     />
     <title>Emptines</title>
+    <link rel="icon" type="image/png" href="/favicon.png" />
     <style>
       .hidden {
         display: none !important;
@@ -343,18 +344,16 @@
 
     <div id="npc-choice-gate" class="hidden" aria-modal="true" role="dialog" aria-labelledby="npc-choice-title">
       <div id="npc-choice-panel">
+        <p id="npc-choice-name" class="npc-choice-name">NPC</p>
         <h2 id="npc-choice-title">NPC 안내</h2>
-        <p class="npc-choice-copy">원하는 항목을 선택하세요.</p>
-        <div id="npc-choice-actions">
-          <button id="npc-choice-nickname" type="button">1. 임시 닉네임 정하기</button>
-          <button id="npc-choice-guide" type="button">2. 도시 설명듣기</button>
-          <button id="npc-choice-play" type="button">3. 놀아달라하기</button>
+        <p id="npc-choice-copy" class="npc-choice-copy">원하는 항목을 선택하세요.</p>
+        <p id="npc-choice-sources" class="npc-choice-sources hidden"></p>
+        <div id="npc-choice-actions"></div>
+        <div id="npc-choice-footer">
+          <button id="npc-choice-back" class="hidden" type="button">이전</button>
+          <button id="npc-choice-close" type="button">닫기</button>
         </div>
       </div>
-    </div>
-
-    <div id="intro-video-overlay" class="hidden" aria-hidden="true">
-      <video id="intro-video" playsinline webkit-playsinline preload="auto"></video>
     </div>
 
     <div id="tool-ui" aria-label="도구">
@@ -385,9 +384,23 @@
         <button id="mobile-paint" class="mobile-action-btn hidden" type="button">그리기</button>
       </div>
       <div id="mobile-promo-scale-wrap" class="hidden" aria-label="Object scale">
-        <label for="mobile-promo-scale">크기</label>
-        <input id="mobile-promo-scale" type="range" min="0.35" max="2.85" step="0.05" value="2.2" />
-        <span id="mobile-promo-scale-value">2.20x</span>
+        <div class="mobile-promo-scale-row">
+          <label for="mobile-promo-scale">가로</label>
+          <input id="mobile-promo-scale" type="range" min="0.35" max="2.85" step="0.05" value="1.4" />
+          <span id="mobile-promo-scale-value">1.40x</span>
+        </div>
+        <div class="mobile-promo-scale-row">
+          <label for="mobile-promo-scale-y">세로</label>
+          <input
+            id="mobile-promo-scale-y"
+            type="range"
+            min="0.35"
+            max="2.85"
+            step="0.05"
+            value="1.4"
+          />
+          <span id="mobile-promo-scale-y-value">1.40x</span>
+        </div>
       </div>
     </div>
 
@@ -397,9 +410,14 @@
         <button id="promo-panel-close" class="hidden" type="button">닫기</button>
       </div>
       <div class="promo-panel-row">
-        <label for="promo-scale">크기</label>
-        <input id="promo-scale" type="range" min="0.35" max="2.85" step="0.05" value="2.2" />
-        <span id="promo-scale-value">2.20x</span>
+        <label for="promo-scale">가로</label>
+        <input id="promo-scale" type="range" min="0.35" max="2.85" step="0.05" value="1.4" />
+        <span id="promo-scale-value">1.40x</span>
+      </div>
+      <div class="promo-panel-row">
+        <label for="promo-scale-y">세로</label>
+        <input id="promo-scale-y" type="range" min="0.35" max="2.85" step="0.05" value="1.4" />
+        <span id="promo-scale-y-value">1.40x</span>
       </div>
       <div class="promo-panel-row">
         <label for="promo-shape">타입</label>
@@ -505,7 +523,7 @@
     </div>
     <div id="hall-portal-countdown" class="hidden" aria-live="assertive" aria-atomic="true">5</div>
 
-    <div id="boundary-warning" aria-live="assertive">
+    <div id="boundary-warning" aria-live="assertive" aria-hidden="true">
       맵 경계를 벗어나셨습니다.
     </div>
 

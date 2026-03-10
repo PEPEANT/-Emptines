@@ -20,23 +20,29 @@ export const BASE_VOID_PACK = {
     },
     clouds: {
       enabled: true,
-      count: 26,
-      area: 2400,
-      minHeight: 130,
-      maxHeight: 250,
-      minScale: 24,
-      maxScale: 56,
-      color: 0xfdfefe,
-      opacity: 0.68,
-      driftMin: 0.12,
-      driftMax: 0.36,
-      minPuffs: 5,
-      maxPuffs: 8,
-      puffSpread: 1.95,
-      puffHeightSpread: 0.16,
+      count: 20,
+      area: 3000,
+      minHeight: 154,
+      maxHeight: 312,
+      minScale: 34,
+      maxScale: 82,
+      color: 0xf7fbff,
+      opacity: 0.58,
+      driftMin: 0.06,
+      driftMax: 0.18,
+      minPuffs: 7,
+      maxPuffs: 11,
+      puffSpread: 2.3,
+      puffHeightSpread: 0.18,
       mobileCountScale: 0.55,
+      windAngle: -0.46,
+      windVariance: 0.34,
+      cirrusCount: 6,
+      distantCount: 7,
+      distantHeightBoost: 40,
+      distantOpacityScale: 0.78,
       emissive: 0x304a63,
-      emissiveIntensity: 0.02
+      emissiveIntensity: 0.015
     },
     lights: {
       hemisphere: {
@@ -168,10 +174,31 @@ export const BASE_VOID_PACK = {
     hubFlow: {
       enabled: true,
       introSeconds: 4.8,
+      npcs: [
+        {
+          id: "bridge_gatekeeper",
+          position: [0, 0, -92],
+          scale: 1.34,
+          interactionRadius: 5.4
+        },
+        {
+          id: "city_archivist",
+          position: [-18, 0, 14],
+          scale: 1.08,
+          interactionRadius: 5.8
+        },
+        {
+          id: "city_curator",
+          position: [18, 0, 18],
+          scale: 1.04,
+          interactionRadius: 5.8
+        }
+      ],
       bridge: {
         approachSpawn: [0, GAME_CONSTANTS.PLAYER_HEIGHT, -98],
         spawn: [0, GAME_CONSTANTS.PLAYER_HEIGHT, -86],
-        npcPosition: [0, 0, -82],
+        npcPosition: [0, 0, -92],
+        npcScale: 1.34,
         npcTriggerRadius: 5,
         mirrorPosition: [0, 1.72, -76],
         mirrorLookSeconds: 1.5,
@@ -194,7 +221,9 @@ export const BASE_VOID_PACK = {
         warningSeconds: 16,
         openSeconds: 24,
         targetUrl: "",
-        aZoneTargetUrl: "https://reclaim-fps.onrender.com/",
+        aZoneTargetUrl: "https://reclaim-fps.vercel.app/",
+        // FPS portal defaults to the middle lane so all three portals are visible from spawn.
+        aZonePosition: [0, 0.08, -4],
         // Move the live/performance portal to the left side pad so the center lane stays open.
         hallPosition: [-60, 0.08, -4],
         hallTargetUrl:

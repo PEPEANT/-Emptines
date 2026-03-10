@@ -80,9 +80,9 @@ const PROMO_BLOCKED_CENTER_X = 0;
 const PROMO_BLOCKED_CENTER_Z = 0;
 const PROMO_BLOCKED_CENTER_RADIUS = 11.5;
 const PROMO_BLOCKED_PORTAL_ZONES = Object.freeze([
-  Object.freeze({ x: 60, z: 0, radius: 6.4 }),
-  Object.freeze({ x: -60, z: 0, radius: 6.4 }),
-  Object.freeze({ x: 0, z: 22, radius: 6.2 })
+  Object.freeze({ x: 60, z: -4, radius: 6.4 }),
+  Object.freeze({ x: 0, z: -4, radius: 6.4 }),
+  Object.freeze({ x: -60, z: -4, radius: 6.2 })
 ]);
 const HOST_CONTROLLED_SURFACE_ID_PATTERN = /^bridge_panel_\d+:(?:px|nx|py|ny|pz|nz)$/;
 const CHAT_MESSAGE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,80}$/;
@@ -120,6 +120,15 @@ const ROOM_ZONE_PORTAL_OBJECT_ID_BY_ZONE = Object.freeze({
   ox: "portal_ox",
   hall: "portal_hall"
 });
+const PERSISTED_FIXED_OBJECT_IDS = Object.freeze([
+  ROOM_ZONE_PORTAL_OBJECT_ID_BY_ZONE.ox,
+  ROOM_ZONE_PORTAL_OBJECT_ID_BY_ZONE.fps,
+  ROOM_ZONE_PORTAL_OBJECT_ID_BY_ZONE.hall,
+  "hall_venue",
+  "plaza_billboard_right",
+  "plaza_billboard_left"
+]);
+const PERSISTED_FIXED_OBJECT_ID_SET = new Set(PERSISTED_FIXED_OBJECT_IDS);
 const ROOM_ZONE_PORTAL_ENTRY_DISTANCE = 6;
 const ROOM_ZONE_STATE_BY_ID = Object.freeze({
   lobby: Object.freeze({
@@ -130,18 +139,18 @@ const ROOM_ZONE_STATE_BY_ID = Object.freeze({
     pitch: -0.02
   }),
   fps: Object.freeze({
-    // Spawn in front of the FPS-side portal so re-entry is intentional.
-    x: -54,
+    // Spawn in front of the center FPS portal so re-entry is intentional.
+    x: 0,
     y: 1.72,
-    z: -2,
-    yaw: -1.46,
+    z: -10,
+    yaw: 0,
     pitch: -0.02
   }),
   ox: Object.freeze({
     // Spawn in front of the B-zone portal used for OX transfers.
     x: 54,
     y: 1.72,
-    z: 0,
+    z: -4,
     yaw: 1.46,
     pitch: -0.02
   })
@@ -153,16 +162,16 @@ const RETURN_PORTAL_UNSAFE_RADIUS_BY_HINT = Object.freeze({
 });
 const RETURN_PORTAL_FALLBACK_CENTER_BY_HINT = Object.freeze({
   fps: Object.freeze({
-    x: ROOM_ZONE_STATE_BY_ID.fps.x,
-    z: ROOM_ZONE_STATE_BY_ID.fps.z
+    x: 0,
+    z: -4
   }),
   ox: Object.freeze({
-    x: ROOM_ZONE_STATE_BY_ID.ox.x,
-    z: ROOM_ZONE_STATE_BY_ID.ox.z
+    x: 60,
+    z: -4
   }),
   hall: Object.freeze({
-    x: 0,
-    z: 22
+    x: -60,
+    z: -4
   })
 });
 
@@ -599,6 +608,17 @@ function normalizeHostCustomBlockId(rawValue) {
   return value;
 }
 
+function normalizePersistedObjectPositionId(rawValue) {
+  const value = normalizeObjectPositionId(rawValue);
+  if (!value) {
+    return "";
+  }
+  if (normalizeHostCustomBlockId(value) || PERSISTED_FIXED_OBJECT_ID_SET.has(value)) {
+    return value;
+  }
+  return "";
+}
+
 function normalizeObjectPositionEntry(rawValue) {
   if (!rawValue || typeof rawValue !== "object") {
     return null;
@@ -663,9 +683,10 @@ function normalizePersistedHostCustomBlockPositions(rawValue) {
     if (count >= MAX_OBJECT_POSITIONS) {
       break;
     }
-    const id = normalizeHostCustomBlockId(rawId);
+    const id = normalizePersistedObjectPositionId(rawId);
     const normalized = normalizeObjectPositionEntry(rawEntry);
-    if (!id || !normalized || normalized.visible === false) {
+    const isHostCustom = HOST_CUSTOM_BLOCK_ID_PATTERN.test(id);
+    if (!id || !normalized || (isHostCustom && normalized.visible === false)) {
       continue;
     }
     sanitized[id] = normalized;
@@ -678,7 +699,7 @@ function normalizePersistedHostCustomBlockList(rawValue) {
   const list = Array.isArray(rawValue) ? rawValue : [];
   const asPositions = {};
   for (const entry of list) {
-    const id = normalizeHostCustomBlockId(entry?.id);
+    const id = normalizePersistedObjectPositionId(entry?.id);
     if (!id) {
       continue;
     }
@@ -700,7 +721,8 @@ function serializePersistedHostCustomBlockList(rawValue) {
       ...(Number.isFinite(Number(entry.ry)) ? { ry: Number(entry.ry) } : {}),
       sx: entry.sx,
       sy: entry.sy,
-      sz: entry.sz
+      sz: entry.sz,
+      visible: entry.visible !== false
     });
   }
   return list;
@@ -1908,6 +1930,7 @@ export class RoomService {
       z: normalizePromoAxis(source.z, fallback?.z ?? 0),
       yaw: normalizePromoYaw(source.yaw, fallback?.yaw ?? 0),
       scale: normalizePromoScale(source.scale, fallback?.scale ?? 1),
+      scaleY: normalizePromoScale(source.scaleY, fallback?.scaleY ?? source.scale ?? fallback?.scale ?? 1),
       linkUrl: normalizePromoUrl(source.linkUrl ?? fallback?.linkUrl ?? ""),
       mediaDataUrl,
       mediaKind,
@@ -1995,6 +2018,7 @@ export class RoomService {
           z: 0,
           yaw: 0,
           scale: 1,
+          scaleY: 1,
           linkUrl: "",
           mediaDataUrl: "",
           allowOthersDraw: false,
@@ -2017,7 +2041,9 @@ export class RoomService {
       Math.abs(Number(normalized.x) - Number(previous.x)) > 0.001 ||
       Math.abs(Number(normalized.z) - Number(previous.z)) > 0.001;
     const hasScaleChange =
-      !previous || Math.abs(Number(normalized.scale) - Number(previous.scale)) > 0.001;
+      !previous ||
+      Math.abs(Number(normalized.scale) - Number(previous.scale)) > 0.001 ||
+      Math.abs(Number(normalized.scaleY) - Number(previous.scaleY ?? previous.scale)) > 0.001;
     if (hasPositionChange || hasScaleChange) {
       const blockReason = getPromoPlacementBlockReason(normalized.x, normalized.z, normalized.scale);
       if (blockReason === "spawn") {
