@@ -212,12 +212,12 @@ const OPENING_VIDEO_OVERLAY_SEQUENCE = Object.freeze([
 ]);
 const NPC_GREETING_VIDEO_SEQUENCE = Object.freeze([
   Object.freeze([
-    new URL("../../../mp4/play/01.mp4", import.meta.url).href,
-    new URL("../../../mp4/play/01.webm", import.meta.url).href
+    new URL("../../../mp4/play/01.webm", import.meta.url).href,
+    new URL("../../../mp4/play/01.mp4", import.meta.url).href
   ]),
   Object.freeze([
-    new URL("../../../mp4/play/02.mp4", import.meta.url).href,
-    new URL("../../../mp4/play/02.webm", import.meta.url).href
+    new URL("../../../mp4/play/02.webm", import.meta.url).href,
+    new URL("../../../mp4/play/02.mp4", import.meta.url).href
   ])
 ]);
 const NPC_GREETING_VIDEO_CLIP_FREEZE_AT_SECONDS = Object.freeze([null, null]);
