@@ -3,6 +3,13 @@ import { chooseDistributedSpawnState } from "./spawn.js";
 import { readFileSync } from "node:fs";
 import { mkdir, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve as resolvePath } from "node:path";
+import {
+  DEFAULT_A_ZONE_PORTAL_TARGET_URL,
+  PORTAL_DISPLAY_KEYS,
+  ROOM_ZONE_IDS,
+  ROOM_ZONE_PORTAL_OBJECT_ID_BY_ZONE,
+  getPortalDisplayDefaults as getSharedPortalDisplayDefaults
+} from "../../shared/portalConfig.js";
 
 const SURFACE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,96}$/;
 const MAX_SURFACE_IMAGE_CHARS = 4_200_000;
@@ -34,8 +41,6 @@ const MAX_LEFT_BILLBOARD_IMAGE_CHARS = 4_200_000;
 const MAX_MAIN_PORTAL_AD_IMAGE_CHARS = 4_200_000;
 const MAX_PORTAL_DISPLAY_TITLE_CHARS = 40;
 const MAX_BILLBOARD_VIDEO_DATA_URL_CHARS = 30_000_000;
-const LEGACY_A_ZONE_PORTAL_TARGET_URL = "https://reclaim-fps.vercel.app/";
-const DEFAULT_A_ZONE_PORTAL_TARGET_URL = "https://reclaim-fps.onrender.com/";
 const SURFACE_PAINT_STORE_VERSION = 1;
 const SURFACE_PAINT_CORE_PAYLOAD_VERSION = 1;
 const MAX_SHARED_AUDIO_DATA_URL_CHARS = 12_000_000;
@@ -60,9 +65,22 @@ const CITY_OBJECT_ID_PATTERN =
   /^city_(?:tower|mega_tower|kiosk|block|outer_block|bridge_block)_\d+$/;
 const PROMO_OWNER_KEY_PATTERN = /^[a-zA-Z0-9:_-]{8,96}$/;
 const MAX_PROMO_OBJECTS = 300;
+const MAX_MOB_PODS = 300;
 const MAX_PROMO_NAME_CHARS = 48;
 const MAX_PROMO_URL_CHARS = 2048;
 const MAX_PROMO_MEDIA_DATA_URL_CHARS = 9_000_000;
+const DRAWING_ENTITY_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,128}$/;
+const MAX_DRAWING_ENTITY_IMAGE_CHARS = 4_200_000;
+const MAX_DRAWING_ENTITIES = 72;
+const DRAWING_ENTITY_MIN_SCALE = 0.55;
+const DRAWING_ENTITY_MAX_SCALE = 2.8;
+const DRAWING_ENTITY_MIN_Y = -2;
+const DRAWING_ENTITY_MAX_Y = 12;
+const DRAWING_ENTITY_MIN_MOTION_RADIUS = 0.18;
+const DRAWING_ENTITY_DEFAULT_MOTION_RADIUS = 1.4;
+const DRAWING_ENTITY_MAX_MOTION_RADIUS = 3.6;
+const MOB_POD_SURFACE_PREFIX = "mp_";
+const MOB_POD_FRONT_SPAWN_DISTANCE = 1.55;
 const PROMO_MIN_SCALE = 0.35;
 const PROMO_MAX_SCALE = 2.85;
 const PROMO_MIN_Y = -1.5;
@@ -91,37 +109,6 @@ const CHAT_MESSAGE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,80}$/;
 const MAX_CHAT_MESSAGES = 5000;
 const MAX_CHAT_TEXT_CHARS = 200;
 const MAX_PORTAL_DISPLAY_LINE_CHARS = 72;
-const PORTAL_DISPLAY_KEYS = Object.freeze(["portal1", "portal2", "hall"]);
-const PORTAL_DISPLAY_DEFAULT_TITLES = Object.freeze({
-  portal1: "OX 퀴즈 대회",
-  portal2: "포탈 2",
-  hall: "공연장"
-});
-const PORTAL_DISPLAY_DEFAULT_MODES = Object.freeze({
-  portal1: "text",
-  portal2: "text",
-  hall: "time"
-});
-const PORTAL_DISPLAY_DEFAULT_LINES = Object.freeze({
-  portal1: Object.freeze({
-    line2: "포탈 1 링크는 패널에서 변경",
-    line3: ""
-  }),
-  portal2: Object.freeze({
-    line2: "포탈 2 링크는 패널에서 변경",
-    line3: ""
-  }),
-  hall: Object.freeze({
-    line2: "",
-    line3: ""
-  })
-});
-const ROOM_ZONE_IDS = Object.freeze(["lobby", "fps", "ox"]);
-const ROOM_ZONE_PORTAL_OBJECT_ID_BY_ZONE = Object.freeze({
-  fps: "portal_fps",
-  ox: "portal_ox",
-  hall: "portal_hall"
-});
 const PERSISTED_FIXED_OBJECT_IDS = Object.freeze([
   ROOM_ZONE_PORTAL_OBJECT_ID_BY_ZONE.ox,
   ROOM_ZONE_PORTAL_OBJECT_ID_BY_ZONE.fps,
@@ -206,10 +193,6 @@ function normalizeRoomPortalTarget(rawValue, fallback = "") {
     return String(fallback ?? "").trim();
   }
 
-  if (text === LEGACY_A_ZONE_PORTAL_TARGET_URL) {
-    return DEFAULT_A_ZONE_PORTAL_TARGET_URL;
-  }
-
   let parsed;
   try {
     parsed = new URL(text);
@@ -233,10 +216,6 @@ function normalizeRoomPortalTarget(rawValue, fallback = "") {
     parsed.hash = "";
     parsed.searchParams.set("zone", zoneHint);
     return parsed.toString();
-  }
-
-  if (parsed.toString() === LEGACY_A_ZONE_PORTAL_TARGET_URL) {
-    return DEFAULT_A_ZONE_PORTAL_TARGET_URL;
   }
 
   return parsed.toString();
@@ -539,6 +518,25 @@ function getPromoOwnerKeyFromSurfaceId(rawSurfaceId, promoMap = null) {
   }
 
   return strippedOwnerKey || directOwnerKey || "";
+}
+
+function getMobPodOwnerKeyFromSurfaceId(rawSurfaceId, mobPodMap = null) {
+  const surfaceId = normalizeSurfaceId(rawSurfaceId);
+  if (!surfaceId || !surfaceId.startsWith(MOB_POD_SURFACE_PREFIX)) {
+    return "";
+  }
+  const baseId = String(surfaceId.split(":")[0] ?? "").trim();
+  if (!baseId.startsWith(MOB_POD_SURFACE_PREFIX)) {
+    return "";
+  }
+  const ownerKey = normalizePromoOwnerKey(baseId.slice(MOB_POD_SURFACE_PREFIX.length));
+  if (!ownerKey) {
+    return "";
+  }
+  if (mobPodMap instanceof Map && !mobPodMap.has(ownerKey)) {
+    return "";
+  }
+  return ownerKey;
 }
 
 function normalizeBooleanFlag(rawValue, fallback = false) {
@@ -1049,6 +1047,163 @@ function normalizePromoKind(rawValue) {
   return "block";
 }
 
+function hashDrawingEntitySeed(rawValue) {
+  const text = String(rawValue ?? "");
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function normalizeDrawingEntityId(rawValue) {
+  const value = String(rawValue ?? "").trim();
+  if (!value || !DRAWING_ENTITY_ID_PATTERN.test(value)) {
+    return "";
+  }
+  return value;
+}
+
+function createDrawingEntityId(ownerKey, createdAt = Date.now()) {
+  const safeOwnerKey = normalizePromoOwnerKey(ownerKey).slice(0, 28);
+  if (!safeOwnerKey) {
+    return "";
+  }
+  const safeCreatedAt = Math.max(0, Math.trunc(Number(createdAt) || Date.now()));
+  const seed = hashDrawingEntitySeed(`${safeOwnerKey}:${safeCreatedAt}`).toString(36).slice(0, 6);
+  return `de_${safeOwnerKey}_${safeCreatedAt.toString(36)}_${seed}`.slice(0, 128);
+}
+
+function normalizeDrawingEntityImageDataUrl(rawValue) {
+  const value = String(rawValue ?? "").trim();
+  if (!value || value.length > MAX_DRAWING_ENTITY_IMAGE_CHARS) {
+    return "";
+  }
+  if (!/^data:image\/(?:png|webp);base64,/i.test(value)) {
+    return "";
+  }
+  return value;
+}
+
+function normalizeDrawingEntityScale(rawValue, fallback = 1) {
+  const parsed = Number(rawValue);
+  const safe = Number.isFinite(parsed) ? parsed : Number(fallback) || 1;
+  return Math.max(DRAWING_ENTITY_MIN_SCALE, Math.min(DRAWING_ENTITY_MAX_SCALE, safe));
+}
+
+function normalizeDrawingEntityAspectRatio(rawValue, fallback = 1) {
+  const parsed = Number(rawValue);
+  const safe = Number.isFinite(parsed) ? parsed : Number(fallback) || 1;
+  return Math.max(0.14, Math.min(4.2, safe));
+}
+
+function normalizeDrawingEntityEntry(rawValue, fallback = null) {
+  if (!rawValue || typeof rawValue !== "object") {
+    return null;
+  }
+  const base = fallback && typeof fallback === "object" ? fallback : {};
+  const entityId = normalizeDrawingEntityId(rawValue.entityId ?? base.entityId ?? "");
+  const imageDataUrl = normalizeDrawingEntityImageDataUrl(
+    rawValue.imageDataUrl ?? rawValue.dataUrl ?? base.imageDataUrl ?? ""
+  );
+  const ownerKey = normalizePromoOwnerKey(rawValue.ownerKey ?? base.ownerKey ?? "");
+  if (!entityId || !imageDataUrl || !ownerKey) {
+    return null;
+  }
+
+  const pixelWidth = Math.max(
+    1,
+    Math.min(2048, Math.trunc(Number(rawValue.pixelWidth) || Number(base.pixelWidth) || 1))
+  );
+  const pixelHeight = Math.max(
+    1,
+    Math.min(2048, Math.trunc(Number(rawValue.pixelHeight) || Number(base.pixelHeight) || 1))
+  );
+  const aspectRatio = normalizeDrawingEntityAspectRatio(
+    rawValue.aspectRatio,
+    pixelWidth / Math.max(1, pixelHeight)
+  );
+  const createdAt = Math.max(
+    0,
+    Math.trunc(Number(rawValue.createdAt) || Number(base.createdAt) || Date.now())
+  );
+  const updatedAt = Math.max(
+    createdAt,
+    Math.trunc(Number(rawValue.updatedAt) || Number(base.updatedAt) || createdAt)
+  );
+
+  return {
+    entityId,
+    ownerKey,
+    ownerName: normalizePromoName(rawValue.ownerName ?? base.ownerName ?? "PLAYER"),
+    displayName: String(
+      rawValue.displayName ?? rawValue.mobName ?? base.displayName ?? ""
+    ).trim().replace(/\s+/g, " ").slice(0, MAX_PROMO_NAME_CHARS),
+    sourceSurfaceId: normalizeSurfaceId(rawValue.sourceSurfaceId ?? base.sourceSurfaceId ?? ""),
+    imageDataUrl,
+    x: normalizePromoAxis(rawValue.x, base.x ?? 0),
+    y: normalizePromoAxis(rawValue.y, base.y ?? 0, DRAWING_ENTITY_MIN_Y, DRAWING_ENTITY_MAX_Y),
+    z: normalizePromoAxis(rawValue.z, base.z ?? 0),
+    yaw: normalizePromoYaw(rawValue.yaw, base.yaw ?? 0),
+    scale: normalizeDrawingEntityScale(rawValue.scale, base.scale ?? 1),
+    aspectRatio,
+    pixelWidth,
+    pixelHeight,
+    motionSeed: Math.max(
+      0,
+      Math.trunc(Number(rawValue.motionSeed) || Number(base.motionSeed) || hashDrawingEntitySeed(entityId))
+    ),
+    motionRadius: Math.max(
+      DRAWING_ENTITY_MIN_MOTION_RADIUS,
+      Math.min(
+        DRAWING_ENTITY_MAX_MOTION_RADIUS,
+        Number(rawValue.motionRadius) || Number(base.motionRadius) || DRAWING_ENTITY_DEFAULT_MOTION_RADIUS
+      )
+    ),
+    motionStretch: Math.max(
+      0.35,
+      Math.min(1.2, Number(rawValue.motionStretch) || Number(base.motionStretch) || 0.65)
+    ),
+    motionSpeed: Math.max(
+      0.18,
+      Math.min(2.2, Number(rawValue.motionSpeed) || Number(base.motionSpeed) || 0.72)
+    ),
+    bobAmplitude: Math.max(
+      0.04,
+      Math.min(0.42, Number(rawValue.bobAmplitude) || Number(base.bobAmplitude) || 0.12)
+    ),
+    phaseOffset: Math.max(
+      0,
+      Math.min(Math.PI * 2, Number(rawValue.phaseOffset) || Number(base.phaseOffset) || 0)
+    ),
+    createdAt,
+    updatedAt
+  };
+}
+
+function normalizeMobPodObject(rawValue, fallback = null) {
+  const source = rawValue && typeof rawValue === "object" ? rawValue : {};
+  const base = fallback && typeof fallback === "object" ? fallback : {};
+  const ownerKey = normalizePromoOwnerKey(source.ownerKey ?? base.ownerKey ?? "");
+  if (!ownerKey) {
+    return null;
+  }
+  return {
+    ownerKey,
+    ownerName: normalizePromoName(source.ownerName ?? base.ownerName ?? "PLAYER"),
+    x: normalizePromoAxis(source.x, base.x ?? 0),
+    y: normalizePromoAxis(source.y, base.y ?? 0, PROMO_MIN_Y, PROMO_MAX_Y),
+    z: normalizePromoAxis(source.z, base.z ?? 0),
+    yaw: normalizePromoYaw(source.yaw, base.yaw ?? 0),
+    scale: normalizePromoScale(source.scale, base.scale ?? 1),
+    updatedAt: Math.max(
+      0,
+      Math.trunc(Number(source.updatedAt) || Number(base.updatedAt) || Date.now())
+    )
+  };
+}
+
 function getPromoPlacementBlockReason(x, z, scale = 1) {
   const safeX = Number(x);
   const safeZ = Number(z);
@@ -1196,13 +1351,7 @@ function normalizePortalDisplayState(rawValue, defaults = {}) {
 }
 
 function getPortalDisplayDefaults(portalKey) {
-  const normalizedKey = normalizePortalDisplayKey(portalKey);
-  return {
-    title: PORTAL_DISPLAY_DEFAULT_TITLES[normalizedKey] ?? "Hall",
-    mode: PORTAL_DISPLAY_DEFAULT_MODES[normalizedKey] ?? "text",
-    line2: PORTAL_DISPLAY_DEFAULT_LINES[normalizedKey]?.line2 ?? "",
-    line3: PORTAL_DISPLAY_DEFAULT_LINES[normalizedKey]?.line3 ?? ""
-  };
+  return getSharedPortalDisplayDefaults(portalKey, "portal1");
 }
 
 function normalizeBillboardVideoDataUrl(rawValue) {
@@ -1240,6 +1389,8 @@ function createPersistentRoom(code, defaultPortalTargetUrl, defaultAZonePortalTa
     surfacePolicies: createSurfacePoliciesState(),
     surfacePaint: new Map(),
     chatHistory: [],
+    drawingEntities: new Map(),
+    mobPods: new Map(),
     promoObjects: new Map(),
     objectEditor: createObjectEditorState(),
     objectPositions: {},
@@ -1370,6 +1521,8 @@ export class RoomService {
     const platforms = Array.isArray(parsed?.platforms) ? parsed.platforms : [];
     const ropes = Array.isArray(parsed?.ropes) ? parsed.ropes : [];
     const promoObjects = Array.isArray(parsed?.promoObjects) ? parsed.promoObjects : [];
+    const mobPods = Array.isArray(parsed?.mobPods) ? parsed.mobPods : [];
+    const drawingEntities = Array.isArray(parsed?.drawingEntities) ? parsed.drawingEntities : [];
     const hasHostCustomBlocksField =
       parsed && typeof parsed === "object"
         ? Object.prototype.hasOwnProperty.call(parsed, "hostCustomBlocks")
@@ -1446,6 +1599,8 @@ export class RoomService {
     });
     this.setPlatforms(room, platforms, { persist: false, bumpRevision: false });
     this.setRopes(room, ropes, { persist: false, bumpRevision: false });
+    this.setDrawingEntities(room, drawingEntities, { persist: false });
+    this.setMobPods(room, mobPods, { persist: false });
     this.setPromoObjects(room, promoObjects, { persist: false });
     if (!hasSurfacePaintCoreField && hasLegacySurfacesField) {
       this.log?.log?.("[paint] Migrating legacy surfaces to surfacePaintCore.");
@@ -1548,6 +1703,8 @@ export class RoomService {
       platformRevision: this.getPlatformRevision(room),
       ropes: this.serializeRopes(room),
       ropeRevision: this.getRopeRevision(room),
+      drawingEntities: this.serializeDrawingEntities(room),
+      mobPods: this.serializeMobPods(room),
       promoObjects: this.serializePromoObjects(room),
       surfacePolicies: this.serializeSurfacePolicies(room),
       hostCustomBlocks: serializePersistedHostCustomBlockList(this.serializeObjectPositions(room)),
@@ -1685,6 +1842,8 @@ export class RoomService {
       rightBillboard: this.serializeRightBillboard(room),
       securityTest: this.serializeSecurityTest(room),
       objectEditor: this.serializeObjectEditor(room),
+      drawingEntities: this.serializeDrawingEntities(room),
+      mobPods: this.serializeMobPods(room),
       promoObjects: this.serializePromoObjects(room),
       surfacePolicies: this.serializeSurfacePolicies(room),
       players: Array.from(room.players.values()).map((player) => ({
@@ -1905,6 +2064,452 @@ export class RoomService {
       settings: this.serializeObjectEditor(room),
       platformsTrimmed,
       ropesTrimmed
+    };
+  }
+
+  getDrawingEntitiesMap(room) {
+    if (!room) {
+      return null;
+    }
+    if (!(room.drawingEntities instanceof Map)) {
+      room.drawingEntities = new Map();
+    }
+    return room.drawingEntities;
+  }
+
+  serializeDrawingEntities(room) {
+    const map = this.getDrawingEntitiesMap(room);
+    if (!map) {
+      return [];
+    }
+    const list = [];
+    for (const rawValue of map.values()) {
+      const normalized = normalizeDrawingEntityEntry(rawValue);
+      if (!normalized) {
+        continue;
+      }
+      list.push(normalized);
+    }
+    list.sort((a, b) => a.createdAt - b.createdAt);
+    return list;
+  }
+
+  emitDrawingEntitiesUpdate(room) {
+    this.io.to(room.code).emit("drawing:entity:state", {
+      entities: this.serializeDrawingEntities(room)
+    });
+  }
+
+  findDrawingEntityForOwnerSurface(room, actorOwnerKey = "", rawSurfaceId = "") {
+    const ownerKey = normalizePromoOwnerKey(actorOwnerKey);
+    const sourceSurfaceId = normalizeSurfaceId(rawSurfaceId);
+    if (!ownerKey || !sourceSurfaceId) {
+      return null;
+    }
+    const map = this.getDrawingEntitiesMap(room);
+    if (!map || map.size <= 0) {
+      return null;
+    }
+    let newestEntry = null;
+    for (const rawValue of map.values()) {
+      const normalized = normalizeDrawingEntityEntry(rawValue);
+      if (!normalized) {
+        continue;
+      }
+      if (normalized.ownerKey !== ownerKey || normalized.sourceSurfaceId !== sourceSurfaceId) {
+        continue;
+      }
+      if (!newestEntry || normalized.updatedAt > newestEntry.updatedAt) {
+        newestEntry = normalized;
+      }
+    }
+    return newestEntry;
+  }
+
+  setDrawingEntities(room, rawList, { persist = true } = {}) {
+    if (!room) {
+      return { ok: false, error: "room not found" };
+    }
+    const map = this.getDrawingEntitiesMap(room);
+    map.clear();
+    const list = Array.isArray(rawList) ? rawList : [];
+    for (const entry of list) {
+      const normalized = normalizeDrawingEntityEntry(entry);
+      if (!normalized) {
+        continue;
+      }
+      map.set(normalized.entityId, normalized);
+      if (map.size >= MAX_DRAWING_ENTITIES) {
+        break;
+      }
+    }
+    if (persist) {
+      this.scheduleSurfacePaintSave();
+    }
+    return { ok: true };
+  }
+
+  spawnDrawingEntity(room, actorOwnerKey, actorName, rawPayload = {}, actorState = null) {
+    if (!room) {
+      return { ok: false, error: "room not found" };
+    }
+    const ownerKey = normalizePromoOwnerKey(actorOwnerKey);
+    if (!ownerKey) {
+      return { ok: false, error: "invalid owner key" };
+    }
+    const imageDataUrl = normalizeDrawingEntityImageDataUrl(
+      rawPayload?.imageDataUrl ?? rawPayload?.dataUrl ?? ""
+    );
+    if (!imageDataUrl) {
+      return { ok: false, error: "invalid drawing image" };
+    }
+    const sourceSurfaceId = normalizeSurfaceId(rawPayload?.sourceSurfaceId ?? "");
+    if (!sourceSurfaceId) {
+      return { ok: false, error: "invalid source surface id" };
+    }
+
+    const baseState = sanitizePlayerState(actorState ?? {});
+    let fallbackYaw = normalizePromoYaw(baseState?.yaw, 0);
+    let spawnX = normalizePromoAxis(
+      Number(baseState?.x) + Math.sin(fallbackYaw) * 1.9,
+      0
+    );
+    let spawnZ = normalizePromoAxis(
+      Number(baseState?.z) + Math.cos(fallbackYaw) * 1.9,
+      -14
+    );
+    const mobPodOwnerKey = getMobPodOwnerKeyFromSurfaceId(sourceSurfaceId, this.getMobPodsMap(room));
+    if (mobPodOwnerKey) {
+      const mobPod = this.getMobPodsMap(room).get(mobPodOwnerKey) ?? null;
+      if (mobPod) {
+        fallbackYaw = normalizePromoYaw(mobPod.yaw, fallbackYaw);
+        spawnX = normalizePromoAxis(
+          Number(mobPod.x) + Math.sin(fallbackYaw) * MOB_POD_FRONT_SPAWN_DISTANCE,
+          spawnX
+        );
+        spawnZ = normalizePromoAxis(
+          Number(mobPod.z) + Math.cos(fallbackYaw) * MOB_POD_FRONT_SPAWN_DISTANCE,
+          spawnZ
+        );
+      }
+    }
+
+    const map = this.getDrawingEntitiesMap(room);
+    const previous = this.findDrawingEntityForOwnerSurface(room, ownerKey, sourceSurfaceId);
+    const createdAt = previous?.createdAt ?? Date.now();
+    const entityId = previous?.entityId ?? createDrawingEntityId(ownerKey, createdAt);
+    if (!entityId) {
+      return { ok: false, error: "invalid drawing entity id" };
+    }
+
+    const motionSeed = hashDrawingEntitySeed(entityId);
+    const phaseOffset = ((motionSeed % 6283) / 1000) % (Math.PI * 2);
+    const requestedMotionRadius = Math.max(
+      DRAWING_ENTITY_MIN_MOTION_RADIUS,
+      Math.min(
+        DRAWING_ENTITY_MAX_MOTION_RADIUS,
+        Number(rawPayload?.motionRadius) ||
+          Number(previous?.motionRadius) ||
+          DRAWING_ENTITY_DEFAULT_MOTION_RADIUS
+      )
+    );
+    const normalized = normalizeDrawingEntityEntry({
+      entityId,
+      ownerKey,
+      ownerName: actorName,
+      displayName: rawPayload?.displayName ?? rawPayload?.mobName ?? "",
+      sourceSurfaceId,
+      imageDataUrl,
+      x: spawnX,
+      y: normalizePromoAxis(0, 0, DRAWING_ENTITY_MIN_Y, DRAWING_ENTITY_MAX_Y),
+      z: spawnZ,
+      yaw: fallbackYaw,
+      scale: Number(rawPayload?.scale) || 1,
+      aspectRatio:
+        Number(rawPayload?.aspectRatio) ||
+        Number(rawPayload?.pixelWidth) / Math.max(1, Number(rawPayload?.pixelHeight) || 1) ||
+        1,
+      pixelWidth: rawPayload?.pixelWidth,
+      pixelHeight: rawPayload?.pixelHeight,
+      motionSeed,
+      motionRadius: requestedMotionRadius,
+      motionStretch: 0.44 + ((motionSeed >>> 9) % 1000) / 1000 * 0.4,
+      motionSpeed: 0.46 + ((motionSeed >>> 15) % 1000) / 1000 * 0.84,
+      bobAmplitude: 0.06 + ((motionSeed >>> 21) % 1000) / 1000 * 0.18,
+      phaseOffset,
+      createdAt,
+      updatedAt: createdAt
+    });
+    if (!normalized) {
+      return { ok: false, error: "invalid drawing entity payload" };
+    }
+
+    const previousNormalized = previous ? normalizeDrawingEntityEntry(previous) : null;
+    const previousSignature = previousNormalized ? JSON.stringify(previousNormalized) : "";
+    normalized.updatedAt = Date.now();
+    map.set(normalized.entityId, normalized);
+    for (const [entityKey, rawValue] of map.entries()) {
+      if (entityKey === normalized.entityId) {
+        continue;
+      }
+      const candidate = normalizeDrawingEntityEntry(rawValue);
+      if (!candidate) {
+        continue;
+      }
+      if (candidate.ownerKey === ownerKey && candidate.sourceSurfaceId === sourceSurfaceId) {
+        map.delete(entityKey);
+      }
+    }
+    if (map.size > MAX_DRAWING_ENTITIES) {
+      const overflow = Array.from(map.values())
+        .map((entry) => normalizeDrawingEntityEntry(entry))
+        .filter(Boolean)
+        .sort((a, b) => a.createdAt - b.createdAt);
+      while (overflow.length > MAX_DRAWING_ENTITIES) {
+        const removed = overflow.shift();
+        if (!removed) {
+          break;
+        }
+        map.delete(removed.entityId);
+      }
+    }
+    this.scheduleSurfacePaintSave();
+    const nextSignature = JSON.stringify(normalized);
+    return {
+      ok: true,
+      changed: previousSignature !== nextSignature,
+      action: previousNormalized ? "updated" : "created",
+      entity: normalized
+    };
+  }
+
+  removeDrawingEntity(room, actorOwnerKey, rawPayload = {}) {
+    if (!room) {
+      return { ok: false, error: "room not found" };
+    }
+    const ownerKey = normalizePromoOwnerKey(actorOwnerKey);
+    if (!ownerKey) {
+      return { ok: false, error: "invalid owner key" };
+    }
+    const map = this.getDrawingEntitiesMap(room);
+    const directEntityId = normalizeDrawingEntityId(rawPayload?.entityId ?? "");
+    let target = null;
+    if (directEntityId) {
+      target = normalizeDrawingEntityEntry(map.get(directEntityId));
+    }
+    if (!target) {
+      target = this.findDrawingEntityForOwnerSurface(
+        room,
+        ownerKey,
+        rawPayload?.sourceSurfaceId ?? ""
+      );
+    }
+    if (!target) {
+      return { ok: true, changed: false };
+    }
+    if (target.ownerKey !== ownerKey) {
+      return { ok: false, error: "owner denied edits" };
+    }
+    let removedCount = 0;
+    for (const [entityKey, rawValue] of map.entries()) {
+      const candidate = normalizeDrawingEntityEntry(rawValue);
+      if (!candidate) {
+        continue;
+      }
+      const matchesEntity = entityKey === target.entityId;
+      const matchesSurface =
+        target.sourceSurfaceId &&
+        candidate.ownerKey === ownerKey &&
+        candidate.sourceSurfaceId === target.sourceSurfaceId;
+      if (!matchesEntity && !matchesSurface) {
+        continue;
+      }
+      map.delete(entityKey);
+      removedCount += 1;
+    }
+    this.scheduleSurfacePaintSave();
+    return {
+      ok: true,
+      changed: removedCount > 0,
+      entityId: target.entityId,
+      sourceSurfaceId: target.sourceSurfaceId
+    };
+  }
+
+  getMobPodsMap(room) {
+    if (!room) {
+      return null;
+    }
+    if (!(room.mobPods instanceof Map)) {
+      room.mobPods = new Map();
+    }
+    return room.mobPods;
+  }
+
+  serializeMobPods(room) {
+    const map = this.getMobPodsMap(room);
+    if (!map) {
+      return [];
+    }
+    const list = [];
+    for (const rawValue of map.values()) {
+      const normalized = normalizeMobPodObject(rawValue);
+      if (!normalized) {
+        continue;
+      }
+      list.push(normalized);
+    }
+    list.sort((a, b) => a.updatedAt - b.updatedAt);
+    return list;
+  }
+
+  emitMobPodsUpdate(room) {
+    this.io.to(room.code).emit("mobpod:state", {
+      objects: this.serializeMobPods(room)
+    });
+  }
+
+  setMobPods(room, rawList, { persist = true } = {}) {
+    if (!room) {
+      return { ok: false, error: "room not found" };
+    }
+    const map = this.getMobPodsMap(room);
+    map.clear();
+    const list = Array.isArray(rawList) ? rawList : [];
+    for (const entry of list) {
+      const normalized = normalizeMobPodObject(entry);
+      if (!normalized) {
+        continue;
+      }
+      if (getPromoPlacementBlockReason(normalized.x, normalized.z, normalized.scale)) {
+        continue;
+      }
+      map.set(normalized.ownerKey, normalized);
+      if (map.size >= MAX_MOB_PODS) {
+        break;
+      }
+    }
+    if (persist) {
+      this.scheduleSurfacePaintSave();
+    }
+    return { ok: true };
+  }
+
+  upsertMobPod(room, actorOwnerKey, actorName, rawPayload = {}) {
+    if (!room) {
+      return { ok: false, error: "room not found" };
+    }
+    const ownerKey = normalizePromoOwnerKey(actorOwnerKey);
+    if (!ownerKey) {
+      return { ok: false, error: "invalid owner key" };
+    }
+    const map = this.getMobPodsMap(room);
+    const previous = map.get(ownerKey) ?? null;
+    const fallback = previous
+      ? { ...previous }
+      : {
+          ownerKey,
+          ownerName: actorName,
+          x: 0,
+          y: 0,
+          z: 0,
+          yaw: 0,
+          scale: 1,
+          updatedAt: Date.now()
+        };
+    const normalized = normalizeMobPodObject(
+      {
+        ...rawPayload,
+        ownerKey,
+        ownerName: previous?.ownerName ?? actorName
+      },
+      fallback
+    );
+    if (!normalized) {
+      return { ok: false, error: "invalid mob pod payload" };
+    }
+    const hasPositionChange =
+      !previous ||
+      Math.abs(Number(normalized.x) - Number(previous.x)) > 0.001 ||
+      Math.abs(Number(normalized.z) - Number(previous.z)) > 0.001;
+    const hasScaleChange =
+      !previous ||
+      Math.abs(Number(normalized.scale) - Number(previous.scale)) > 0.001;
+    if (hasPositionChange || hasScaleChange) {
+      const blockReason = getPromoPlacementBlockReason(normalized.x, normalized.z, normalized.scale);
+      if (blockReason === "spawn") {
+        return { ok: false, error: "placement blocked at spawn" };
+      }
+      if (blockReason === "bridge") {
+        return { ok: false, error: "placement blocked on bridge" };
+      }
+      if (blockReason === "portal") {
+        return { ok: false, error: "placement blocked at portal" };
+      }
+      if (blockReason === "center") {
+        return { ok: false, error: "placement blocked at center" };
+      }
+      if (blockReason === "land") {
+        return { ok: false, error: "placement blocked on land" };
+      }
+    }
+    if (!previous && map.size >= MAX_MOB_PODS) {
+      return { ok: false, error: "mob pod limit reached" };
+    }
+    normalized.updatedAt = Date.now();
+    normalized.ownerName = normalizePromoName(actorName);
+    map.set(ownerKey, normalized);
+    this.scheduleSurfacePaintSave();
+    return {
+      ok: true,
+      changed: true,
+      object: normalized
+    };
+  }
+
+  removeMobPod(room, actorOwnerKey) {
+    if (!room) {
+      return { ok: false, error: "room not found" };
+    }
+    const ownerKey = normalizePromoOwnerKey(actorOwnerKey);
+    if (!ownerKey) {
+      return { ok: false, error: "invalid owner key" };
+    }
+    const map = this.getMobPodsMap(room);
+    const existing = normalizeMobPodObject(map.get(ownerKey));
+    if (!existing) {
+      return { ok: true, changed: false };
+    }
+    map.delete(ownerKey);
+    const surfacePrefix = `${MOB_POD_SURFACE_PREFIX}${ownerKey}`;
+    if (room.surfacePaint instanceof Map) {
+      for (const surfaceId of Array.from(room.surfacePaint.keys())) {
+        if (String(surfaceId ?? "").trim().toLowerCase().startsWith(surfacePrefix)) {
+          room.surfacePaint.delete(surfaceId);
+        }
+      }
+    }
+    const drawingMap = this.getDrawingEntitiesMap(room);
+    if (drawingMap instanceof Map) {
+      for (const [entityId, rawValue] of Array.from(drawingMap.entries())) {
+        const entry = normalizeDrawingEntityEntry(rawValue);
+        if (!entry) {
+          continue;
+        }
+        if (entry.ownerKey !== ownerKey) {
+          continue;
+        }
+        if (!String(entry.sourceSurfaceId ?? "").trim().toLowerCase().startsWith(surfacePrefix)) {
+          continue;
+        }
+        drawingMap.delete(entityId);
+      }
+    }
+    this.scheduleSurfacePaintSave();
+    return {
+      ok: true,
+      changed: true,
+      object: existing
     };
   }
 
@@ -2862,6 +3467,17 @@ export class RoomService {
       const promoEntry = promoMap instanceof Map ? promoMap.get(promoOwnerKey) : null;
       const allowOthersDraw = normalizeBooleanFlag(promoEntry?.allowOthersDraw, false);
       if (actorKey !== promoOwnerKey && !allowOthersDraw) {
+        return { ok: false, error: "owner denied edits" };
+      }
+    }
+    const mobPodMap = this.getMobPodsMap(room);
+    const mobPodOwnerKey = getMobPodOwnerKeyFromSurfaceId(surfaceId, mobPodMap);
+    if (mobPodOwnerKey) {
+      const actorKey = normalizePromoOwnerKey(actorOwnerKey);
+      if (!actorKey) {
+        return { ok: false, error: "invalid owner key" };
+      }
+      if (actorKey !== mobPodOwnerKey) {
         return { ok: false, error: "owner denied edits" };
       }
     }

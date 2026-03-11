@@ -1296,7 +1296,7 @@ canvas {
 }
 
 #surface-painter-panel {
-  width: min(95vw, 700px);
+  width: min(96vw, 980px);
   display: grid;
   gap: 8px;
   padding: 12px;
@@ -1310,7 +1310,23 @@ canvas {
 }
 
 #surface-painter-title {
-  display: none;
+  display: block;
+  margin: 0;
+  color: #d8efff;
+  font: 700 0.7rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.07em;
+}
+
+#surface-painter-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 10px;
+  align-items: start;
+}
+
+#surface-painter-main {
+  display: grid;
+  gap: 8px;
 }
 
 #surface-painter-canvas {
@@ -1323,11 +1339,183 @@ canvas {
   touch-action: none;
 }
 
+#surface-painter-mob-sidebar {
+  display: grid;
+  gap: 10px;
+}
+
+.surface-painter-mob-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(147, 198, 236, 0.42);
+  border-radius: 10px;
+  background: rgba(11, 28, 45, 0.82);
+}
+
+.surface-painter-mob-heading,
+.promo-panel-subhead {
+  color: #d5efff;
+  font: 700 0.62rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.06em;
+}
+
+.placement-panel-section {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  scroll-margin-top: 10px;
+  transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+
+.placement-panel-section.is-focus-target {
+  border-color: rgba(255, 210, 140, 0.84);
+  background: rgba(61, 39, 12, 0.34);
+  box-shadow: inset 0 0 0 1px rgba(255, 196, 116, 0.14);
+}
+
+#surface-painter-mob-preview-wrap {
+  display: grid;
+  place-items: center;
+  min-height: 156px;
+  border: 1px solid rgba(157, 205, 241, 0.42);
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at 50% 22%, rgba(202, 234, 255, 0.16), transparent 46%),
+    linear-gradient(180deg, rgba(13, 30, 47, 0.92), rgba(7, 18, 28, 0.98));
+}
+
+#surface-painter-mob-preview {
+  max-width: 100%;
+  max-height: 156px;
+  object-fit: contain;
+}
+
+.surface-painter-mob-label {
+  color: #a7cff0;
+  font: 700 0.56rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.05em;
+}
+
+#surface-painter-mob-radius-value {
+  color: #dcefff;
+  font: 700 0.58rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.04em;
+}
+
+.surface-painter-mob-range-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+#surface-painter-mob-name {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid rgba(177, 210, 240, 0.64);
+  border-radius: 8px;
+  background: rgba(11, 26, 41, 0.92);
+  color: #edf6ff;
+  font: 600 0.7rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+}
+
+#surface-painter-mob-radius {
+  width: 100%;
+}
+
+#surface-painter-mob-status,
+#surface-painter-mob-list,
+#mob-pod-help,
+#mob-pod-status {
+  margin: 0;
+  color: #dcefff;
+  font: 600 0.58rem/1.35 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.03em;
+}
+
+#surface-painter-mob-list {
+  display: grid;
+  gap: 8px;
+}
+
+.surface-painter-mob-list-item {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid rgba(136, 196, 235, 0.34);
+  border-radius: 10px;
+  background: rgba(7, 21, 34, 0.78);
+}
+
+.surface-painter-mob-list-item.current {
+  border-color: rgba(255, 213, 136, 0.78);
+  box-shadow: 0 0 0 1px rgba(255, 194, 104, 0.18);
+}
+
+.surface-painter-mob-thumb {
+  width: 54px;
+  height: 54px;
+  border-radius: 10px;
+  border: 1px solid rgba(160, 205, 239, 0.32);
+  background: rgba(10, 24, 38, 0.94);
+  object-fit: contain;
+}
+
+.surface-painter-mob-meta {
+  display: grid;
+  gap: 4px;
+}
+
+.surface-painter-mob-name-row {
+  color: #eef7ff;
+  font: 700 0.62rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.04em;
+}
+
+.surface-painter-mob-copy {
+  color: #cfe7fa;
+  font: 600 0.54rem/1.3 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+}
+
+.surface-painter-mob-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.surface-painter-mob-actions button {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  border: 1px solid rgba(169, 205, 236, 0.58);
+  border-radius: 8px;
+  background: rgba(10, 24, 39, 0.88);
+  color: #e2f3ff;
+  font: 700 0.54rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
 #surface-painter-toolbar {
   display: flex;
   flex-wrap: wrap;
   gap: 8px 10px;
   align-items: center;
+}
+
+#surface-painter-toolbar .surface-painter-tool-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#surface-painter-toolbar .surface-painter-tool-group-size {
+  flex: 1 1 220px;
+  min-width: 220px;
 }
 
 #surface-painter-toolbar label {
@@ -1350,6 +1538,26 @@ canvas {
 #surface-painter-size {
   flex: 1 1 160px;
   min-width: 160px;
+}
+
+#surface-painter-panel.mob-pod-surface #surface-painter-bg-group {
+  display: none;
+}
+
+#surface-painter-panel.mob-pod-surface #surface-painter-size-group {
+  order: 1;
+}
+
+#surface-painter-panel.mob-pod-surface #surface-painter-color-group {
+  order: 2;
+}
+
+#surface-painter-panel.mob-pod-surface #surface-painter-fill {
+  order: 3;
+}
+
+#surface-painter-panel.mob-pod-surface #surface-painter-eraser {
+  display: none;
 }
 
 #surface-painter-fill,
@@ -1688,6 +1896,105 @@ canvas {
   backdrop-filter: blur(5px);
 }
 
+body.placement-selector-open {
+  cursor: default;
+}
+
+#placement-selector {
+  position: fixed;
+  inset: 0;
+  z-index: 42;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(4, 10, 18, 0.56);
+  backdrop-filter: blur(10px);
+}
+
+#placement-selector-card {
+  width: min(92vw, 620px);
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid rgba(179, 208, 236, 0.62);
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at top, rgba(81, 143, 189, 0.18), transparent 58%),
+    rgba(9, 19, 31, 0.96);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.34);
+}
+
+.placement-selector-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.placement-selector-title {
+  color: #dff3ff;
+  font: 700 0.86rem/1.2 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.07em;
+}
+
+#placement-selector-close {
+  min-width: 62px;
+  height: 30px;
+  border: 1px solid rgba(175, 208, 238, 0.62);
+  border-radius: 7px;
+  background: rgba(12, 30, 47, 0.82);
+  color: #dcedfc;
+  font: 700 0.58rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+
+.placement-selector-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.placement-selector-option {
+  display: grid;
+  gap: 8px;
+  min-height: 168px;
+  padding: 16px;
+  border: 1px solid rgba(175, 208, 238, 0.42);
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(20, 44, 66, 0.94), rgba(10, 22, 35, 0.96));
+  color: #edf7ff;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    background 140ms ease;
+}
+
+.placement-selector-option strong {
+  font: 700 0.82rem/1.15 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.06em;
+}
+
+.placement-selector-option span {
+  color: #bfdcf2;
+  font: 600 0.68rem/1.45 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.03em;
+}
+
+.placement-selector-option:hover,
+.placement-selector-option:focus-visible {
+  transform: translateY(-2px);
+  border-color: rgba(255, 216, 150, 0.82);
+  box-shadow: 0 16px 30px rgba(0, 0, 0, 0.22);
+  background:
+    linear-gradient(180deg, rgba(47, 62, 26, 0.96), rgba(17, 26, 20, 0.98));
+  outline: none;
+}
+
 body:not(.is-mobile-ui) #promo-place-btn {
   display: none;
 }
@@ -1914,6 +2221,12 @@ body:not(.is-mobile-ui) #promo-place-btn {
 #promo-draw-size:disabled {
   opacity: 0.62;
   cursor: default;
+}
+
+.promo-panel-divider {
+  height: 1px;
+  margin: 6px 0 2px;
+  background: linear-gradient(90deg, transparent, rgba(172, 209, 238, 0.48), transparent);
 }
 
 #promo-media-name,
@@ -2310,6 +2623,23 @@ body.is-mobile-ui #chat-ui.mobile-fullscreen #chat-expand {
 
 body.is-mobile-ui #promo-hotkey-hint {
   display: none;
+}
+
+body.is-mobile-ui #placement-selector {
+  padding: calc(env(safe-area-inset-top, 0px) + 14px) 14px calc(env(safe-area-inset-bottom, 0px) + 14px);
+}
+
+body.is-mobile-ui #placement-selector-card {
+  width: min(100%, 520px);
+  max-height: 100%;
+}
+
+body.is-mobile-ui .placement-selector-options {
+  grid-template-columns: 1fr;
+}
+
+body.is-mobile-ui .placement-selector-option {
+  min-height: 128px;
 }
 
 body.is-mobile-ui #chat-ui.mobile-fullscreen #chat-log {
@@ -2856,7 +3186,15 @@ body.is-mobile-ui #mobile-move-stick {
   }
 
   #surface-painter-title {
-    display: none;
+    display: block;
+  }
+
+  #surface-painter-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #surface-painter-mob-sidebar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   #surface-painter-toolbar {
@@ -2953,7 +3291,8 @@ body.is-mobile-ui #surface-painter-panel {
 
 /* ① title row — minimal */
 body.is-mobile-ui #surface-painter-title {
-  display: none;
+  display: block;
+  font-size: 0.56rem;
 }
 
 /* ② toolbar row — single horizontal flex line, NO scroll */
@@ -2969,6 +3308,16 @@ body.is-mobile-ui #surface-painter-toolbar {
   /* reset grid-only props */
   grid-template-columns: unset;
   overscroll-behavior: unset;
+}
+
+body.is-mobile-ui #surface-painter-toolbar .surface-painter-tool-group {
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+body.is-mobile-ui #surface-painter-toolbar .surface-painter-tool-group-size {
+  flex: 1 1 120px;
+  min-width: 120px;
 }
 
 body.is-mobile-ui #surface-painter-toolbar label {
@@ -3024,6 +3373,22 @@ body.is-mobile-ui #surface-painter-canvas {
 }
 
 /* ④ actions row — flex, 저장 prominent */
+body.is-mobile-ui #surface-painter-layout {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 6px;
+  min-height: 0;
+}
+
+body.is-mobile-ui #surface-painter-main {
+  min-height: 0;
+}
+
+body.is-mobile-ui #surface-painter-mob-sidebar {
+  grid-row: 2;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 body.is-mobile-ui #surface-painter-actions {
   grid-row: 3;
   display: grid;
@@ -3049,6 +3414,18 @@ body.is-mobile-ui #surface-painter-actions button {
   height: 40px;
   font-size: 0.6rem;
   letter-spacing: 0.04em;
+}
+
+body.is-mobile-ui .surface-painter-mob-card {
+  padding: 8px;
+}
+
+body.is-mobile-ui #surface-painter-mob-preview-wrap {
+  min-height: 104px;
+}
+
+body.is-mobile-ui #surface-painter-mob-preview {
+  max-height: 104px;
 }
 
 /* Save button: most prominent */

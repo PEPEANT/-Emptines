@@ -27,6 +27,10 @@ function showBootError(message) {
 }
 
 function boot() {
+  const existingGame = window.__emptinesGame;
+  if (existingGame && typeof existingGame.destroy === "function") {
+    existingGame.destroy();
+  }
   if (!supportsWebGL()) {
     showBootError("이 브라우저에서는 WebGL을 사용할 수 없습니다.");
     return;
@@ -58,4 +62,20 @@ if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", boot);
 } else {
   boot();
+}
+
+window.addEventListener("beforeunload", () => {
+  const game = window.__emptinesGame;
+  if (game && typeof game.destroy === "function") {
+    game.destroy();
+  }
+});
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    const game = window.__emptinesGame;
+    if (game && typeof game.destroy === "function") {
+      game.destroy();
+    }
+  });
 }

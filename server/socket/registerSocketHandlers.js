@@ -652,6 +652,20 @@ export function registerSocketHandlers({
       socket.emit("promo:state", { objects: roomService.serializePromoObjects(room) });
     };
 
+    const emitMobPodState = () => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) return;
+      socket.emit("mobpod:state", { objects: roomService.serializeMobPods(room) });
+    };
+
+    const emitDrawingEntityState = () => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) return;
+      socket.emit("drawing:entity:state", {
+        entities: roomService.serializeDrawingEntities(room)
+      });
+    };
+
     const emitRuntimePolicyState = () => {
       const persistenceStatus = roomService?.getPersistenceStatus?.() ?? null;
       socket.emit("runtime:policy", {
@@ -735,6 +749,8 @@ export function registerSocketHandlers({
         emitMainPortalAdState();
         emitPortalOpenCatchup();
         emitPromoState();
+        emitMobPodState();
+        emitDrawingEntityState();
         emitObjectState();
         emitChatHistoryState();
       }
@@ -803,6 +819,8 @@ export function registerSocketHandlers({
     emitPlatformState();
     emitRopeState();
     emitPromoState();
+    emitMobPodState();
+    emitDrawingEntityState();
     emitObjectState();
     emitChatHistoryState();
     roomService.emitRoomList(socket);
@@ -1833,6 +1851,144 @@ export function registerSocketHandlers({
       emitPromoState();
     });
 
+    socket.on("mobpod:state:request", () => {
+      emitMobPodState();
+    });
+
+    socket.on("drawing:entity:state:request", () => {
+      emitDrawingEntityState();
+    });
+
+    socket.on("drawing:entity:spawn", async (payload = {}, ackFn) => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        ack(ackFn, { ok: false, error: "room not found" });
+        return;
+      }
+      if (!room.players?.has?.(socket.id)) {
+        ack(ackFn, { ok: false, error: "player not in room" });
+        return;
+      }
+
+      const isHost = roomService.isHost(room, socket.id);
+      const persistenceError = getPersistentStateBlockReason(config, "drawing entity");
+      if (persistenceError) {
+        ack(ackFn, { ok: false, error: persistenceError });
+        return;
+      }
+      const paintModeError = getFeatureModeBlockReason(
+        config?.surfacePaintMode,
+        "drawing entity",
+        isHost
+      );
+      if (paintModeError) {
+        ack(ackFn, { ok: false, error: paintModeError });
+        return;
+      }
+      const spawnGuard = consumePromoOperationBudget({
+        socketState: socketPromoRateState,
+        ipStateMap: promoOpRateStateByIp,
+        clientIp: socket.data.clientIp ?? clientIp,
+        isHost,
+        antiAbuse
+      });
+      if (!spawnGuard.ok) {
+        ack(ackFn, spawnGuard);
+        return;
+      }
+
+      const ownerKey = sanitizeOwnerKey(socket.data.playerKey ?? "");
+      if (!ownerKey || ownerKey.length < 8) {
+        ack(ackFn, { ok: false, error: "owner key required" });
+        return;
+      }
+      const player = room.players.get(socket.id);
+      const actorName = sanitizeName(player?.name ?? socket.data.playerName);
+      const result = roomService.spawnDrawingEntity(
+        room,
+        ownerKey,
+        actorName,
+        payload,
+        player?.state ?? null
+      );
+      if (!result.ok) {
+        ack(ackFn, result);
+        return;
+      }
+
+      roomService.emitDrawingEntitiesUpdate(room);
+      if (!(await flushPersistentStateIfRequested(payload, ackFn, "drawing entity"))) {
+        return;
+      }
+      ack(ackFn, {
+        ok: true,
+        changed: Boolean(result.changed),
+        action: String(result.action ?? "created"),
+        entity: result.entity ?? null
+      });
+    });
+
+    socket.on("drawing:entity:remove", async (payload = {}, ackFn) => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        ack(ackFn, { ok: false, error: "room not found" });
+        return;
+      }
+      if (!room.players?.has?.(socket.id)) {
+        ack(ackFn, { ok: false, error: "player not in room" });
+        return;
+      }
+
+      const isHost = roomService.isHost(room, socket.id);
+      const persistenceError = getPersistentStateBlockReason(config, "drawing entity");
+      if (persistenceError) {
+        ack(ackFn, { ok: false, error: persistenceError });
+        return;
+      }
+      const paintModeError = getFeatureModeBlockReason(
+        config?.surfacePaintMode,
+        "drawing entity",
+        isHost
+      );
+      if (paintModeError) {
+        ack(ackFn, { ok: false, error: paintModeError });
+        return;
+      }
+      const removeGuard = consumePromoOperationBudget({
+        socketState: socketPromoRateState,
+        ipStateMap: promoOpRateStateByIp,
+        clientIp: socket.data.clientIp ?? clientIp,
+        isHost,
+        antiAbuse
+      });
+      if (!removeGuard.ok) {
+        ack(ackFn, removeGuard);
+        return;
+      }
+
+      const ownerKey = sanitizeOwnerKey(socket.data.playerKey ?? "");
+      if (!ownerKey || ownerKey.length < 8) {
+        ack(ackFn, { ok: false, error: "owner key required" });
+        return;
+      }
+      const result = roomService.removeDrawingEntity(room, ownerKey, payload);
+      if (!result.ok) {
+        ack(ackFn, result);
+        return;
+      }
+
+      roomService.emitDrawingEntitiesUpdate(room);
+      if (!(await flushPersistentStateIfRequested(payload, ackFn, "drawing entity"))) {
+        return;
+      }
+      ack(ackFn, {
+        ok: true,
+        changed: Boolean(result.changed),
+        entityId: result.entityId ?? "",
+        sourceSurfaceId: result.sourceSurfaceId ?? ""
+      });
+    });
+
     socket.on("promo:upsert", async (payload = {}, ackFn) => {
       const room = roomService.getRoomBySocket(socket);
       if (!room) {
@@ -1945,6 +2101,121 @@ export function registerSocketHandlers({
         ok: true,
         changed: Boolean(result.changed),
         clearedSurfacePaintCount: Math.max(0, Math.trunc(Number(result?.clearedSurfacePaintCount) || 0))
+      });
+    });
+
+    socket.on("mobpod:upsert", async (payload = {}, ackFn) => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        ack(ackFn, { ok: false, error: "room not found" });
+        return;
+      }
+      if (!room.players?.has?.(socket.id)) {
+        ack(ackFn, { ok: false, error: "player not in room" });
+        return;
+      }
+      const isHost = roomService.isHost(room, socket.id);
+      const persistenceError = getPersistentStateBlockReason(config, "mob pod");
+      if (persistenceError) {
+        ack(ackFn, { ok: false, error: persistenceError });
+        return;
+      }
+      const promoModeError = getFeatureModeBlockReason(config?.promoMode, "mob pod", isHost);
+      if (promoModeError) {
+        ack(ackFn, { ok: false, error: promoModeError });
+        return;
+      }
+      const promoGuard = consumePromoOperationBudget({
+        socketState: socketPromoRateState,
+        ipStateMap: promoOpRateStateByIp,
+        clientIp: socket.data.clientIp ?? clientIp,
+        isHost,
+        antiAbuse
+      });
+      if (!promoGuard.ok) {
+        ack(ackFn, promoGuard);
+        return;
+      }
+      const ownerKey = sanitizeOwnerKey(socket.data.playerKey ?? "");
+      if (!ownerKey || ownerKey.length < 8) {
+        ack(ackFn, { ok: false, error: "owner key required" });
+        return;
+      }
+      const player = room.players.get(socket.id);
+      const actorName = sanitizeName(player?.name ?? socket.data.playerName);
+      const result = roomService.upsertMobPod(room, ownerKey, actorName, payload);
+      if (!result.ok) {
+        ack(ackFn, result);
+        return;
+      }
+      roomService.emitMobPodsUpdate(room);
+      roomService.emitRoomUpdate(room);
+      if (!(await flushPersistentStateIfRequested(payload, ackFn, "mob pod"))) {
+        return;
+      }
+      ack(ackFn, {
+        ok: true,
+        changed: Boolean(result.changed),
+        object: result.object ?? null
+      });
+    });
+
+    socket.on("mobpod:remove", async (payload = {}, ackFn) => {
+      const room = roomService.getRoomBySocket(socket);
+      if (!room) {
+        ack(ackFn, { ok: false, error: "room not found" });
+        return;
+      }
+      if (!room.players?.has?.(socket.id)) {
+        ack(ackFn, { ok: false, error: "player not in room" });
+        return;
+      }
+      const isHost = roomService.isHost(room, socket.id);
+      const persistenceError = getPersistentStateBlockReason(config, "mob pod");
+      if (persistenceError) {
+        ack(ackFn, { ok: false, error: persistenceError });
+        return;
+      }
+      const promoModeError = getFeatureModeBlockReason(config?.promoMode, "mob pod", isHost);
+      if (promoModeError) {
+        ack(ackFn, { ok: false, error: promoModeError });
+        return;
+      }
+      const promoGuard = consumePromoOperationBudget({
+        socketState: socketPromoRateState,
+        ipStateMap: promoOpRateStateByIp,
+        clientIp: socket.data.clientIp ?? clientIp,
+        isHost,
+        antiAbuse
+      });
+      if (!promoGuard.ok) {
+        ack(ackFn, promoGuard);
+        return;
+      }
+      const ownerKey = sanitizeOwnerKey(socket.data.playerKey ?? "");
+      if (!ownerKey || ownerKey.length < 8) {
+        ack(ackFn, { ok: false, error: "owner key required" });
+        return;
+      }
+      const result = roomService.removeMobPod(room, ownerKey);
+      if (!result.ok) {
+        ack(ackFn, result);
+        return;
+      }
+      if (result.changed) {
+        roomService.emitMobPodsUpdate(room);
+        roomService.emitDrawingEntitiesUpdate(room);
+        io.to(room.code).emit("paint:state", {
+          surfaces: roomService.serializeSurfacePaint(room)
+        });
+        roomService.emitRoomUpdate(room);
+        if (!(await flushPersistentStateIfRequested(payload, ackFn, "mob pod"))) {
+          return;
+        }
+      }
+      ack(ackFn, {
+        ok: true,
+        changed: Boolean(result.changed)
       });
     });
 

@@ -24,6 +24,14 @@ import { isLikelyTouchDevice } from "../utils/device.js";
 import { lerpAngle } from "../utils/math.js";
 import { disposeMeshTree } from "../utils/threeUtils.js";
 import { RUNTIME_TUNING } from "./config/runtimeTuning.js";
+import {
+  DEFAULT_A_ZONE_PORTAL_TARGET_URL as A_ZONE_FIXED_PORTAL_TARGET_URL,
+  DEFAULT_HALL_PORTAL_TARGET_URL as HALL_FIXED_PORTAL_TARGET_URL,
+  DEFAULT_PORTAL_TARGET_URL,
+  PORTAL_DISPLAY_DEFAULTS as SHARED_PORTAL_DISPLAY_DEFAULTS,
+  ROOM_ZONE_IDS,
+  ROOM_ZONE_PORTAL_OBJECT_ID_BY_ZONE
+} from "../../../shared/portalConfig.js";
 
 function parseVec3(raw, fallback) {
   const base = Array.isArray(fallback) ? fallback : [0, 0, 0];
@@ -95,11 +103,6 @@ const MAX_PORTAL_DISPLAY_TITLE_CHARS = 40;
 const MAX_PORTAL_DISPLAY_LINE_CHARS = 72;
 const MAX_BILLBOARD_VIDEO_DATA_URL_CHARS = 30_000_000;
 const MAX_BILLBOARD_VIDEO_BYTES = 20 * 1024 * 1024;
-const DEFAULT_PORTAL_TARGET_URL = "https://singularity-ox.onrender.com/?v=0.2";
-const A_ZONE_FIXED_PORTAL_TARGET_URL = "https://reclaim-fps.onrender.com/";
-const HALL_FIXED_PORTAL_TARGET_URL =
-  "https://performance-i3w5.onrender.com/performance/?host=0&room=event01&from=emptines";
-const ROOM_ZONE_IDS = Object.freeze(["lobby", "fps", "ox"]);
 const ROOM_ZONE_LABELS = Object.freeze({
   lobby: "대기방",
   fps: "FPS 존",
@@ -109,24 +112,15 @@ const A_ZONE_FIXED_PORTAL_IMAGE_URL = new URL("../../../png/REC_FPS.png", import
 const HALL_FIXED_PORTAL_IMAGE_URL = new URL("../../../png/PER.png", import.meta.url).href;
 const PORTAL_DISPLAY_DEFAULTS = Object.freeze({
   portal1: Object.freeze({
-    mode: "text",
-    title: "OX 퀴즈 대회",
-    line2: "포탈 1 링크는 패널에서 변경",
-    line3: "",
+    ...SHARED_PORTAL_DISPLAY_DEFAULTS.portal1,
     imageUrl: PORTAL_TOP_AD_IMAGE_URL
   }),
   portal2: Object.freeze({
-    mode: "text",
-    title: "마인크래프트 FPS 온라인",
-    line2: "실시간 플레이 가능",
-    line3: "",
+    ...SHARED_PORTAL_DISPLAY_DEFAULTS.portal2,
     imageUrl: A_ZONE_FIXED_PORTAL_IMAGE_URL
   }),
   hall: Object.freeze({
-    mode: "time",
-    title: "공연장",
-    line2: "",
-    line3: "",
+    ...SHARED_PORTAL_DISPLAY_DEFAULTS.hall,
     imageUrl: HALL_FIXED_PORTAL_IMAGE_URL
   })
 });
@@ -137,11 +131,7 @@ const CITY_AD_BILLBOARD_BASE_PREFIX = "city_ad_board_";
 const OBJECT_EDITOR_SETTINGS_STORAGE_KEY = "objectEditorSettings_v1";
 const OBJECT_POSITIONS_STORAGE_KEY = "objPositions_v1";
 const HOST_LINK_FIXED_NAME = "HOST";
-const PORTAL_MOVABLE_IDS = Object.freeze({
-  ox: "portal_ox",
-  fps: "portal_fps",
-  hall: "portal_hall"
-});
+const PORTAL_MOVABLE_IDS = ROOM_ZONE_PORTAL_OBJECT_ID_BY_ZONE;
 const PLAZA_BILLBOARD_MOVABLE_IDS = Object.freeze({
   right: "plaza_billboard_right",
   left: "plaza_billboard_left"
@@ -188,6 +178,18 @@ const PLAYER_PLACEABLE_BLOCKED_MESSAGE =
   "포탈존 , 스폰지점 , 다리 , 중앙 에서는 설치가 불가능합니다";
 const PROMO_BLOCKED_CENTER_RADIUS = 11.5;
 const PROMO_BLOCKED_PORTAL_RADIUS_PADDING = 1.9;
+const MAX_DRAWING_ENTITY_IMAGE_CHARS = 4_200_000;
+const DRAWING_ENTITY_MIN_SCALE = 0.55;
+const DRAWING_ENTITY_MAX_SCALE = 2.8;
+const DRAWING_ENTITY_BASE_HEIGHT = 1.28;
+const DRAWING_ENTITY_MIN_HEIGHT = 0.74;
+const DRAWING_ENTITY_MAX_HEIGHT = 2.48;
+const DRAWING_ENTITY_BACKGROUND_TOLERANCE = 28;
+const DRAWING_ENTITY_TRIM_PADDING_PX = 14;
+const DRAWING_ENTITY_MIN_MOTION_RADIUS = 0.18;
+const DRAWING_ENTITY_DEFAULT_MOTION_RADIUS = 1.4;
+const DRAWING_ENTITY_MAX_MOTION_RADIUS = 3.6;
+const MOB_POD_SURFACE_BG_COLOR = "#d8dde5";
 
 function resolveRuntimeAssetUrl(relativePath) {
   const normalized = String(relativePath ?? "").trim().replace(/^\/+/, "");
@@ -462,6 +464,16 @@ export class GameRuntime {
     this.promoOwnerKey = this.getOrCreatePromoOwnerKey();
     this.promoObjects = new Map();
     this.promoObjectVisuals = new Map();
+    this.mobPodObjects = new Map();
+    this.mobPodObjectVisuals = new Map();
+    this.drawingEntities = new Map();
+    this.drawingEntityVisuals = new Map();
+    this.drawingEntitySpawnInFlight = false;
+    this.drawingEntityRemoveInFlight = false;
+    this.mobPodSetInFlight = false;
+    this.mobPodRemoveInFlight = false;
+    this.surfacePainterMobNameDrafts = new Map();
+    this.surfacePainterMobRadiusDrafts = new Map();
     this.promoCollisionBoxes = [];
     this.promoPlatformCandidateBuffer = [];
     this.promoSetInFlight = false;
@@ -474,6 +486,8 @@ export class GameRuntime {
     this.promoMediaRemoved = false;
     this.promoPanelMobileOpen = false;
     this.promoPanelDesktopOpen = false;
+    this.placementSelectorOpen = false;
+    this.placementPanelFocusMode = "promo";
     this.promoDrawContext = null;
     this.promoDrawCanvasInitialized = false;
     this.promoDrawPointerId = null;
@@ -492,6 +506,11 @@ export class GameRuntime {
     this.promoPlacementPreviewCurrentScaleY = PROMO_DEFAULT_SCALE;
     this.promoPlacementPreviewBlockReason = "";
     this.promoPlacementPreviewTransform = null;
+    this.mobPodPlacementPreviewActive = false;
+    this.mobPodPlacementPreviewRepositionOwn = false;
+    this.mobPodPlacementPreviewMesh = null;
+    this.mobPodPlacementPreviewBlockReason = "";
+    this.mobPodPlacementPreviewTransform = null;
     this.runtimePolicyState = {
       promoMode: "",
       surfacePaintMode: "",
@@ -526,6 +545,9 @@ export class GameRuntime {
     this.surfacePainterContext = null;
     this.surfacePainterColorInputEl = null;
     this.surfacePainterBgColorInputEl = null;
+    this.surfacePainterColorGroupEl = null;
+    this.surfacePainterSizeGroupEl = null;
+    this.surfacePainterBgGroupEl = null;
     this.surfacePainterSizeInputEl = null;
     this.surfacePainterExportBtnEl = null;
     this.surfacePainterImportBtnEl = null;
@@ -533,6 +555,15 @@ export class GameRuntime {
     this.surfacePainterClearBtnEl = null;
     this.surfacePainterCancelBtnEl = null;
     this.surfacePainterSaveBtnEl = null;
+    this.surfacePainterSpawnMobBtnEl = null;
+    this.surfacePainterRemoveMobBtnEl = null;
+    this.surfacePainterMobSidebarEl = null;
+    this.surfacePainterMobPreviewEl = null;
+    this.surfacePainterMobNameInputEl = null;
+    this.surfacePainterMobRadiusInputEl = null;
+    this.surfacePainterMobRadiusValueEl = null;
+    this.surfacePainterMobStatusEl = null;
+    this.surfacePainterMobListEl = null;
     this.surfacePainterPromoRepositionBtnEl = null;
     this.surfacePainterPromoRemoveBtnEl = null;
     this.surfacePainterPromoScaleDownBtnEl = null;
@@ -565,6 +596,7 @@ export class GameRuntime {
     this.surfacePaintProbeWorldPosition = new THREE.Vector3();
     this.surfacePaintProbeCameraLocal = new THREE.Vector3();
     this.surfacePaintProbeForwardVector = new THREE.Vector3();
+    this.drawingEntityCameraFacingTarget = new THREE.Vector3();
     this.plazaBillboardAdTexture = null;
     this.plazaBillboardLeftCustomTexture = null;
     this.plazaBillboardLeftVideoEl = null;
@@ -758,6 +790,7 @@ export class GameRuntime {
     this.localChatLabel = null;
     this.localChatExpireAt = 0;
     this.loopRafCallback = () => this.loop();
+    this.loopRafId = 0;
     this.lastActiveMoveInputAt = 0;
     this.npcPlayerLastSamplePosition.copy(this.playerPosition);
     this.cloudUpdateClock = 0;
@@ -923,6 +956,9 @@ export class GameRuntime {
     this.surfacePainterCanvasEl = document.getElementById("surface-painter-canvas");
     this.surfacePainterColorInputEl = document.getElementById("surface-painter-color");
     this.surfacePainterBgColorInputEl = document.getElementById("surface-painter-bg");
+    this.surfacePainterColorGroupEl = document.getElementById("surface-painter-color-group");
+    this.surfacePainterSizeGroupEl = document.getElementById("surface-painter-size-group");
+    this.surfacePainterBgGroupEl = document.getElementById("surface-painter-bg-group");
     this.surfacePainterSizeInputEl = document.getElementById("surface-painter-size");
     this.surfacePainterExportBtnEl = document.getElementById("surface-painter-export");
     this.surfacePainterImportBtnEl = document.getElementById("surface-painter-import");
@@ -930,6 +966,15 @@ export class GameRuntime {
     this.surfacePainterClearBtnEl = document.getElementById("surface-painter-clear");
     this.surfacePainterCancelBtnEl = document.getElementById("surface-painter-cancel");
     this.surfacePainterSaveBtnEl = document.getElementById("surface-painter-save");
+    this.surfacePainterSpawnMobBtnEl = document.getElementById("surface-painter-spawn-mob");
+    this.surfacePainterRemoveMobBtnEl = document.getElementById("surface-painter-remove-mob");
+    this.surfacePainterMobSidebarEl = document.getElementById("surface-painter-mob-sidebar");
+    this.surfacePainterMobPreviewEl = document.getElementById("surface-painter-mob-preview");
+    this.surfacePainterMobNameInputEl = document.getElementById("surface-painter-mob-name");
+    this.surfacePainterMobRadiusInputEl = document.getElementById("surface-painter-mob-radius");
+    this.surfacePainterMobRadiusValueEl = document.getElementById("surface-painter-mob-radius-value");
+    this.surfacePainterMobStatusEl = document.getElementById("surface-painter-mob-status");
+    this.surfacePainterMobListEl = document.getElementById("surface-painter-mob-list");
     this.surfacePainterPromoRepositionBtnEl = document.getElementById("surface-painter-promo-reposition");
     this.surfacePainterPromoRemoveBtnEl = document.getElementById("surface-painter-promo-remove");
     this.surfacePainterPromoScaleDownBtnEl = document.getElementById("surface-painter-promo-scale-down");
@@ -939,8 +984,14 @@ export class GameRuntime {
     this.surfacePainterEraserBtnEl = document.getElementById("surface-painter-eraser");
     this.surfacePainterFillBtnEl = document.getElementById("surface-painter-fill");
     this.surfacePainterContext = this.surfacePainterCanvasEl?.getContext?.("2d") ?? null;
+    this.placementSelectorEl = document.getElementById("placement-selector");
+    this.placementSelectorCloseBtnEl = document.getElementById("placement-selector-close");
+    this.placementSelectorPromoBtnEl = document.getElementById("placement-selector-promo");
+    this.placementSelectorMobBtnEl = document.getElementById("placement-selector-mob");
     this.promoPanelEl = document.getElementById("promo-panel");
     this.promoPanelCloseBtnEl = document.getElementById("promo-panel-close");
+    this.promoPlacementSectionEl = document.getElementById("promo-placement-section");
+    this.mobPodPlacementSectionEl = document.getElementById("mob-pod-placement-section");
     this.promoScaleInputEl = document.getElementById("promo-scale");
     this.promoScaleValueEl = document.getElementById("promo-scale-value");
     this.promoScaleYInputEl = document.getElementById("promo-scale-y");
@@ -971,6 +1022,9 @@ export class GameRuntime {
     this.promoPlaceBtnEl = document.getElementById("promo-place-btn");
     this.promoSaveBtnEl = document.getElementById("promo-save-btn");
     this.promoRemoveBtnEl = document.getElementById("promo-remove-btn");
+    this.mobPodPlaceBtnEl = document.getElementById("mob-pod-place-btn");
+    this.mobPodRemoveBtnEl = document.getElementById("mob-pod-remove-btn");
+    this.mobPodStatusEl = document.getElementById("mob-pod-status");
     this.promoStatusEl = document.getElementById("promo-panel-status");
     this.promoLinkPromptEl = document.getElementById("promo-link-prompt");
     this.promoLinkPromptTextEl = document.getElementById("promo-link-prompt-text");
@@ -1457,6 +1511,9 @@ export class GameRuntime {
     this.applyDeviceRuntimeProfile();
 
     this._initialized = false;
+    this._destroyed = false;
+    this.managedDomListeners = [];
+    this.managedSocketListeners = [];
   }
 
   init() {
@@ -1513,6 +1570,191 @@ export class GameRuntime {
     this.refreshSecurityTestObjectLabels();
 
     this.loop();
+  }
+
+  captureManagedEventListeners(registerListeners) {
+    if (typeof registerListeners !== "function") {
+      return;
+    }
+    if (typeof EventTarget === "undefined" || !EventTarget.prototype?.addEventListener) {
+      registerListeners();
+      return;
+    }
+
+    const originalAddEventListener = EventTarget.prototype.addEventListener;
+    EventTarget.prototype.addEventListener = function patchedAddEventListener(type, listener, options) {
+      const result = originalAddEventListener.call(this, type, listener, options);
+      if (listener) {
+        try {
+          const runtime = GameRuntime.activeEventCaptureRuntime;
+          runtime?.managedDomListeners?.push({
+            target: this,
+            type,
+            listener,
+            options
+          });
+        } catch {
+          // ignore listener capture failures so runtime boot can continue
+        }
+      }
+      return result;
+    };
+
+    GameRuntime.activeEventCaptureRuntime = this;
+    try {
+      registerListeners();
+    } finally {
+      GameRuntime.activeEventCaptureRuntime = null;
+      EventTarget.prototype.addEventListener = originalAddEventListener;
+    }
+  }
+
+  removeManagedEventListeners() {
+    if (!Array.isArray(this.managedDomListeners) || this.managedDomListeners.length === 0) {
+      return;
+    }
+    for (let index = this.managedDomListeners.length - 1; index >= 0; index -= 1) {
+      const entry = this.managedDomListeners[index];
+      try {
+        entry?.target?.removeEventListener?.(entry.type, entry.listener, entry.options);
+      } catch {
+        // ignore best-effort cleanup failures
+      }
+    }
+    this.managedDomListeners.length = 0;
+  }
+
+  captureManagedSocketListeners(socket, registerListeners) {
+    if (!socket || typeof registerListeners !== "function") {
+      return;
+    }
+
+    const originalOn = socket.on?.bind(socket);
+    if (typeof originalOn !== "function") {
+      registerListeners();
+      return;
+    }
+
+    socket.on = (eventName, handler) => {
+      const result = originalOn(eventName, handler);
+      if (handler) {
+        this.managedSocketListeners.push({
+          socket,
+          eventName,
+          handler
+        });
+      }
+      return result;
+    };
+
+    try {
+      registerListeners();
+    } finally {
+      socket.on = originalOn;
+    }
+  }
+
+  detachManagedSocketListeners(socket = this.socket) {
+    if (!socket || !Array.isArray(this.managedSocketListeners) || this.managedSocketListeners.length === 0) {
+      return;
+    }
+
+    const remaining = [];
+    for (const entry of this.managedSocketListeners) {
+      if (entry?.socket !== socket) {
+        remaining.push(entry);
+        continue;
+      }
+      try {
+        entry.socket?.off?.(entry.eventName, entry.handler);
+      } catch {
+        // ignore best-effort cleanup failures
+      }
+    }
+    this.managedSocketListeners = remaining;
+  }
+
+  destroy() {
+    if (this._destroyed) {
+      return;
+    }
+    this._destroyed = true;
+    this._initialized = false;
+
+    this.stopNetworkPing();
+    this.detachEntryMusicUnlockListeners();
+    this.detachSharedMusicUnlockListeners();
+
+    if (this.surfacePaintRetryTimer) {
+      window.clearTimeout(this.surfacePaintRetryTimer);
+      this.surfacePaintRetryTimer = null;
+    }
+    if (this.portalPrewarmKickTimer) {
+      window.clearTimeout(this.portalPrewarmKickTimer);
+      this.portalPrewarmKickTimer = null;
+    }
+    if (this.loopRafId) {
+      cancelAnimationFrame(this.loopRafId);
+      this.loopRafId = 0;
+    }
+
+    if (document.pointerLockElement === this.renderer?.domElement) {
+      try {
+        document.exitPointerLock?.();
+      } catch {
+        // ignore
+      }
+    }
+
+    this.detachManagedSocketListeners(this.socket);
+    if (this.socket) {
+      try {
+        this.socket.disconnect();
+      } catch {
+        // ignore
+      }
+      this.socket = null;
+    }
+
+    this.removeManagedEventListeners();
+
+    this.clearRemotePlayers();
+    this.clearDrawingEntityVisuals();
+    this.drawingEntities.clear();
+    this.clearPromoObjectVisuals();
+    this.clearPromoPlacementPreview({ syncUi: false });
+    this.clearMobPodPlacementPreview({ syncUi: false });
+    this.clearHostCustomBlockPlacementPreview({ syncUi: false });
+    this.stopSharedMusicPlayback();
+    if (this.entryMusicAudioEl) {
+      try {
+        this.entryMusicAudioEl.pause();
+        this.entryMusicAudioEl.currentTime = 0;
+      } catch {
+        // ignore
+      }
+    }
+
+    disposeMeshTree(this.scene);
+    this.scene?.clear?.();
+
+    if (this.composer) {
+      this.composer.dispose();
+      this.composer = null;
+    }
+    if (this.renderer) {
+      try {
+        this.renderer.dispose();
+        this.renderer.forceContextLoss?.();
+      } catch {
+        // ignore
+      }
+    }
+    this.renderer?.domElement?.remove?.();
+
+    if (typeof window !== "undefined" && window.__emptinesGame === this) {
+      window.__emptinesGame = null;
+    }
   }
 
   setupWorld() {
@@ -7153,6 +7395,9 @@ export class GameRuntime {
     if (this.isCityMainAdBillboardSurface(normalized)) {
       return "광고판 그리기 / CITY AD BOARD";
     }
+    if (this.isSurfacePainterMobPodSurface(normalized)) {
+      return "알형 몹 캔버스 / MOB EGG POD";
+    }
     return `표면 그리기 / ${normalized.toUpperCase()}`;
   }
 
@@ -7334,6 +7579,19 @@ export class GameRuntime {
     return `${scopedBaseId}:pz`;
   }
 
+  getMobPodPaintSurfaceBaseId(ownerKey = "") {
+    const safeOwnerKey = String(ownerKey ?? "").trim().replace(/[^a-zA-Z0-9:_-]/g, "").slice(0, 90);
+    if (!safeOwnerKey) {
+      return "";
+    }
+    return `mp_${safeOwnerKey}`;
+  }
+
+  getMobPodPaintSurfaceId(ownerKey = "") {
+    const baseId = this.getMobPodPaintSurfaceBaseId(ownerKey);
+    return baseId ? `${baseId}:pz` : "";
+  }
+
   registerPromoPaintSurface(mesh, ownerKey, width = 2.6, height = 1.5, surfaceSuffix = "") {
     if (!mesh) {
       return "";
@@ -7361,6 +7619,39 @@ export class GameRuntime {
       baseMap,
       surfaceSize: {
         width: Math.max(0.25, Number(width) || 2.6),
+        height: Math.max(0.25, Number(height) || 1.5)
+      },
+      revision: 0
+    });
+    const existing = this.surfacePaintState.get(surfaceId);
+    if (existing) {
+      this.applySurfacePaintTexture(surfaceId, existing);
+    }
+    return surfaceId;
+  }
+
+  registerMobPodPaintSurface(mesh, ownerKey, width = 1.2, height = 1.5) {
+    if (!mesh) {
+      return "";
+    }
+    const baseId = this.getMobPodPaintSurfaceBaseId(ownerKey);
+    const surfaceId = this.getMobPodPaintSurfaceId(ownerKey);
+    if (!baseId || !surfaceId) {
+      return "";
+    }
+    mesh.userData.paintSurfaceBaseId = baseId;
+    mesh.userData.paintPreferredFace = "pz";
+    if (!this.paintableSurfaceMeshes.includes(mesh)) {
+      this.paintableSurfaceMeshes.push(mesh);
+    }
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const baseMap = materials[0]?.map ?? null;
+    this.paintableSurfaceMap.set(surfaceId, {
+      mesh,
+      materialIndex: 0,
+      baseMap,
+      surfaceSize: {
+        width: Math.max(0.25, Number(width) || 1.2),
         height: Math.max(0.25, Number(height) || 1.5)
       },
       revision: 0
@@ -7746,6 +8037,7 @@ export class GameRuntime {
     context.restore();
 
     if (!imageDataUrl) {
+      this.syncSurfacePainterMobPanel();
       return;
     }
 
@@ -7755,6 +8047,7 @@ export class GameRuntime {
         return;
       }
       context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      this.syncSurfacePainterMobPanel();
     };
     image.src = imageDataUrl;
   }
@@ -7833,6 +8126,25 @@ export class GameRuntime {
       // getImageData can fail on tainted canvas; keep editor usable.
     }
     this.surfacePainterCanvasBgColor = nextColor;
+    this.syncSurfacePainterMobPanel();
+  }
+
+  syncSurfacePainterToolbarModeUi() {
+    const isMobPodSurface = this.isSurfacePainterMobPodSurface(this.surfacePainterTargetId);
+    this.surfacePainterPanelEl?.classList.toggle("mob-pod-surface", isMobPodSurface);
+    this.surfacePainterBgGroupEl?.classList.toggle("hidden", isMobPodSurface);
+    this.surfacePainterEraserBtnEl?.classList.toggle("hidden", isMobPodSurface);
+    if (!isMobPodSurface) {
+      return;
+    }
+    const fixedBgColor = MOB_POD_SURFACE_BG_COLOR;
+    if (this.surfacePainterBgColorInputEl) {
+      this.surfacePainterBgColorInputEl.value = fixedBgColor;
+    }
+    this.surfacePainterCanvasBgColor = fixedBgColor;
+    if (this.surfacePainterEraserEnabled) {
+      this.setSurfacePainterEraserEnabled(false);
+    }
   }
 
   toggleSurfacePainterFillMode() {
@@ -7989,6 +8301,7 @@ export class GameRuntime {
         context.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
         context.restore();
         this.appendChatLine("", `이미지 불러오기 완료: ${String(file.name ?? "").trim()}`, "system");
+        this.syncSurfacePainterMobPanel();
       };
       image.onerror = () => {
         this.appendChatLine("", "이미지를 캔버스로 불러오지 못했습니다.", "system");
@@ -8023,6 +8336,7 @@ export class GameRuntime {
     this.surfacePainterTargetId = normalizedId;
     this.surfacePainterSaveInFlight = false;
     this.surfacePainterActionsCollapsed = false;
+    this.syncSurfacePainterToolbarModeUi();
     this.updateSurfacePainterSaveAvailability();
     this.updateSurfacePainterActionsUi();
     this.setSurfacePainterEraserEnabled(false);
@@ -8072,6 +8386,7 @@ export class GameRuntime {
     this.surfacePainterTargetId = "";
     this.surfacePainterCanvasLoadNonce += 1;
     this.surfacePainterActionsCollapsed = false;
+    this.surfacePainterPanelEl?.classList.remove("mob-pod-surface");
     this.setSurfacePainterFillModeEnabled(false);
     this.resetMobileControlInputState();
     this.surfacePainterEl?.classList.add("hidden");
@@ -8233,6 +8548,7 @@ export class GameRuntime {
     }
     this.surfacePainterDrawing = false;
     this.surfacePainterPointerId = null;
+    this.syncSurfacePainterMobPanel();
   }
 
   resetSurfacePaintTexture(surfaceId) {
@@ -8516,12 +8832,36 @@ export class GameRuntime {
     return ownerWithSuffix.replace(/_q[0-3]$/i, "");
   }
 
+  getSurfacePainterMobPodOwnerKey(surfaceId = this.surfacePainterTargetId) {
+    const normalized = String(surfaceId ?? "").trim();
+    if (!normalized.startsWith("mp_")) {
+      return "";
+    }
+    const baseId = normalized.split(":")[0] ?? "";
+    if (!baseId.startsWith("mp_")) {
+      return "";
+    }
+    return baseId.slice(3);
+  }
+
+  isSurfacePainterMobPodSurface(surfaceId = this.surfacePainterTargetId) {
+    return Boolean(this.getSurfacePainterMobPodOwnerKey(surfaceId));
+  }
+
   getSurfacePainterPromoTarget() {
     const ownerKey = this.getSurfacePainterPromoOwnerKey();
     if (!ownerKey) {
       return null;
     }
     return this.promoObjects.get(ownerKey) ?? null;
+  }
+
+  getSurfacePainterMobPodTarget() {
+    const ownerKey = this.getSurfacePainterMobPodOwnerKey();
+    if (!ownerKey) {
+      return null;
+    }
+    return this.mobPodObjects.get(ownerKey) ?? null;
   }
 
   isPromoEditLockEnabled(rawAllowOthersDraw = false) {
@@ -8718,6 +9058,7 @@ export class GameRuntime {
       return;
     }
     this.clearSurfacePainterCanvas();
+    this.syncSurfacePainterMobPanel();
   }
 
   getSurfacePaintSaveBlockedReason() {
@@ -8752,6 +9093,10 @@ export class GameRuntime {
     if (promoOwnerKey && !this.canCurrentPlayerEditPromoSurface(promoOwnerKey)) {
       return "소유자가 허용한 오브젝트만 수정할 수 있습니다.";
     }
+    const mobPodOwnerKey = this.getSurfacePainterMobPodOwnerKey();
+    if (mobPodOwnerKey && mobPodOwnerKey !== String(this.promoOwnerKey ?? "")) {
+      return "내 알 오브젝트에서만 몹 캔버스를 수정할 수 있습니다.";
+    }
     if (!this.socketEndpoint) {
       const endpointError = String(this.socketEndpointValidationError ?? "").trim();
       if (endpointError) {
@@ -8777,20 +9122,72 @@ export class GameRuntime {
     }
     const blockedReason = this.getSurfacePaintSaveBlockedReason();
     const canSave = !blockedReason;
+    const mobPodOwnerKey = this.getSurfacePainterMobPodOwnerKey();
+    const isOwnMobPodSurface = mobPodOwnerKey === String(this.promoOwnerKey ?? "");
+    const isMobPodSurface = Boolean(mobPodOwnerKey);
+    const ownDrawingEntity = this.getOwnDrawingEntityForSurface();
+    const hasOwnDrawingEntity = Boolean(ownDrawingEntity);
     this.surfacePainterSaveBtnEl.disabled = !canSave;
+    this.surfacePainterSaveBtnEl.classList.toggle("hidden", isMobPodSurface);
     if (!canSave) {
       this.surfacePainterSaveBtnEl.title = blockedReason;
     } else {
       this.surfacePainterSaveBtnEl.removeAttribute("title");
     }
+    if (this.surfacePainterSpawnMobBtnEl) {
+      this.surfacePainterSpawnMobBtnEl.textContent = hasOwnDrawingEntity ? "몹 갱신" : "몹 생성";
+      const canSpawn =
+        this.surfacePainterOpen &&
+        !blockedReason &&
+        !this.surfacePainterSaveInFlight &&
+        !this.drawingEntitySpawnInFlight &&
+        !this.drawingEntityRemoveInFlight;
+      this.surfacePainterSpawnMobBtnEl.disabled = !canSpawn;
+      if (!canSpawn) {
+        this.surfacePainterSpawnMobBtnEl.title =
+          blockedReason ||
+          (this.drawingEntitySpawnInFlight
+            ? "몹 생성 중입니다."
+            : this.drawingEntityRemoveInFlight
+              ? "몹 삭제 중입니다."
+              : "표면 저장 후 몹으로 소환할 수 있습니다.");
+      } else {
+        this.surfacePainterSpawnMobBtnEl.title = hasOwnDrawingEntity
+          ? "현재 표면의 내 선화 몹을 새 그림으로 교체합니다."
+          : "배경을 제외한 선화 몹으로 월드에 소환합니다.";
+      }
+      this.surfacePainterSpawnMobBtnEl.classList.toggle("hidden", !isOwnMobPodSurface);
+    }
+    if (this.surfacePainterRemoveMobBtnEl) {
+      const showRemove = this.surfacePainterOpen && hasOwnDrawingEntity && isOwnMobPodSurface;
+      const canRemove =
+        showRemove &&
+        !this.surfacePainterSaveInFlight &&
+        !this.drawingEntitySpawnInFlight &&
+        !this.drawingEntityRemoveInFlight;
+      this.surfacePainterRemoveMobBtnEl.classList.toggle("hidden", !showRemove);
+      this.surfacePainterRemoveMobBtnEl.disabled = !canRemove;
+      if (!showRemove) {
+        this.surfacePainterRemoveMobBtnEl.removeAttribute("title");
+      } else if (!canRemove) {
+        this.surfacePainterRemoveMobBtnEl.title = this.drawingEntityRemoveInFlight
+          ? "몹 삭제 중입니다."
+          : "처리 중에는 삭제할 수 없습니다.";
+      } else {
+        this.surfacePainterRemoveMobBtnEl.title = "현재 표면의 내 선화 몹을 월드에서 제거합니다.";
+      }
+    }
     if (this.surfacePainterImportBtnEl) {
       const canImportVisible = this.hasHostPrivilege();
       const canImport = this.surfacePainterOpen && canImportVisible;
-      this.surfacePainterImportBtnEl.classList.toggle("hidden", !canImportVisible);
+      this.surfacePainterImportBtnEl.classList.toggle("hidden", !canImportVisible || isMobPodSurface);
       this.surfacePainterImportBtnEl.disabled = !canImport;
       this.surfacePainterImportBtnEl.title = canImport
         ? "PNG/JPG 파일을 캔버스로 불러옵니다."
         : "PNG/JPG 불러오기는 호스트만 가능합니다.";
+    }
+    if (this.surfacePainterExportBtnEl) {
+      this.surfacePainterExportBtnEl.classList.toggle("hidden", isMobPodSurface);
     }
 
     const promoButtons = [
@@ -8862,6 +9259,223 @@ export class GameRuntime {
           this.surfacePainterPromoShareToggleBtnEl.title = this.getPromoEditLockStatusText(nextAllow);
         }
       }
+    }
+    this.syncSurfacePainterMobPanel();
+  }
+
+  getSurfacePainterMobDraftName(surfaceId = this.surfacePainterTargetId) {
+    const normalizedId = String(surfaceId ?? "").trim().toLowerCase();
+    if (!normalizedId) {
+      return "";
+    }
+    return String(this.surfacePainterMobNameDrafts.get(normalizedId) ?? "").trim().slice(0, 48);
+  }
+
+  setSurfacePainterMobDraftName(surfaceId = this.surfacePainterTargetId, rawValue = "") {
+    const normalizedId = String(surfaceId ?? "").trim().toLowerCase();
+    if (!normalizedId) {
+      return "";
+    }
+    const nextValue = String(rawValue ?? "").trim().slice(0, 48);
+    if (nextValue) {
+      this.surfacePainterMobNameDrafts.set(normalizedId, nextValue);
+    } else {
+      this.surfacePainterMobNameDrafts.delete(normalizedId);
+    }
+    return nextValue;
+  }
+
+  getSurfacePainterMobNameValue() {
+    return String(this.surfacePainterMobNameInputEl?.value ?? "").trim().slice(0, 48);
+  }
+
+  normalizeSurfacePainterMobRadius(
+    rawValue,
+    fallbackValue = DRAWING_ENTITY_DEFAULT_MOTION_RADIUS
+  ) {
+    const fallback = Number(fallbackValue);
+    const nextValue = Number(rawValue);
+    const safeValue =
+      Number.isFinite(nextValue) && nextValue > 0
+        ? nextValue
+        : Number.isFinite(fallback) && fallback > 0
+          ? fallback
+          : DRAWING_ENTITY_DEFAULT_MOTION_RADIUS;
+    return THREE.MathUtils.clamp(
+      safeValue,
+      DRAWING_ENTITY_MIN_MOTION_RADIUS,
+      DRAWING_ENTITY_MAX_MOTION_RADIUS
+    );
+  }
+
+  formatSurfacePainterMobRadius(rawValue) {
+    return `${this.normalizeSurfacePainterMobRadius(rawValue)
+      .toFixed(2)
+      .replace(/\.?0+$/, "")}m`;
+  }
+
+  getSurfacePainterMobDraftRadius(
+    surfaceId = this.surfacePainterTargetId,
+    fallbackValue = DRAWING_ENTITY_DEFAULT_MOTION_RADIUS
+  ) {
+    const normalizedId = String(surfaceId ?? "").trim().toLowerCase();
+    if (!normalizedId) {
+      return this.normalizeSurfacePainterMobRadius(fallbackValue);
+    }
+    return this.normalizeSurfacePainterMobRadius(
+      this.surfacePainterMobRadiusDrafts.get(normalizedId),
+      fallbackValue
+    );
+  }
+
+  setSurfacePainterMobDraftRadius(
+    surfaceId = this.surfacePainterTargetId,
+    rawValue = DRAWING_ENTITY_DEFAULT_MOTION_RADIUS
+  ) {
+    const normalizedId = String(surfaceId ?? "").trim().toLowerCase();
+    const nextValue = this.normalizeSurfacePainterMobRadius(rawValue);
+    if (!normalizedId) {
+      return nextValue;
+    }
+    this.surfacePainterMobRadiusDrafts.set(normalizedId, nextValue);
+    return nextValue;
+  }
+
+  getSurfacePainterMobRadiusValue() {
+    return this.normalizeSurfacePainterMobRadius(
+      this.surfacePainterMobRadiusInputEl?.value,
+      DRAWING_ENTITY_DEFAULT_MOTION_RADIUS
+    );
+  }
+
+  syncSurfacePainterMobPanel() {
+    const mobPodOwnerKey = this.getSurfacePainterMobPodOwnerKey();
+    const isOwnMobPodSurface =
+      Boolean(mobPodOwnerKey) && mobPodOwnerKey === String(this.promoOwnerKey ?? "");
+    this.syncSurfacePainterToolbarModeUi();
+    if (this.surfacePainterTitleEl) {
+      this.surfacePainterTitleEl.textContent = this.getSurfacePainterTitle(this.surfacePainterTargetId);
+    }
+    if (this.surfacePainterMobSidebarEl) {
+      this.surfacePainterMobSidebarEl.classList.toggle("hidden", !isOwnMobPodSurface);
+    }
+    if (!isOwnMobPodSurface) {
+      return;
+    }
+
+    const currentSurfaceId = String(this.surfacePainterTargetId ?? "").trim().toLowerCase();
+    const ownDrawingEntity = this.getOwnDrawingEntityForSurface(currentSurfaceId);
+    const payloadPreview = this.buildSurfacePainterDrawingEntityPayload(220_000);
+    const previewDataUrl = ownDrawingEntity?.imageDataUrl || payloadPreview?.imageDataUrl || "";
+    if (this.surfacePainterMobPreviewEl) {
+      if (previewDataUrl) {
+        if (this.surfacePainterMobPreviewEl.src !== previewDataUrl) {
+          this.surfacePainterMobPreviewEl.src = previewDataUrl;
+        }
+      } else {
+        this.surfacePainterMobPreviewEl.removeAttribute("src");
+      }
+    }
+
+    const draftName =
+      this.getSurfacePainterMobDraftName(currentSurfaceId) ||
+      String(ownDrawingEntity?.displayName ?? ownDrawingEntity?.ownerName ?? "").trim();
+    if (draftName) {
+      this.setSurfacePainterMobDraftName(currentSurfaceId, draftName);
+    }
+    if (this.surfacePainterMobNameInputEl && document.activeElement !== this.surfacePainterMobNameInputEl) {
+      this.surfacePainterMobNameInputEl.value = draftName;
+    }
+    const draftRadius = this.setSurfacePainterMobDraftRadius(
+      currentSurfaceId,
+      this.getSurfacePainterMobDraftRadius(currentSurfaceId, ownDrawingEntity?.motionRadius)
+    );
+    if (
+      this.surfacePainterMobRadiusInputEl &&
+      document.activeElement !== this.surfacePainterMobRadiusInputEl
+    ) {
+      this.surfacePainterMobRadiusInputEl.value = draftRadius.toFixed(2);
+    }
+    if (this.surfacePainterMobRadiusValueEl) {
+      this.surfacePainterMobRadiusValueEl.textContent = this.formatSurfacePainterMobRadius(draftRadius);
+    }
+
+    if (this.surfacePainterMobStatusEl) {
+      if (ownDrawingEntity) {
+        this.surfacePainterMobStatusEl.textContent =
+          `생성됨 · ${this.formatSurfacePainterMobRadius(ownDrawingEntity.motionRadius)} 반경으로 알 오브젝트 앞에서 배회 중입니다.`;
+      } else if (payloadPreview) {
+        this.surfacePainterMobStatusEl.textContent =
+          `초안 있음 · 생성하면 ${this.formatSurfacePainterMobRadius(draftRadius)} 반경으로 알 오브젝트 앞에서 소환됩니다.`;
+      } else {
+        this.surfacePainterMobStatusEl.textContent = "캔버스가 비어 있습니다. 선을 그린 뒤 생성하세요.";
+      }
+    }
+
+    if (!this.surfacePainterMobListEl) {
+      return;
+    }
+    this.surfacePainterMobListEl.replaceChildren();
+    const ownEntries = Array.from(this.drawingEntities.values())
+      .filter((entry) => String(entry?.ownerKey ?? "").trim() === String(this.promoOwnerKey ?? "").trim())
+      .sort((a, b) => Math.max(0, Number(b?.updatedAt) || 0) - Math.max(0, Number(a?.updatedAt) || 0));
+    if (ownEntries.length <= 0) {
+      const empty = document.createElement("p");
+      empty.className = "surface-painter-mob-copy";
+      empty.textContent = "아직 생성된 몹이 없습니다.";
+      this.surfacePainterMobListEl.appendChild(empty);
+      return;
+    }
+
+    for (const entry of ownEntries) {
+      const item = document.createElement("div");
+      item.className = "surface-painter-mob-list-item";
+      if (String(entry?.sourceSurfaceId ?? "").trim().toLowerCase() === currentSurfaceId) {
+        item.classList.add("current");
+      }
+      const thumb = document.createElement("img");
+      thumb.className = "surface-painter-mob-thumb";
+      thumb.alt = String(entry?.displayName ?? entry?.ownerName ?? "몹");
+      if (entry?.imageDataUrl) {
+        thumb.src = entry.imageDataUrl;
+      }
+      item.appendChild(thumb);
+
+      const meta = document.createElement("div");
+      meta.className = "surface-painter-mob-meta";
+      const nameRow = document.createElement("div");
+      nameRow.className = "surface-painter-mob-name-row";
+      nameRow.textContent = String(entry?.displayName ?? entry?.ownerName ?? "선화 몹");
+      meta.appendChild(nameRow);
+      const copy = document.createElement("div");
+      copy.className = "surface-painter-mob-copy";
+      const updatedAt = Math.max(0, Math.trunc(Number(entry?.updatedAt) || 0));
+      copy.textContent = updatedAt > 0
+        ? `상태: 활성 · 반경 ${this.formatSurfacePainterMobRadius(entry?.motionRadius)} · ${new Date(updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+        : `상태: 활성 · 반경 ${this.formatSurfacePainterMobRadius(entry?.motionRadius)}`;
+      meta.appendChild(copy);
+      const actions = document.createElement("div");
+      actions.className = "surface-painter-mob-actions";
+      if (this.paintableSurfaceMap.has(String(entry?.sourceSurfaceId ?? "").trim().toLowerCase())) {
+        const openBtn = document.createElement("button");
+        openBtn.type = "button";
+        openBtn.textContent = "열기";
+        openBtn.addEventListener("click", () => {
+          this.openSurfacePainter(String(entry?.sourceSurfaceId ?? "").trim().toLowerCase());
+        });
+        actions.appendChild(openBtn);
+      }
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.textContent = "삭제";
+      removeBtn.disabled = this.drawingEntityRemoveInFlight;
+      removeBtn.addEventListener("click", () => {
+        void this.removeDrawingEntityByEntry(entry);
+      });
+      actions.appendChild(removeBtn);
+      meta.appendChild(actions);
+      item.appendChild(meta);
+      this.surfacePainterMobListEl.appendChild(item);
     }
   }
 
@@ -9025,62 +9639,292 @@ export class GameRuntime {
     });
   }
 
-  getSurfacePainterSaveImageDataUrl(maxChars = 4_000_000) {
-    const canvas = this.surfacePainterCanvasEl;
+  encodeCanvasImageDataUrl(
+    canvas,
+    {
+      maxChars = 4_000_000,
+      formats = [{ type: "image/webp", qualities: [0.84, 0.76, 0.68, 0.58, 0.5] }]
+    } = {}
+  ) {
     if (!canvas) {
       return "";
     }
-    const qualities = [0.84, 0.76, 0.68, 0.58, 0.5];
+    const normalizedFormats = Array.isArray(formats) ? formats : [];
     let bestEffort = "";
-    for (const quality of qualities) {
-      let dataUrl = "";
-      try {
-        dataUrl = String(canvas.toDataURL("image/webp", quality) ?? "");
-      } catch {
-        dataUrl = "";
-      }
-      if (!/^data:image\/webp;base64,/i.test(dataUrl)) {
-        continue;
-      }
-      if (!bestEffort || dataUrl.length < bestEffort.length) {
-        bestEffort = dataUrl;
-      }
-      if (dataUrl.length <= maxChars) {
-        return dataUrl;
+    for (const format of normalizedFormats) {
+      const type = String(format?.type ?? "").trim().toLowerCase();
+      const qualities = Array.isArray(format?.qualities) && format.qualities.length > 0
+        ? format.qualities
+        : [undefined];
+      for (const quality of qualities) {
+        let dataUrl = "";
+        try {
+          dataUrl =
+            quality === undefined
+              ? String(canvas.toDataURL(type) ?? "")
+              : String(canvas.toDataURL(type, quality) ?? "");
+        } catch {
+          dataUrl = "";
+        }
+        if (!/^data:image\/(?:png|webp);base64,/i.test(dataUrl)) {
+          continue;
+        }
+        if (!bestEffort || dataUrl.length < bestEffort.length) {
+          bestEffort = dataUrl;
+        }
+        if (dataUrl.length <= maxChars) {
+          return dataUrl;
+        }
       }
     }
     return bestEffort;
   }
 
-  async saveSurfacePainter() {
-    if (!this.surfacePainterOpen || this.surfacePainterSaveInFlight || !this.surfacePainterCanvasEl) {
+  getSurfacePainterSaveImageDataUrl(maxChars = 4_000_000) {
+    return this.encodeCanvasImageDataUrl(this.surfacePainterCanvasEl, {
+      maxChars,
+      formats: [{ type: "image/webp", qualities: [0.84, 0.76, 0.68, 0.58, 0.5] }]
+    });
+  }
+
+  buildSurfacePainterDrawingEntityPayload(maxChars = MAX_DRAWING_ENTITY_IMAGE_CHARS) {
+    const canvas = this.surfacePainterCanvasEl;
+    if (!canvas) {
+      return null;
+    }
+    if (!this.surfacePainterContext) {
+      this.surfacePainterContext = canvas.getContext("2d");
+    }
+    const context = this.surfacePainterContext;
+    if (!context) {
+      return null;
+    }
+
+    const width = Math.max(1, Math.trunc(Number(canvas.width) || 0));
+    const height = Math.max(1, Math.trunc(Number(canvas.height) || 0));
+    let imageData = null;
+    try {
+      imageData = context.getImageData(0, 0, width, height);
+    } catch {
+      return null;
+    }
+    const pixels = new Uint8ClampedArray(imageData.data);
+    const bgColor = this.getSurfacePainterColorRgb(
+      this.surfacePainterCanvasBgColor || this.surfacePainterBgColorInputEl?.value || "#ffffff",
+      "#ffffff"
+    );
+    let minX = width;
+    let minY = height;
+    let maxX = -1;
+    let maxY = -1;
+    let activePixelCount = 0;
+    for (let index = 0; index < pixels.length; index += 4) {
+      const alpha = pixels[index + 3];
+      if (alpha <= 10) {
+        pixels[index + 3] = 0;
+        continue;
+      }
+      const diffR = Math.abs(pixels[index] - bgColor.r);
+      const diffG = Math.abs(pixels[index + 1] - bgColor.g);
+      const diffB = Math.abs(pixels[index + 2] - bgColor.b);
+      const maxDiff = Math.max(diffR, diffG, diffB);
+      const totalDiff = diffR + diffG + diffB;
+      if (
+        maxDiff <= DRAWING_ENTITY_BACKGROUND_TOLERANCE &&
+        totalDiff <= DRAWING_ENTITY_BACKGROUND_TOLERANCE * 2.4
+      ) {
+        pixels[index + 3] = 0;
+        continue;
+      }
+      const pixelIndex = index / 4;
+      const x = pixelIndex % width;
+      const y = Math.floor(pixelIndex / width);
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+      activePixelCount += 1;
+    }
+
+    if (maxX < minX || maxY < minY || activePixelCount <= 0) {
+      return null;
+    }
+
+    const trimWidth = maxX - minX + 1;
+    const trimHeight = maxY - minY + 1;
+    const padding = Math.max(
+      4,
+      Math.min(
+        DRAWING_ENTITY_TRIM_PADDING_PX,
+        Math.round(Math.min(trimWidth, trimHeight) * 0.18)
+      )
+    );
+    const workingCanvas = document.createElement("canvas");
+    workingCanvas.width = width;
+    workingCanvas.height = height;
+    const workingContext = workingCanvas.getContext("2d");
+    if (!workingContext) {
+      return null;
+    }
+    const workingImageData = workingContext.createImageData(width, height);
+    workingImageData.data.set(pixels);
+    workingContext.putImageData(workingImageData, 0, 0);
+
+    const outputCanvas = document.createElement("canvas");
+    outputCanvas.width = trimWidth + padding * 2;
+    outputCanvas.height = trimHeight + padding * 2;
+    const outputContext = outputCanvas.getContext("2d");
+    if (!outputContext) {
+      return null;
+    }
+    outputContext.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
+    outputContext.drawImage(
+      workingCanvas,
+      minX,
+      minY,
+      trimWidth,
+      trimHeight,
+      padding,
+      padding,
+      trimWidth,
+      trimHeight
+    );
+
+    const imageDataUrl = this.encodeCanvasImageDataUrl(outputCanvas, {
+      maxChars,
+      formats: [
+        { type: "image/webp", qualities: [0.92, 0.86, 0.8, 0.74] },
+        { type: "image/png", qualities: [undefined] }
+      ]
+    });
+    if (!imageDataUrl) {
+      return null;
+    }
+
+    const aspectRatio = outputCanvas.width / Math.max(1, outputCanvas.height);
+    const coverageRatio = (trimWidth * trimHeight) / Math.max(1, width * height);
+    const scale = THREE.MathUtils.clamp(0.88 + Math.sqrt(coverageRatio) * 1.05, 0.85, 1.9);
+    return {
+      imageDataUrl,
+      pixelWidth: outputCanvas.width,
+      pixelHeight: outputCanvas.height,
+      aspectRatio,
+      scale,
+      motionRadius: this.getSurfacePainterMobDraftRadius(this.surfacePainterTargetId)
+    };
+  }
+
+  requestDrawingEntityState() {
+    if (!this.socket || !this.networkConnected) {
       return;
+    }
+    this.socket.emit("drawing:entity:state:request");
+  }
+
+  sendDrawingEntitySpawn(payload = {}, { forceFlush = false } = {}) {
+    return new Promise((resolve) => {
+      if (!this.socket || !this.networkConnected) {
+        resolve({ ok: false, error: "offline" });
+        return;
+      }
+      let settled = false;
+      const finish = (response = {}) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        if (timeoutId) {
+          window.clearTimeout(timeoutId);
+        }
+        resolve(response);
+      };
+      const timeoutId = window.setTimeout(() => {
+        finish({ ok: false, error: "timeout" });
+      }, 4500);
+      this.socket.emit(
+        "drawing:entity:spawn",
+        {
+          ...payload,
+          forceFlush: Boolean(forceFlush)
+        },
+        (response = {}) => {
+          finish(response);
+        }
+      );
+    });
+  }
+
+  sendDrawingEntityRemove(payload = {}, { forceFlush = false } = {}) {
+    return new Promise((resolve) => {
+      if (!this.socket || !this.networkConnected) {
+        resolve({ ok: false, error: "offline" });
+        return;
+      }
+      let settled = false;
+      const finish = (response = {}) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        if (timeoutId) {
+          window.clearTimeout(timeoutId);
+        }
+        resolve(response);
+      };
+      const timeoutId = window.setTimeout(() => {
+        finish({ ok: false, error: "timeout" });
+      }, 4500);
+      this.socket.emit(
+        "drawing:entity:remove",
+        {
+          ...payload,
+          forceFlush: Boolean(forceFlush)
+        },
+        (response = {}) => {
+          finish(response);
+        }
+      );
+    });
+  }
+
+  async saveSurfacePainter(options = {}) {
+    const closeOnSuccess = options?.closeOnSuccess !== false;
+    const announceMultiFace = options?.announceMultiFace !== false;
+    const announceQueued = options?.announceQueued !== false;
+    const announceFailure = options?.announceFailure !== false;
+    const announceBlocked = options?.announceBlocked !== false;
+    if (!this.surfacePainterOpen || this.surfacePainterSaveInFlight || !this.surfacePainterCanvasEl) {
+      return { ok: false, error: "surface painter unavailable" };
     }
 
     const surfaceId = String(this.surfacePainterTargetId ?? "").trim();
     if (!surfaceId) {
-      return;
+      return { ok: false, error: "surface id missing" };
     }
     const targetIds = this.getSurfacePainterTargetIds(surfaceId);
     if (!targetIds.length) {
-      return;
+      return { ok: false, error: "surface target missing" };
     }
 
     const blockedReason = this.getSurfacePaintSaveBlockedReason();
     if (blockedReason) {
-      if (!this.socketEndpoint || this.socketEndpointLinkRequired) {
-        this.showSurfacePaintLinkWarningOnce(blockedReason);
-      } else {
-        this.appendChatLine("", blockedReason, "system");
+      if (announceBlocked) {
+        if (!this.socketEndpoint || this.socketEndpointLinkRequired) {
+          this.showSurfacePaintLinkWarningOnce(blockedReason);
+        } else {
+          this.appendChatLine("", blockedReason, "system");
+        }
       }
       this.updateSurfacePainterSaveAvailability();
-      return;
+      return { ok: false, error: blockedReason };
     }
 
     const imageDataUrl = this.getSurfacePainterSaveImageDataUrl();
     if (!imageDataUrl) {
-      this.appendChatLine("", "그림 데이터(WebP) 인코딩에 실패했습니다.", "system");
-      return;
+      if (announceFailure) {
+        this.appendChatLine("", "그림 데이터(WebP) 인코딩에 실패했습니다.", "system");
+      }
+      return { ok: false, error: "image encoding failed" };
     }
     this.surfacePainterSaveInFlight = true;
     this.surfacePaintSendInFlight = true;
@@ -9116,12 +9960,12 @@ export class GameRuntime {
       this.updateSurfacePainterSaveAvailability();
     }
 
-    if (failedCount > 0) {
+    if (failedCount > 0 && announceFailure) {
       this.requestSurfacePaintSnapshot();
       this.appendChatLine("", `그림 반영 실패(${failedCount}면): ${lastReason}`, "system");
     }
 
-    if (queuedCount > 0) {
+    if (queuedCount > 0 && announceQueued) {
       this.appendChatLine(
         "",
         `그림 저장 대기열 등록(${queuedCount}면): 연결 복구 시 자동 재시도`,
@@ -9130,12 +9974,235 @@ export class GameRuntime {
       this.scheduleSurfacePaintRetry(600);
     }
 
-    if (failedCount === 0 && (successCount > 0 || queuedCount > 0)) {
+    const requestAccepted = failedCount === 0 && (successCount > 0 || queuedCount > 0);
+    const persisted = failedCount === 0 && queuedCount === 0 && successCount > 0;
+    if (requestAccepted && closeOnSuccess) {
       this.closeSurfacePainter();
     }
 
-    if (failedCount === 0 && targetIds.length > 1) {
+    if (failedCount === 0 && announceMultiFace && targetIds.length > 1) {
       this.appendChatLine("", `오브젝트 전체면(${targetIds.length}) 반영 완료`, "system");
+    }
+
+    return {
+      ok: failedCount === 0,
+      requestAccepted,
+      persisted,
+      targetIds,
+      successCount,
+      queuedCount,
+      failedCount,
+      error: lastReason
+    };
+  }
+
+  async spawnDrawingEntityFromSurfacePainter() {
+    if (
+      !this.surfacePainterOpen ||
+      !this.surfacePainterCanvasEl ||
+      this.surfacePainterSaveInFlight ||
+      this.drawingEntitySpawnInFlight
+    ) {
+      return;
+    }
+
+    const blockedReason = this.getSurfacePaintSaveBlockedReason();
+    if (blockedReason) {
+      if (!this.socketEndpoint || this.socketEndpointLinkRequired) {
+        this.showSurfacePaintLinkWarningOnce(blockedReason);
+      } else {
+        this.appendChatLine("", blockedReason, "system");
+      }
+      this.updateSurfacePainterSaveAvailability();
+      return;
+    }
+
+    const surfaceId = String(this.surfacePainterTargetId ?? "").trim();
+    if (!surfaceId) {
+      return;
+    }
+    const drawingPayload = this.buildSurfacePainterDrawingEntityPayload();
+    if (!drawingPayload?.imageDataUrl) {
+      this.appendChatLine("", "배경을 제외하고 남은 선이 없어 몹을 만들 수 없습니다.", "system");
+      return;
+    }
+    const mobName = this.setSurfacePainterMobDraftName(
+      surfaceId,
+      this.getSurfacePainterMobNameValue() || this.getSurfacePainterMobDraftName(surfaceId)
+    );
+
+    this.drawingEntitySpawnInFlight = true;
+    this.updateSurfacePainterSaveAvailability();
+    try {
+      const saveResult = await this.saveSurfacePainter({
+        closeOnSuccess: false,
+        announceMultiFace: false
+      });
+      if (!saveResult?.persisted) {
+        if (saveResult?.queuedCount > 0) {
+          this.appendChatLine(
+            "",
+            "그림 저장이 아직 서버에 반영되지 않아 몹 생성을 보류했습니다.",
+            "system"
+          );
+        } else if (saveResult?.failedCount > 0) {
+          this.appendChatLine(
+            "",
+            `몹 생성 전 그림 저장 실패: ${String(saveResult?.error ?? "unknown")}`,
+            "system"
+          );
+        }
+        return;
+      }
+
+      const response = await this.sendDrawingEntitySpawn(
+        {
+          sourceSurfaceId: surfaceId,
+          imageDataUrl: drawingPayload.imageDataUrl,
+          displayName: mobName,
+          pixelWidth: drawingPayload.pixelWidth,
+          pixelHeight: drawingPayload.pixelHeight,
+          aspectRatio: drawingPayload.aspectRatio,
+          scale: drawingPayload.scale,
+          motionRadius: drawingPayload.motionRadius
+        },
+        {
+          forceFlush: true
+        }
+      );
+      if (!response?.ok) {
+        const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
+        this.appendChatLine("", `선화 몹 생성 실패: ${reason}`, "system");
+        this.requestDrawingEntityState();
+        return;
+      }
+
+      const action = String(response?.action ?? "").trim().toLowerCase();
+      this.appendChatLine(
+        "",
+        action === "updated" ? "선화 몹 갱신 완료" : "선화 몹 생성 완료",
+        "system"
+      );
+      const nextEntry = this.normalizeDrawingEntityEntry(response?.entity ?? null);
+      if (nextEntry) {
+        this.setSurfacePainterMobDraftRadius(surfaceId, nextEntry.motionRadius);
+        const nextState = Array.from(this.drawingEntities.values()).filter((entry) => {
+          if (!entry) {
+            return false;
+          }
+          const sameEntityId = String(entry.entityId ?? "").trim() === nextEntry.entityId;
+          const sameOwnerSurface =
+            String(entry.ownerKey ?? "").trim() === nextEntry.ownerKey &&
+            String(entry.sourceSurfaceId ?? "").trim().toLowerCase() === nextEntry.sourceSurfaceId;
+          return !sameEntityId && !sameOwnerSurface;
+        });
+        nextState.push(nextEntry);
+        this.applyDrawingEntityState(nextState);
+      }
+      this.requestDrawingEntityState();
+      if (this.isSurfacePainterMobPodSurface(surfaceId)) {
+        this.syncSurfacePainterMobPanel();
+      } else {
+        this.closeSurfacePainter();
+      }
+    } finally {
+      this.drawingEntitySpawnInFlight = false;
+      this.updateSurfacePainterSaveAvailability();
+    }
+  }
+
+  async removeDrawingEntityFromSurfacePainter() {
+    if (
+      !this.surfacePainterOpen ||
+      this.surfacePainterSaveInFlight ||
+      this.drawingEntitySpawnInFlight ||
+      this.drawingEntityRemoveInFlight
+    ) {
+      return;
+    }
+    const surfaceId = String(this.surfacePainterTargetId ?? "").trim();
+    if (!surfaceId) {
+      return;
+    }
+    const ownDrawingEntity = this.getOwnDrawingEntityForSurface(surfaceId);
+    if (!ownDrawingEntity?.entityId) {
+      this.appendChatLine("", "삭제할 내 선화 몹이 없습니다.", "system");
+      this.updateSurfacePainterSaveAvailability();
+      return;
+    }
+
+    this.drawingEntityRemoveInFlight = true;
+    this.updateSurfacePainterSaveAvailability();
+    try {
+      const response = await this.sendDrawingEntityRemove(
+        {
+          entityId: ownDrawingEntity.entityId,
+          sourceSurfaceId: surfaceId
+        },
+        {
+          forceFlush: true
+        }
+      );
+      if (!response?.ok) {
+        const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
+        this.appendChatLine("", `선화 몹 삭제 실패: ${reason}`, "system");
+        this.requestDrawingEntityState();
+        return;
+      }
+      this.appendChatLine("", "선화 몹 삭제 완료", "system");
+      const nextState = Array.from(this.drawingEntities.values()).filter((entry) => {
+        if (!entry) {
+          return false;
+        }
+        const sameEntityId = String(entry.entityId ?? "").trim() === String(ownDrawingEntity.entityId ?? "").trim();
+        const sameOwnerSurface =
+          String(entry.ownerKey ?? "").trim() === String(this.promoOwnerKey ?? "").trim() &&
+          String(entry.sourceSurfaceId ?? "").trim().toLowerCase() === surfaceId.toLowerCase();
+        return !sameEntityId && !sameOwnerSurface;
+      });
+      this.applyDrawingEntityState(nextState);
+      this.requestDrawingEntityState();
+      this.updateSurfacePainterSaveAvailability();
+    } finally {
+      this.drawingEntityRemoveInFlight = false;
+      this.updateSurfacePainterSaveAvailability();
+    }
+  }
+
+  async removeDrawingEntityByEntry(rawEntry = null) {
+    const target = this.normalizeDrawingEntityEntry(rawEntry);
+    if (!target?.entityId || this.drawingEntityRemoveInFlight) {
+      return;
+    }
+    this.drawingEntityRemoveInFlight = true;
+    this.updateSurfacePainterSaveAvailability();
+    try {
+      const response = await this.sendDrawingEntityRemove(
+        {
+          entityId: target.entityId,
+          sourceSurfaceId: target.sourceSurfaceId
+        },
+        {
+          forceFlush: true
+        }
+      );
+      if (!response?.ok) {
+        const reason = String(response?.error ?? "").trim() || "알 수 없는 오류";
+        this.appendChatLine("", `선화 몹 삭제 실패: ${reason}`, "system");
+        this.requestDrawingEntityState();
+        return;
+      }
+      const nextState = Array.from(this.drawingEntities.values()).filter((entry) => {
+        if (!entry) {
+          return false;
+        }
+        return String(entry.entityId ?? "").trim() !== String(target.entityId ?? "").trim();
+      });
+      this.applyDrawingEntityState(nextState);
+      this.requestDrawingEntityState();
+    } finally {
+      this.drawingEntityRemoveInFlight = false;
+      this.updateSurfacePainterSaveAvailability();
     }
   }
 
@@ -9557,15 +10624,17 @@ export class GameRuntime {
     }
     this.hubFlowUiBound = true;
 
-    this.nicknameFormEl.addEventListener("submit", (event) => {
-      event.preventDefault();
-      this.confirmBridgeName();
-    });
-    this.npcChoiceBackBtnEl?.addEventListener("click", () => {
-      this.navigateNpcDialogueBack();
-    });
-    this.npcChoiceCloseBtnEl?.addEventListener("click", () => {
-      this.handleNpcDialogueDismiss();
+    this.captureManagedEventListeners(() => {
+      this.nicknameFormEl.addEventListener("submit", (event) => {
+        event.preventDefault();
+        this.confirmBridgeName();
+      });
+      this.npcChoiceBackBtnEl?.addEventListener("click", () => {
+        this.navigateNpcDialogueBack();
+      });
+      this.npcChoiceCloseBtnEl?.addEventListener("click", () => {
+        this.handleNpcDialogueDismiss();
+      });
     });
   }
 
@@ -10332,6 +11401,7 @@ export class GameRuntime {
 
   syncMobileUiState() {
     if (!this.mobileUiEl) {
+      this.syncPlacementSelectorUi();
       this.syncChatLiveUi();
       return;
     }
@@ -10344,6 +11414,9 @@ export class GameRuntime {
       this.promoPanelMobileOpen = false;
       this.syncPromoPanelUi();
     }
+    if (portraitBlocked && this.placementSelectorOpen) {
+      this.placementSelectorOpen = false;
+    }
     if (portraitBlocked && this.chatOpen) {
       this.setChatOpen(false);
       return;
@@ -10353,11 +11426,13 @@ export class GameRuntime {
       !portraitBlocked &&
       !this.chatOpen &&
       !this.promoPanelMobileOpen &&
+      !this.placementSelectorOpen &&
       this.canMovePlayer() &&
       !this.surfacePainterOpen &&
       this.flowStage !== "portal_transfer" &&
       (this.nicknameGateEl?.classList.contains("hidden") ?? true) &&
       (this.npcChoiceGateEl?.classList.contains("hidden") ?? true);
+    this.syncPlacementSelectorUi();
     this.mobileUiEl.classList.toggle("hidden", !visible);
     if (this.mobilePaintBtnEl) {
       const paintEnabled = this.isSurfacePaintFeatureEnabled();
@@ -11629,7 +12704,15 @@ void main() {
     if (this.portalTransitioning || this.surfacePainterOpen || this.surfacePainterDrawing) {
       return true;
     }
-    if (this.chalkDrawingActive || this.promoPlacementPreviewActive || this.hostCustomBlockPlacementPreviewActive) {
+    if (this.placementSelectorOpen) {
+      return true;
+    }
+    if (
+      this.chalkDrawingActive ||
+      this.promoPlacementPreviewActive ||
+      this.mobPodPlacementPreviewActive ||
+      this.hostCustomBlockPlacementPreviewActive
+    ) {
       return true;
     }
     if (this.objEditorDragging || this.chatOpen || this.isNpcChoiceGateOpen()) {
@@ -12198,6 +13281,9 @@ void main() {
     if (this.surfacePainterOpen) {
       return false;
     }
+    if (this.placementSelectorOpen) {
+      return false;
+    }
     if (!(this.nicknameGateEl?.classList.contains("hidden") ?? true)) {
       return false;
     }
@@ -12223,6 +13309,9 @@ void main() {
     if (this.surfacePainterOpen) {
       return false;
     }
+    if (this.placementSelectorOpen) {
+      return false;
+    }
     if (this.isOpeningVideoGateOpen()) {
       return false;
     }
@@ -12234,6 +13323,9 @@ void main() {
       return false;
     }
     if (this.surfacePainterOpen) {
+      return false;
+    }
+    if (this.placementSelectorOpen) {
       return false;
     }
     return this.hasHostPrivilege();
@@ -14350,9 +15442,7 @@ void main() {
       }
     }
     if (this.hostAZonePortalTargetApplyBtnEl) {
-      if (!this.hostAZonePortalTargetInputEl) {
-        this.hostAZonePortalTargetApplyBtnEl.classList.toggle("hidden", !A_ZONE_PORTAL_ENABLED);
-      }
+      this.hostAZonePortalTargetApplyBtnEl.classList.toggle("hidden", !A_ZONE_PORTAL_ENABLED);
       this.hostAZonePortalTargetApplyBtnEl.disabled = controlsBusy;
     }
     const portal1DisplayState = this.getPortalDisplayState("portal1");
@@ -14895,6 +15985,321 @@ void main() {
     ].join("|");
   }
 
+  normalizeMobPodObjectEntry(rawValue) {
+    if (!rawValue || typeof rawValue !== "object") {
+      return null;
+    }
+    const ownerKey = String(rawValue.ownerKey ?? "").trim().replace(/[^a-zA-Z0-9:_-]/g, "").slice(0, 96);
+    if (!ownerKey || ownerKey.length < 8) {
+      return null;
+    }
+    const scale = THREE.MathUtils.clamp(Number(rawValue.scale) || 1, PROMO_MIN_SCALE, PROMO_MAX_SCALE);
+    return {
+      ownerKey,
+      ownerName: this.formatPlayerName(rawValue.ownerName ?? "PLAYER"),
+      x: THREE.MathUtils.clamp(Number(rawValue.x) || 0, -2000, 2000),
+      y: THREE.MathUtils.clamp(Number(rawValue.y) || 0, -100, 400),
+      z: THREE.MathUtils.clamp(Number(rawValue.z) || 0, -2000, 2000),
+      yaw: this.normalizePromoYaw(rawValue.yaw, 0),
+      scale,
+      updatedAt: Math.max(0, Math.trunc(Number(rawValue.updatedAt) || Date.now()))
+    };
+  }
+
+  getMobPodObjectSignature(entry) {
+    if (!entry) {
+      return "";
+    }
+    return [
+      entry.ownerKey,
+      entry.ownerName,
+      entry.x.toFixed(3),
+      entry.y.toFixed(3),
+      entry.z.toFixed(3),
+      entry.yaw.toFixed(4),
+      entry.scale.toFixed(3),
+      entry.updatedAt
+    ].join("|");
+  }
+
+  normalizeDrawingEntityImageDataUrl(rawValue) {
+    const value = String(rawValue ?? "").trim();
+    if (!value || value.length > MAX_DRAWING_ENTITY_IMAGE_CHARS) {
+      return "";
+    }
+    return /^data:image\/(?:png|webp);base64,/i.test(value) ? value : "";
+  }
+
+  normalizeDrawingEntityEntry(rawValue) {
+    if (!rawValue || typeof rawValue !== "object") {
+      return null;
+    }
+    const entityId = String(rawValue.entityId ?? "").trim().replace(/[^a-zA-Z0-9:_-]/g, "").slice(0, 128);
+    const imageDataUrl = this.normalizeDrawingEntityImageDataUrl(
+      rawValue.imageDataUrl ?? rawValue.dataUrl ?? ""
+    );
+    const ownerKey = String(rawValue.ownerKey ?? "").trim().replace(/[^a-zA-Z0-9:_-]/g, "").slice(0, 96);
+    if (!entityId || !imageDataUrl || !ownerKey) {
+      return null;
+    }
+    const pixelWidth = Math.max(
+      1,
+      Math.min(2048, Math.trunc(Number(rawValue.pixelWidth) || 1))
+    );
+    const pixelHeight = Math.max(
+      1,
+      Math.min(2048, Math.trunc(Number(rawValue.pixelHeight) || 1))
+    );
+    const aspectRatio = THREE.MathUtils.clamp(
+      Number(rawValue.aspectRatio) || pixelWidth / Math.max(1, pixelHeight),
+      0.14,
+      4.2
+    );
+    const scale = THREE.MathUtils.clamp(
+      Number(rawValue.scale) || 1,
+      DRAWING_ENTITY_MIN_SCALE,
+      DRAWING_ENTITY_MAX_SCALE
+    );
+    const createdAt = Math.max(0, Math.trunc(Number(rawValue.createdAt) || Date.now()));
+    const updatedAt = Math.max(createdAt, Math.trunc(Number(rawValue.updatedAt) || createdAt));
+    return {
+      entityId,
+      ownerKey,
+      ownerName: this.formatPlayerName(rawValue.ownerName ?? "PLAYER"),
+      displayName: String(rawValue.displayName ?? rawValue.mobName ?? "")
+        .trim()
+        .replace(/\s+/g, "_")
+        .slice(0, 16),
+      sourceSurfaceId: String(rawValue.sourceSurfaceId ?? "").trim().toLowerCase(),
+      imageDataUrl,
+      x: THREE.MathUtils.clamp(Number(rawValue.x) || 0, -2000, 2000),
+      y: THREE.MathUtils.clamp(Number(rawValue.y) || 0, -4, 40),
+      z: THREE.MathUtils.clamp(Number(rawValue.z) || 0, -2000, 2000),
+      yaw: this.normalizePromoYaw(rawValue.yaw, 0),
+      scale,
+      aspectRatio,
+      pixelWidth,
+      pixelHeight,
+      motionSeed: Math.max(0, Math.trunc(Number(rawValue.motionSeed) || 0)),
+      motionRadius: THREE.MathUtils.clamp(
+        Number(rawValue.motionRadius) || DRAWING_ENTITY_DEFAULT_MOTION_RADIUS,
+        DRAWING_ENTITY_MIN_MOTION_RADIUS,
+        DRAWING_ENTITY_MAX_MOTION_RADIUS
+      ),
+      motionStretch: THREE.MathUtils.clamp(Number(rawValue.motionStretch) || 0.65, 0.35, 1.2),
+      motionSpeed: THREE.MathUtils.clamp(Number(rawValue.motionSpeed) || 0.72, 0.18, 2.2),
+      bobAmplitude: THREE.MathUtils.clamp(Number(rawValue.bobAmplitude) || 0.12, 0.04, 0.42),
+      phaseOffset: THREE.MathUtils.clamp(Number(rawValue.phaseOffset) || 0, 0, Math.PI * 2),
+      createdAt,
+      updatedAt
+    };
+  }
+
+  getDrawingEntitySignature(entry) {
+    if (!entry) {
+      return "";
+    }
+    return [
+      entry.entityId,
+      entry.ownerKey,
+      entry.ownerName,
+      entry.displayName,
+      entry.sourceSurfaceId,
+      entry.imageDataUrl.slice(0, 64),
+      entry.imageDataUrl.length,
+      entry.x.toFixed(3),
+      entry.y.toFixed(3),
+      entry.z.toFixed(3),
+      entry.scale.toFixed(3),
+      entry.aspectRatio.toFixed(3),
+      entry.motionSeed,
+      entry.motionRadius.toFixed(3),
+      entry.motionStretch.toFixed(3),
+      entry.motionSpeed.toFixed(3),
+      entry.bobAmplitude.toFixed(3),
+      entry.phaseOffset.toFixed(3)
+    ].join("|");
+  }
+
+  getOwnDrawingEntityForSurface(surfaceId = this.surfacePainterTargetId) {
+    const normalizedSurfaceId = String(surfaceId ?? "").trim().toLowerCase();
+    const ownerKey = String(this.promoOwnerKey ?? "").trim();
+    if (!normalizedSurfaceId || !ownerKey || this.drawingEntities.size <= 0) {
+      return null;
+    }
+    let newestEntry = null;
+    for (const entry of this.drawingEntities.values()) {
+      if (!entry) {
+        continue;
+      }
+      if (String(entry.ownerKey ?? "").trim() !== ownerKey) {
+        continue;
+      }
+      if (String(entry.sourceSurfaceId ?? "").trim().toLowerCase() !== normalizedSurfaceId) {
+        continue;
+      }
+      if (!newestEntry || Number(entry.updatedAt) > Number(newestEntry.updatedAt)) {
+        newestEntry = entry;
+      }
+    }
+    return newestEntry;
+  }
+
+  disposeDrawingEntityVisual(entityId) {
+    const key = String(entityId ?? "").trim();
+    if (!key) {
+      return;
+    }
+    const visual = this.drawingEntityVisuals.get(key);
+    if (!visual) {
+      return;
+    }
+    if (visual.label) {
+      this.disposeTextLabel(visual.label);
+    }
+    if (visual.imageTexture) {
+      visual.imageTexture.dispose?.();
+    }
+    this.scene.remove(visual.group);
+    disposeMeshTree(visual.group);
+    this.drawingEntityVisuals.delete(key);
+  }
+
+  clearDrawingEntityVisuals() {
+    for (const entityId of this.drawingEntityVisuals.keys()) {
+      this.disposeDrawingEntityVisual(entityId);
+    }
+  }
+
+  createDrawingEntityVisual(entry) {
+    const height = THREE.MathUtils.clamp(
+      DRAWING_ENTITY_BASE_HEIGHT * entry.scale,
+      DRAWING_ENTITY_MIN_HEIGHT,
+      DRAWING_ENTITY_MAX_HEIGHT
+    );
+    const width = THREE.MathUtils.clamp(height * entry.aspectRatio, 0.34, 2.8);
+    const group = new THREE.Group();
+    group.position.set(entry.x, entry.y, entry.z);
+
+    const imageTexture = this.textureLoader.load(entry.imageDataUrl);
+    imageTexture.colorSpace = THREE.SRGBColorSpace;
+    imageTexture.minFilter = THREE.LinearFilter;
+    imageTexture.magFilter = THREE.LinearFilter;
+    imageTexture.generateMipmaps = false;
+
+    const planeMaterial = new THREE.MeshBasicMaterial({
+      map: imageTexture,
+      transparent: true,
+      alphaTest: 0.08,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    });
+    planeMaterial.toneMapped = false;
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(width, height), planeMaterial);
+    plane.position.set(0, height * 0.52, 0);
+    plane.renderOrder = 28;
+    group.add(plane);
+
+    const shadowMaterial = new THREE.MeshBasicMaterial({
+      color: 0x05080d,
+      transparent: true,
+      opacity: 0.14,
+      depthWrite: false
+    });
+    shadowMaterial.toneMapped = false;
+    const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.5, 24), shadowMaterial);
+    shadow.rotation.x = -Math.PI * 0.5;
+    shadow.position.y = 0.02;
+    shadow.scale.set(Math.max(0.2, width * 0.42), Math.max(0.14, width * 0.22), 1);
+    group.add(shadow);
+
+    const label = this.createTextLabel(entry.displayName || entry.ownerName, "name");
+    label.position.set(0, height + 0.4, 0);
+    label.renderOrder = 30;
+    group.add(label);
+
+    return {
+      group,
+      plane,
+      planeWidth: width,
+      planeHeight: height,
+      shadow,
+      label,
+      imageTexture
+    };
+  }
+
+  applyDrawingEntityState(rawEntities = []) {
+    const incoming = Array.isArray(rawEntities) ? rawEntities : [];
+    const nextMap = new Map();
+    for (const rawValue of incoming) {
+      const normalized = this.normalizeDrawingEntityEntry(rawValue);
+      if (!normalized) {
+        continue;
+      }
+      nextMap.set(normalized.entityId, normalized);
+    }
+
+    for (const entityId of this.drawingEntityVisuals.keys()) {
+      if (!nextMap.has(entityId)) {
+        this.disposeDrawingEntityVisual(entityId);
+      }
+    }
+
+    for (const [entityId, nextEntry] of nextMap.entries()) {
+      const prevEntry = this.drawingEntities.get(entityId);
+      const prevSignature = this.getDrawingEntitySignature(prevEntry);
+      const nextSignature = this.getDrawingEntitySignature(nextEntry);
+      if (prevSignature === nextSignature && this.drawingEntityVisuals.has(entityId)) {
+        continue;
+      }
+      this.disposeDrawingEntityVisual(entityId);
+      const visual = this.createDrawingEntityVisual(nextEntry);
+      this.scene.add(visual.group);
+      this.drawingEntityVisuals.set(entityId, visual);
+    }
+
+    this.drawingEntities = nextMap;
+    this.updateSurfacePainterSaveAvailability();
+  }
+
+  updateDrawingEntities(_delta = 0) {
+    if (this.drawingEntities.size <= 0 || this.drawingEntityVisuals.size <= 0) {
+      return;
+    }
+    const nowSeconds = Date.now() * 0.001;
+    for (const [entityId, entry] of this.drawingEntities.entries()) {
+      const visual = this.drawingEntityVisuals.get(entityId);
+      if (!visual?.group) {
+        continue;
+      }
+      const elapsed = Math.max(0, nowSeconds - entry.createdAt / 1000);
+      const phase = entry.phaseOffset + elapsed * entry.motionSpeed;
+      const offsetX = Math.sin(phase) * entry.motionRadius;
+      const offsetZ = Math.cos(phase * 0.82 + entry.phaseOffset * 0.7) * entry.motionRadius * entry.motionStretch;
+      const bob = Math.abs(Math.sin(phase * 1.7)) * entry.bobAmplitude;
+      const pulse = 1 + Math.sin(phase * 2.3) * 0.04;
+      visual.group.position.set(entry.x + offsetX, entry.y + bob, entry.z + offsetZ);
+      visual.plane.scale.set(pulse, 1 + Math.cos(phase * 2.1) * 0.025, 1);
+      if (visual.shadow?.material) {
+        visual.shadow.material.opacity = THREE.MathUtils.clamp(
+          0.08 + (1 - bob / Math.max(entry.bobAmplitude, 0.001)) * 0.08,
+          0.06,
+          0.18
+        );
+      }
+      if (visual.label) {
+        visual.label.position.y = visual.planeHeight + 0.4 + bob * 0.1;
+      }
+      this.drawingEntityCameraFacingTarget.set(
+        this.camera.position.x,
+        visual.group.position.y + visual.planeHeight * 0.5,
+        this.camera.position.z
+      );
+      visual.group.lookAt(this.drawingEntityCameraFacingTarget);
+    }
+  }
+
   setPromoPanelStatus(message = "") {
     if (!this.promoStatusEl) {
       return;
@@ -15049,6 +16454,10 @@ void main() {
     return this.promoObjects.get(this.promoOwnerKey) ?? null;
   }
 
+  getOwnMobPodObject() {
+    return this.mobPodObjects.get(this.promoOwnerKey) ?? null;
+  }
+
   syncOwnPromoPreviewVisibility() {
     const ownerKey = String(this.promoOwnerKey ?? "").trim();
     if (!ownerKey) {
@@ -15062,6 +16471,22 @@ void main() {
       this.promoPlacementPreviewActive &&
       this.promoPlacementPreviewRepositionOwn &&
       Boolean(this.getOwnPromoObject());
+    visual.group.visible = !shouldHide;
+  }
+
+  syncOwnMobPodPreviewVisibility() {
+    const ownerKey = String(this.promoOwnerKey ?? "").trim();
+    if (!ownerKey) {
+      return;
+    }
+    const visual = this.mobPodObjectVisuals.get(ownerKey);
+    if (!visual?.group) {
+      return;
+    }
+    const shouldHide =
+      this.mobPodPlacementPreviewActive &&
+      this.mobPodPlacementPreviewRepositionOwn &&
+      Boolean(this.getOwnMobPodObject());
     visual.group.visible = !shouldHide;
   }
 
@@ -15084,6 +16509,126 @@ void main() {
     return nearest;
   }
 
+  normalizePlacementPanelFocusMode(mode) {
+    return mode === "mob" ? "mob" : "promo";
+  }
+
+  isPlacementSelectorReady() {
+    if (this.isMobilePortraitBlocked()) {
+      return false;
+    }
+    if (this.surfacePainterOpen || this.chatOpen || this.bootIntroVideoPlaying) {
+      return false;
+    }
+    if (this.flowStage === "portal_transfer") {
+      return false;
+    }
+    if (!(this.nicknameGateEl?.classList.contains("hidden") ?? true)) {
+      return false;
+    }
+    if (!(this.npcChoiceGateEl?.classList.contains("hidden") ?? true)) {
+      return false;
+    }
+    if (this.mobileEnabled ? this.promoPanelMobileOpen : this.promoPanelDesktopOpen) {
+      return false;
+    }
+    return true;
+  }
+
+  syncPlacementPanelFocusUi() {
+    const focusMode = this.normalizePlacementPanelFocusMode(this.placementPanelFocusMode);
+    this.placementPanelFocusMode = focusMode;
+    this.promoPlacementSectionEl?.classList.toggle("is-focus-target", focusMode === "promo");
+    this.mobPodPlacementSectionEl?.classList.toggle("is-focus-target", focusMode === "mob");
+  }
+
+  scrollPlacementPanelSectionIntoView(mode) {
+    const focusMode = this.normalizePlacementPanelFocusMode(mode);
+    const targetEl = focusMode === "mob" ? this.mobPodPlacementSectionEl : this.promoPlacementSectionEl;
+    if (!targetEl || typeof window === "undefined") {
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      targetEl.scrollIntoView({
+        block: "start",
+        inline: "nearest",
+        behavior: this.mobileEnabled ? "auto" : "smooth"
+      });
+    });
+  }
+
+  syncPlacementSelectorUi() {
+    this.resolveUiElements();
+    const visible = Boolean(this.placementSelectorOpen) && this.isPlacementSelectorReady();
+    if (this.placementSelectorOpen !== visible) {
+      this.placementSelectorOpen = visible;
+    }
+    if (this.placementSelectorEl) {
+      this.placementSelectorEl.classList.toggle("hidden", !visible);
+    }
+    if (typeof document !== "undefined" && document.body) {
+      document.body.classList.toggle("placement-selector-open", visible);
+    }
+    this.syncPlacementPanelFocusUi();
+    return visible;
+  }
+
+  setPlacementSelectorOpen(nextOpen, { syncUi = true } = {}) {
+    const shouldOpen = Boolean(nextOpen) && this.isPlacementSelectorReady();
+    if (this.placementSelectorOpen === shouldOpen) {
+      if (syncUi) {
+        this.syncPromoPanelUi();
+        if (this.mobileEnabled) {
+          this.syncMobileUiState();
+        }
+      }
+      return;
+    }
+    this.placementSelectorOpen = shouldOpen;
+    if (shouldOpen) {
+      this.chatInputEl?.blur?.();
+      this.resetMobileControlInputState();
+      if (typeof document !== "undefined" && document.pointerLockElement === this.renderer.domElement) {
+        document.exitPointerLock?.();
+      }
+    }
+    if (syncUi) {
+      this.syncPromoPanelUi();
+      if (this.mobileEnabled) {
+        this.syncMobileUiState();
+      }
+    }
+  }
+
+  openPlacementSelector({ preferredMode = this.placementPanelFocusMode } = {}) {
+    if (
+      this.promoPlacementPreviewActive ||
+      this.mobPodPlacementPreviewActive ||
+      this.hostCustomBlockPlacementPreviewActive
+    ) {
+      return false;
+    }
+    this.placementPanelFocusMode = this.normalizePlacementPanelFocusMode(preferredMode);
+    this.setPlacementSelectorOpen(true, { syncUi: true });
+    return this.placementSelectorOpen;
+  }
+
+  openPlacementPanelForMode(mode) {
+    const focusMode = this.normalizePlacementPanelFocusMode(mode);
+    this.placementPanelFocusMode = focusMode;
+    this.setPlacementSelectorOpen(false, { syncUi: false });
+    if (this.mobileEnabled) {
+      this.setPromoPanelMobileOpen(false, { syncMobileUi: false });
+    } else {
+      this.setPromoPanelDesktopOpen(false, { syncUi: false });
+    }
+    if (focusMode === "mob") {
+      this.beginMobPodPlacementPreview({ announce: true, syncUi: true, allowOwnReposition: true });
+      return;
+    }
+    this.beginPromoPlacementPreview({ announce: true, syncUi: true, allowOwnReposition: true });
+  }
+
   setPromoPanelMobileOpen(nextOpen, { syncMobileUi = true } = {}) {
     const shouldOpen =
       Boolean(nextOpen) &&
@@ -15100,6 +16645,7 @@ void main() {
     }
     this.promoPanelMobileOpen = shouldOpen;
     if (shouldOpen) {
+      this.placementSelectorOpen = false;
       this.chatInputEl?.blur?.();
       this.resetMobileControlInputState();
       if (typeof document !== "undefined" && document.pointerLockElement === this.renderer.domElement) {
@@ -15122,6 +16668,7 @@ void main() {
     }
     this.promoPanelDesktopOpen = shouldOpen;
     if (shouldOpen) {
+      this.placementSelectorOpen = false;
       this.chatInputEl?.blur?.();
       if (typeof document !== "undefined" && document.pointerLockElement === this.renderer.domElement) {
         document.exitPointerLock?.();
@@ -15359,6 +16906,7 @@ void main() {
 
   syncPromoPanelUi() {
     this.resolveUiElements();
+    const placementSelectorVisible = this.syncPlacementSelectorUi();
     const promoPanelReady =
       !this.surfacePainterOpen &&
       !this.bootIntroVideoPlaying &&
@@ -15385,13 +16933,22 @@ void main() {
       this.promoPanelCloseBtnEl.classList.toggle("hidden", !(this.mobileEnabled && panelVisible));
     }
     if (this.mobilePromoPlaceBtnEl) {
-      this.mobilePromoPlaceBtnEl.classList.toggle("active", Boolean(this.mobileEnabled && panelVisible));
+      this.mobilePromoPlaceBtnEl.classList.toggle(
+        "active",
+        Boolean(this.mobileEnabled && (panelVisible || placementSelectorVisible))
+      );
     }
     document.body.classList.toggle("promo-desktop-open", Boolean(desktopPanelVisible));
 
     const connected = Boolean(this.socket && this.networkConnected);
     const busy = this.promoSetInFlight || this.promoRemoveInFlight;
     const own = this.getOwnPromoObject();
+    const ownMobPod = this.getOwnMobPodObject();
+    const mobPodBusy = this.mobPodSetInFlight || this.mobPodRemoveInFlight;
+    const mobPodPreviewActive = this.mobPodPlacementPreviewActive;
+    const mobPodPreviewBlockReasonMessage = this.getPromoPlacementBlockReasonMessage(
+      this.mobPodPlacementPreviewBlockReason
+    );
     const hasOwnPromo = Boolean(own);
     const previewActive = this.promoPlacementPreviewActive && !hasOwnPromo;
     const previewScaleX = THREE.MathUtils.clamp(
@@ -15440,7 +16997,6 @@ void main() {
     const ownKind = this.normalizePromoKind(own?.kind ?? "block", "block");
     const linkValue = own?.linkUrl ?? "";
     const placeBtnLabel = previewActive ? "배치 확정" : "앞에 배치+저장";
-    const mobilePromoLabel = previewActive ? "확정" : "배치";
     const prefersTouchUi =
       typeof window !== "undefined" &&
       typeof window.matchMedia === "function" &&
@@ -15476,11 +17032,20 @@ void main() {
       this.promoPlaceBtnEl.textContent = placeBtnLabel;
     }
     if (this.mobilePromoPlaceBtnEl) {
-      this.mobilePromoPlaceBtnEl.classList.toggle("hidden", hasOwnPromo);
-      this.mobilePromoPlaceBtnEl.textContent = mobilePromoLabel;
+      this.mobilePromoPlaceBtnEl.classList.remove("hidden");
+      this.mobilePromoPlaceBtnEl.textContent = "배치";
     }
     if (this.promoRemoveBtnEl) {
       this.promoRemoveBtnEl.textContent = "철거";
+    }
+    if (this.mobPodPlaceBtnEl) {
+      if (mobPodPreviewActive) {
+        this.mobPodPlaceBtnEl.textContent = this.mobPodPlacementPreviewRepositionOwn
+          ? "알 오브젝트 위치 확정"
+          : "알 오브젝트 배치 확정";
+      } else {
+        this.mobPodPlaceBtnEl.textContent = ownMobPod ? "알 오브젝트 위치 갱신" : "알 오브젝트 앞에 배치";
+      }
     }
     if (panelVisible) {
       this.initPromoDrawCanvasIfNeeded();
@@ -15620,13 +17185,50 @@ void main() {
     this.promoPlaceBtnEl && (this.promoPlaceBtnEl.disabled = disabled);
     this.promoSaveBtnEl && (this.promoSaveBtnEl.disabled = disabled);
     this.promoRemoveBtnEl && (this.promoRemoveBtnEl.disabled = disabled);
+    this.mobPodPlaceBtnEl &&
+      (this.mobPodPlaceBtnEl.disabled = !connected || mobPodBusy || Boolean(promoActionBlockedReason));
+    this.mobPodRemoveBtnEl &&
+      (this.mobPodRemoveBtnEl.disabled = !connected || mobPodBusy || mobPodPreviewActive || !ownMobPod);
+    if (this.mobPodStatusEl) {
+      if (!connected) {
+        this.mobPodStatusEl.textContent = "서버 연결 후 알 오브젝트를 배치할 수 있습니다.";
+      } else if (mobPodBusy) {
+        this.mobPodStatusEl.textContent = "알 오브젝트 동기화 중...";
+      } else if (mobPodPreviewActive) {
+        if (mobPodPreviewBlockReasonMessage) {
+          this.mobPodStatusEl.textContent = `배치 불가: ${mobPodPreviewBlockReasonMessage}`;
+        } else {
+          this.mobPodStatusEl.textContent = this.mobPodPlacementPreviewRepositionOwn
+            ? "알 오브젝트 위치 미리보기 중 · 클릭 또는 버튼으로 확정"
+            : "알 오브젝트 배치 미리보기 중 · 클릭 또는 버튼으로 확정";
+        }
+      } else if (promoActionBlockedReason) {
+        this.mobPodStatusEl.textContent = promoActionBlockedReason;
+      } else if (ownMobPod) {
+        this.mobPodStatusEl.textContent = "알 오브젝트 배치됨 · 가까이 가서 F로 몹 캔버스를 열 수 있습니다.";
+      } else {
+        this.mobPodStatusEl.textContent = "아직 배치된 알 오브젝트가 없습니다.";
+      }
+    }
 
     if (!connected) {
       this.setPromoPanelStatus("서버 연결 후 사용 가능");
     } else if (busy) {
       this.setPromoPanelStatus("홍보 오브젝트 동기화 중...");
+    } else if (mobPodBusy) {
+      this.setPromoPanelStatus("알 오브젝트 동기화 중...");
     } else if (promoActionBlockedReason) {
       this.setPromoPanelStatus(promoActionBlockedReason);
+    } else if (mobPodPreviewActive) {
+      if (mobPodPreviewBlockReasonMessage) {
+        this.setPromoPanelStatus(`알 배치 불가: ${mobPodPreviewBlockReasonMessage}`);
+      } else {
+        this.setPromoPanelStatus(
+          this.mobPodPlacementPreviewRepositionOwn
+            ? "알 위치 미리보기 중 · 클릭 또는 버튼으로 확정"
+            : "알 배치 미리보기 중 · 클릭 또는 버튼으로 확정"
+        );
+      }
     } else if (previewActive) {
       const blockReasonMessage = this.getPromoPlacementBlockReasonMessage(
         this.promoPlacementPreviewBlockReason
@@ -15637,9 +17239,9 @@ void main() {
         this.setPromoPanelStatus("배치 미리보기 중 · 휠/크기 조절 후 배치 확정");
       }
     } else if (own) {
-      this.setPromoPanelStatus("내 오브젝트 배치됨 · Y로 위치 이동 · 가까이서 수정 가능");
+      this.setPromoPanelStatus("내 오브젝트 배치됨 · 패널에서 위치 갱신 가능");
     } else {
-      this.setPromoPanelStatus("내 오브젝트 없음 · Y로 배치");
+      this.setPromoPanelStatus("내 오브젝트 없음 · 배치 메뉴에서 생성");
     }
   }
 
@@ -15846,6 +17448,241 @@ void main() {
     return "";
   }
 
+  ensureMobPodPlacementPreviewMesh() {
+    if (this.mobPodPlacementPreviewMesh) {
+      return this.mobPodPlacementPreviewMesh;
+    }
+
+    const frameWidth = 1.26;
+    const frameHeight = 1.72;
+    const frameDepth = 0.22;
+    const panelWidth = 0.96;
+    const panelHeight = 1.28;
+
+    const group = new THREE.Group();
+    const accentMaterial = new THREE.MeshStandardMaterial({
+      color: 0x91b7da,
+      emissive: 0x19324d,
+      emissiveIntensity: 0.48,
+      transparent: true,
+      opacity: 0.48,
+      depthWrite: false,
+      roughness: 0.38,
+      metalness: 0.18
+    });
+    const shellMaterial = new THREE.MeshStandardMaterial({
+      color: 0xe8f4ff,
+      emissive: 0x314a66,
+      emissiveIntensity: 0.22,
+      transparent: true,
+      opacity: 0.24,
+      depthWrite: false,
+      roughness: 0.24,
+      metalness: 0.04
+    });
+    const screenMaterial = new THREE.MeshStandardMaterial({
+      color: 0xf5fbff,
+      emissive: 0x314a66,
+      emissiveIntensity: 0.32,
+      transparent: true,
+      opacity: 0.2,
+      depthWrite: false,
+      roughness: 0.16,
+      metalness: 0.02
+    });
+    screenMaterial.toneMapped = false;
+
+    const baseRing = new THREE.Mesh(new THREE.TorusGeometry(0.48, 0.09, 18, 44), accentMaterial);
+    baseRing.rotation.x = Math.PI * 0.5;
+    baseRing.position.y = 0.14;
+    baseRing.renderOrder = 26;
+    group.add(baseRing);
+
+    const shell = new THREE.Mesh(new THREE.SphereGeometry(0.72, 38, 34), shellMaterial);
+    shell.scale.set(0.88, 1.1, 0.62);
+    shell.position.y = 0.94;
+    shell.renderOrder = 24;
+    group.add(shell);
+
+    const frameMaterial = accentMaterial.clone();
+    frameMaterial.transparent = true;
+    frameMaterial.opacity = 0.58;
+    frameMaterial.depthWrite = false;
+    const frame = new THREE.Mesh(new THREE.CircleGeometry(frameWidth * 0.5, 48), frameMaterial);
+    frame.scale.y = frameHeight / Math.max(frameWidth, 0.001);
+    frame.position.set(0, 0.98, frameDepth * 0.51);
+    frame.renderOrder = 27;
+    group.add(frame);
+
+    const screen = new THREE.Mesh(new THREE.CircleGeometry(panelWidth * 0.5, 48), screenMaterial);
+    screen.scale.y = panelHeight / Math.max(panelWidth, 0.001);
+    screen.position.set(0, 0.98, frameDepth * 0.58);
+    screen.renderOrder = 28;
+    group.add(screen);
+
+    group.visible = false;
+    group.userData.previewPrimaryMaterials = [shellMaterial, screenMaterial];
+    group.userData.previewAccentMaterials = [accentMaterial, frameMaterial];
+    this.scene.add(group);
+    this.mobPodPlacementPreviewMesh = group;
+    return group;
+  }
+
+  setMobPodPlacementPreviewTint(blocked = false) {
+    const preview = this.mobPodPlacementPreviewMesh;
+    if (!preview) {
+      return;
+    }
+    const primaryMaterials = Array.isArray(preview.userData.previewPrimaryMaterials)
+      ? preview.userData.previewPrimaryMaterials
+      : [];
+    const accentMaterials = Array.isArray(preview.userData.previewAccentMaterials)
+      ? preview.userData.previewAccentMaterials
+      : [];
+    const primaryColor = blocked ? 0xff8c99 : 0xe8f4ff;
+    const primaryEmissive = blocked ? 0x4a1620 : 0x314a66;
+    const accentColor = blocked ? 0xffd7de : 0x91b7da;
+    const accentEmissive = blocked ? 0x62121d : 0x19324d;
+    for (const material of primaryMaterials) {
+      material?.color?.setHex?.(primaryColor);
+      material?.emissive?.setHex?.(primaryEmissive);
+    }
+    for (const material of accentMaterials) {
+      material?.color?.setHex?.(accentColor);
+      material?.emissive?.setHex?.(accentEmissive);
+    }
+  }
+
+  clearMobPodPlacementPreview({ syncUi = true } = {}) {
+    this.mobPodPlacementPreviewActive = false;
+    this.mobPodPlacementPreviewRepositionOwn = false;
+    this.mobPodPlacementPreviewBlockReason = "";
+    this.mobPodPlacementPreviewTransform = null;
+    if (this.mobPodPlacementPreviewMesh) {
+      this.mobPodPlacementPreviewMesh.visible = false;
+    }
+    this.syncOwnMobPodPreviewVisibility();
+    if (syncUi) {
+      this.syncPromoPanelUi();
+      if (this.mobileEnabled) {
+        this.syncMobileUiState();
+      }
+    }
+  }
+
+  updateMobPodPlacementPreview() {
+    if (!this.mobPodPlacementPreviewActive) {
+      if (this.mobPodPlacementPreviewMesh) {
+        this.mobPodPlacementPreviewMesh.visible = false;
+      }
+      this.syncOwnMobPodPreviewVisibility();
+      return;
+    }
+    if (!(this.socket && this.networkConnected)) {
+      this.clearMobPodPlacementPreview({ syncUi: true });
+      return;
+    }
+
+    const ownMobPod = this.getOwnMobPodObject();
+    if (ownMobPod && !this.mobPodPlacementPreviewRepositionOwn) {
+      this.clearMobPodPlacementPreview({ syncUi: true });
+      return;
+    }
+    if (!ownMobPod && this.mobPodPlacementPreviewRepositionOwn) {
+      this.mobPodPlacementPreviewRepositionOwn = false;
+    }
+
+    const preview = this.ensureMobPodPlacementPreviewMesh();
+    const transform = this.getPromoPlacementTransform();
+    const blockReason = this.getPromoPlacementBlockReason(transform, 1);
+    this.mobPodPlacementPreviewBlockReason = blockReason;
+    this.mobPodPlacementPreviewTransform = transform;
+
+    preview.position.set(transform.x, transform.y, transform.z);
+    preview.rotation.set(0, this.normalizePromoYaw(transform.yaw, 0), 0);
+    preview.visible = true;
+    this.setMobPodPlacementPreviewTint(Boolean(blockReason));
+    this.syncOwnMobPodPreviewVisibility();
+  }
+
+  beginMobPodPlacementPreview({ announce = true, syncUi = true, allowOwnReposition = true } = {}) {
+    const ownMobPod = this.getOwnMobPodObject();
+    const repositionOwn = Boolean(allowOwnReposition && ownMobPod);
+    const policyBlockedReason = this.getPromoActionBlockedReason();
+    if (policyBlockedReason) {
+      if (announce) {
+        this.appendChatLine("", policyBlockedReason, "system");
+      }
+      if (syncUi) {
+        this.syncPromoPanelUi();
+      }
+      return false;
+    }
+    if (this.promoPlacementPreviewActive) {
+      this.clearPromoPlacementPreview({ syncUi: false });
+    }
+    if (this.hostCustomBlockPlacementPreviewActive) {
+      this.clearHostCustomBlockPlacementPreview({ syncUi: false });
+    }
+    if (this.mobPodPlacementPreviewActive) {
+      this.mobPodPlacementPreviewRepositionOwn = repositionOwn;
+      this.updateMobPodPlacementPreview();
+      if (syncUi) {
+        this.syncPromoPanelUi();
+        if (this.mobileEnabled) {
+          this.syncMobileUiState();
+        }
+      }
+      return true;
+    }
+    this.mobPodPlacementPreviewActive = true;
+    this.mobPodPlacementPreviewRepositionOwn = repositionOwn;
+    this.mobPodPlacementPreviewBlockReason = "";
+    this.mobPodPlacementPreviewTransform = null;
+    this.ensureMobPodPlacementPreviewMesh();
+    this.updateMobPodPlacementPreview();
+    if (syncUi) {
+      this.syncPromoPanelUi();
+      if (this.mobileEnabled) {
+        this.syncMobileUiState();
+      }
+    }
+    if (announce) {
+      this.appendChatLine(
+        "",
+        repositionOwn
+          ? "알 오브젝트 이동 미리보기 시작: 위치를 맞춘 뒤 클릭 또는 버튼으로 확정"
+          : "알 오브젝트 배치 미리보기 시작: 위치를 맞춘 뒤 클릭 또는 버튼으로 확정",
+        "system"
+      );
+    }
+    return true;
+  }
+
+  confirmMobPodPlacementPreview() {
+    if (!this.mobPodPlacementPreviewActive) {
+      return false;
+    }
+    this.updateMobPodPlacementPreview();
+    const blockReason = this.mobPodPlacementPreviewBlockReason;
+    if (blockReason) {
+      const message =
+        this.getPromoPlacementBlockReasonMessage(blockReason) || PLAYER_PLACEABLE_BLOCKED_MESSAGE;
+      if (message) {
+        this.appendChatLine("", message, "system");
+      }
+      this.syncPromoPanelUi();
+      return true;
+    }
+    const transform = this.mobPodPlacementPreviewTransform ?? this.getPromoPlacementTransform();
+    this.clearMobPodPlacementPreview({ syncUi: true });
+    this.requestMobPodUpsert({
+      transformOverride: transform,
+      skipPlacementPreview: true
+    });
+    return true;
+  }
+
   ensurePromoPlacementPreviewMesh() {
     if (this.promoPlacementPreviewMesh) {
       return this.promoPlacementPreviewMesh;
@@ -15993,6 +17830,9 @@ void main() {
     }
     if (this.hostCustomBlockPlacementPreviewActive) {
       this.clearHostCustomBlockPlacementPreview({ syncUi: true });
+    }
+    if (this.mobPodPlacementPreviewActive) {
+      this.clearMobPodPlacementPreview({ syncUi: false });
     }
     if (this.promoPlacementPreviewActive) {
       this.promoPlacementPreviewRepositionOwn = repositionOwn;
@@ -16425,6 +18265,104 @@ void main() {
     });
   }
 
+  requestMobPodState() {
+    if (!(this.socket && this.networkConnected)) {
+      return;
+    }
+    this.socket.emit("mobpod:state:request");
+  }
+
+  requestMobPodUpsert({ transformOverride = null, skipPlacementPreview = false } = {}) {
+    if (!(this.socket && this.networkConnected)) {
+      this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
+      return;
+    }
+    const promoActionBlockedReason = this.getPromoActionBlockedReason();
+    if (promoActionBlockedReason) {
+      this.appendChatLine("", promoActionBlockedReason, "system");
+      this.syncPromoPanelUi();
+      return;
+    }
+    if (this.mobPodSetInFlight) {
+      return;
+    }
+    if (!skipPlacementPreview) {
+      if (!this.mobPodPlacementPreviewActive) {
+        this.beginMobPodPlacementPreview({ announce: true, syncUi: true, allowOwnReposition: true });
+      } else {
+        this.confirmMobPodPlacementPreview();
+      }
+      return;
+    }
+    if (this.mobPodPlacementPreviewActive) {
+      this.clearMobPodPlacementPreview({ syncUi: false });
+    }
+    const transform = transformOverride && typeof transformOverride === "object"
+      ? {
+          x: Number(transformOverride.x),
+          y: Number(transformOverride.y),
+          z: Number(transformOverride.z),
+          yaw: this.normalizePromoYaw(transformOverride.yaw, 0)
+        }
+      : this.getPromoPlacementTransform();
+    this.mobPodSetInFlight = true;
+    this.syncPromoPanelUi();
+    this.socket.emit(
+      "mobpod:upsert",
+      {
+        x: transform.x,
+        y: transform.y,
+        z: transform.z,
+        yaw: this.normalizePromoYaw(transform.yaw, 0),
+        scale: 1,
+        forceFlush: true
+      },
+      (response = {}) => {
+        this.mobPodSetInFlight = false;
+        if (!response?.ok) {
+          const errorText = String(response?.error ?? "unknown");
+          this.appendChatLine("", `알 오브젝트 저장 실패: ${errorText}`, "system");
+          this.syncPromoPanelUi();
+          return;
+        }
+        this.requestMobPodState();
+        this.syncPromoPanelUi();
+      }
+    );
+  }
+
+  requestMobPodRemove() {
+    if (!(this.socket && this.networkConnected)) {
+      this.appendChatLine("", "서버 연결 후 다시 시도하세요.", "system");
+      return;
+    }
+    if (this.mobPodRemoveInFlight) {
+      return;
+    }
+    if (this.mobPodPlacementPreviewActive) {
+      this.clearMobPodPlacementPreview({ syncUi: false });
+    }
+    this.mobPodRemoveInFlight = true;
+    this.syncPromoPanelUi();
+    this.socket.emit("mobpod:remove", { forceFlush: true }, (response = {}) => {
+      this.mobPodRemoveInFlight = false;
+      if (!response?.ok) {
+        const errorText = String(response?.error ?? "unknown");
+        this.appendChatLine("", `알 오브젝트 삭제 실패: ${errorText}`, "system");
+        this.syncPromoPanelUi();
+        return;
+      }
+      const ownOwnerKey = String(this.promoOwnerKey ?? "").trim();
+      if (ownOwnerKey) {
+        this.disposeMobPodVisual(ownOwnerKey);
+        this.mobPodObjects.delete(ownOwnerKey);
+      }
+      this.requestMobPodState();
+      this.requestDrawingEntityState();
+      this.syncPromoPanelUi();
+    });
+  }
+
   disposePromoObjectVisual(ownerKey) {
     const key = String(ownerKey ?? "").trim();
     if (!key) {
@@ -16467,6 +18405,105 @@ void main() {
     }
     this.promoCollisionBoxes = [];
     this.promoPlatformCandidateBuffer.length = 0;
+  }
+
+  disposeMobPodVisual(ownerKey) {
+    const key = String(ownerKey ?? "").trim();
+    if (!key) {
+      return;
+    }
+    const visual = this.mobPodObjectVisuals.get(key);
+    if (!visual) {
+      return;
+    }
+    this.unregisterPromoPaintSurface(visual.paintSurfaceId, visual.paintSurfaceMesh);
+    this.scene.remove(visual.group);
+    disposeMeshTree(visual.group);
+    this.mobPodObjectVisuals.delete(key);
+  }
+
+  clearMobPodVisuals() {
+    for (const ownerKey of this.mobPodObjectVisuals.keys()) {
+      this.disposeMobPodVisual(ownerKey);
+    }
+  }
+
+  createMobPodVisual(entry) {
+    const safeScale = THREE.MathUtils.clamp(Number(entry.scale) || 1, PROMO_MIN_SCALE, PROMO_MAX_SCALE);
+    const frameWidth = 1.26 * safeScale;
+    const frameHeight = 1.72 * safeScale;
+    const frameDepth = 0.22 * safeScale;
+    const panelWidth = 0.96 * safeScale;
+    const panelHeight = 1.28 * safeScale;
+    const group = new THREE.Group();
+    group.position.set(entry.x, entry.y, entry.z);
+    group.rotation.y = this.normalizePromoYaw(entry.yaw, 0);
+
+    const baseRing = new THREE.Mesh(
+      new THREE.TorusGeometry(0.48 * safeScale, 0.09 * safeScale, 18, 44),
+      new THREE.MeshStandardMaterial({
+        color: 0x4c6175,
+        roughness: 0.42,
+        metalness: 0.18,
+        emissive: 0x1b2838,
+        emissiveIntensity: 0.44
+      })
+    );
+    baseRing.rotation.x = Math.PI * 0.5;
+    baseRing.position.y = 0.14 * safeScale;
+    group.add(baseRing);
+
+    const shell = new THREE.Mesh(
+      new THREE.SphereGeometry(0.72 * safeScale, 38, 34),
+      new THREE.MeshStandardMaterial({
+        color: 0xd8e8f4,
+        roughness: 0.24,
+        metalness: 0.04,
+        emissive: 0x23384f,
+        emissiveIntensity: 0.16
+      })
+    );
+    shell.scale.set(0.88, 1.1, 0.62);
+    shell.position.y = 0.94 * safeScale;
+    group.add(shell);
+
+    const frame = new THREE.Mesh(
+      new THREE.CircleGeometry(frameWidth * 0.5, 48),
+      new THREE.MeshStandardMaterial({
+        color: 0x30465d,
+        roughness: 0.38,
+        metalness: 0.16,
+        emissive: 0x1b2f42,
+        emissiveIntensity: 0.38
+      })
+    );
+    frame.scale.y = frameHeight / Math.max(frameWidth, 0.001);
+    frame.position.set(0, 0.98 * safeScale, frameDepth * 0.51);
+    group.add(frame);
+
+    const screenMaterial = new THREE.MeshStandardMaterial({
+      color: 0xf1f8ff,
+      emissive: 0x31465c,
+      emissiveIntensity: 0.26,
+      roughness: 0.18,
+      metalness: 0.02
+    });
+    screenMaterial.toneMapped = false;
+    const screen = new THREE.Mesh(new THREE.CircleGeometry(panelWidth * 0.5, 48), screenMaterial);
+    screen.scale.y = panelHeight / Math.max(panelWidth, 0.001);
+    screen.position.set(0, 0.98 * safeScale, frameDepth * 0.58);
+    group.add(screen);
+
+    const paintSurfaceId = this.registerMobPodPaintSurface(screen, entry.ownerKey, panelWidth, panelHeight);
+    const label = this.createTextLabel(`${entry.ownerName} EGG`, "name");
+    label.position.set(0, 2.08 * safeScale, 0);
+    group.add(label);
+
+    return {
+      group,
+      paintSurfaceId,
+      paintSurfaceMesh: screen
+    };
   }
 
   createPromoScreenMediaResources(
@@ -16658,6 +18695,42 @@ void main() {
       return this.createPromoSignVisual(entry);
     }
     return this.createPromoBlockVisual(entry);
+  }
+
+  applyMobPodState(rawObjects = []) {
+    const incoming = Array.isArray(rawObjects) ? rawObjects : [];
+    const nextMap = new Map();
+    for (const rawValue of incoming) {
+      const normalized = this.normalizeMobPodObjectEntry(rawValue);
+      if (!normalized) {
+        continue;
+      }
+      nextMap.set(normalized.ownerKey, normalized);
+    }
+
+    for (const ownerKey of this.mobPodObjectVisuals.keys()) {
+      if (!nextMap.has(ownerKey)) {
+        this.disposeMobPodVisual(ownerKey);
+      }
+    }
+
+    for (const [ownerKey, nextEntry] of nextMap.entries()) {
+      const prevEntry = this.mobPodObjects.get(ownerKey);
+      const prevSignature = this.getMobPodObjectSignature(prevEntry);
+      const nextSignature = this.getMobPodObjectSignature(nextEntry);
+      if (prevSignature === nextSignature && this.mobPodObjectVisuals.has(ownerKey)) {
+        continue;
+      }
+      this.disposeMobPodVisual(ownerKey);
+      const visual = this.createMobPodVisual(nextEntry);
+      this.scene.add(visual.group);
+      this.mobPodObjectVisuals.set(ownerKey, visual);
+    }
+
+    this.mobPodObjects = nextMap;
+    this.syncOwnMobPodPreviewVisibility();
+    this.updateSurfacePainterSaveAvailability();
+    this.syncPromoPanelUi();
   }
 
   applyPromoState(rawObjects = []) {
@@ -19537,10 +21610,10 @@ void main() {
   bindEvents() {
     this.resolveUiElements();
     this.updateFullscreenToggleState();
-
-    window.addEventListener("resize", () => this.onResize());
-    document.addEventListener("fullscreenchange", () => this.updateFullscreenToggleState());
-    document.addEventListener("webkitfullscreenchange", () => this.updateFullscreenToggleState());
+    this.captureManagedEventListeners(() => {
+      window.addEventListener("resize", () => this.onResize());
+      document.addEventListener("fullscreenchange", () => this.updateFullscreenToggleState());
+      document.addEventListener("webkitfullscreenchange", () => this.updateFullscreenToggleState());
 
     if (this.fullscreenToggleBtnEl) {
       this.fullscreenToggleBtnEl.addEventListener("click", () => {
@@ -19577,18 +21650,26 @@ void main() {
         return;
       }
 
+      if (this.placementSelectorOpen && event.code === "Escape") {
+        event.preventDefault();
+        this.setPlacementSelectorOpen(false, { syncUi: true });
+        return;
+      }
       if (!this.mobileEnabled && this.promoPanelDesktopOpen && event.code === "Escape") {
         event.preventDefault();
         this.setPromoPanelDesktopOpen(false, { syncUi: true });
         return;
       }
-      if (
-        this.promoPlacementPreviewActive &&
-        (event.code === "Escape" || (!this.mobileEnabled && event.code === "KeyY"))
-      ) {
+      if (this.promoPlacementPreviewActive && event.code === "Escape") {
         event.preventDefault();
         this.clearPromoPlacementPreview({ syncUi: true });
         this.appendChatLine("", "배치 미리보기를 취소했습니다.", "system");
+        return;
+      }
+      if (this.mobPodPlacementPreviewActive && event.code === "Escape") {
+        event.preventDefault();
+        this.clearMobPodPlacementPreview({ syncUi: true });
+        this.appendChatLine("", "알 오브젝트 미리보기를 취소했습니다.", "system");
         return;
       }
       if (this.hostCustomBlockPlacementPreviewActive && event.code === "Escape") {
@@ -19626,12 +21707,6 @@ void main() {
       ) {
         event.preventDefault();
         this.focusChatInput();
-        return;
-      }
-
-      if (event.code === "KeyY" && this.canMovePlayer() && !this.mobileEnabled) {
-        event.preventDefault();
-        this.requestPromoUpsert({ placeInFront: true, preserveExistingStyle: true });
         return;
       }
 
@@ -19680,9 +21755,21 @@ void main() {
         return;
       }
 
-      if (event.code === "KeyE" && this.canUseGameplayControls()) {
+      if (event.code === "KeyE") {
         event.preventDefault();
-        this.tryClimbRope();
+        if (this.canUseGameplayControls() && this.tryClimbRope()) {
+          return;
+        }
+        if (
+          !this.mobileEnabled &&
+          !this.promoPanelDesktopOpen &&
+          !this.placementSelectorOpen &&
+          !this.promoPlacementPreviewActive &&
+          !this.mobPodPlacementPreviewActive &&
+          !this.hostCustomBlockPlacementPreviewActive
+        ) {
+          this.openPlacementSelector();
+        }
         return;
       }
 
@@ -19810,6 +21897,11 @@ void main() {
         this.confirmPromoPlacementPreview();
         return;
       }
+      if (event.button === 0 && this.mobPodPlacementPreviewActive && this.canMovePlayer()) {
+        event.preventDefault();
+        this.confirmMobPodPlacementPreview();
+        return;
+      }
       if (event.button === 0 && this.hostCustomBlockPlacementPreviewActive && this.canMovePlayer()) {
         event.preventDefault();
         this.confirmHostCustomBlockPlacementPreview();
@@ -19843,6 +21935,7 @@ void main() {
         event.button === 0 &&
         !this.canDrawChalk() &&
         !this.promoPlacementPreviewActive &&
+        !this.mobPodPlacementPreviewActive &&
         !this.hostCustomBlockPlacementPreviewActive &&
         !this.flyModeActive &&
         this.tryInteractWithNpcFromPointer(event.clientX, event.clientY, this.pointerLocked)
@@ -19915,7 +22008,12 @@ void main() {
           this.tryDrawChalkMark();
           return;
         }
-        if (this.tryInteractWithNpcFromPointer(touch.clientX, touch.clientY, false)) {
+        if (
+          !this.promoPlacementPreviewActive &&
+          !this.mobPodPlacementPreviewActive &&
+          !this.hostCustomBlockPlacementPreviewActive &&
+          this.tryInteractWithNpcFromPointer(touch.clientX, touch.clientY, false)
+        ) {
           event.preventDefault();
           return;
         }
@@ -20204,9 +22302,23 @@ void main() {
         if (!this.mobileEnabled || !this.canMovePlayer()) {
           return;
         }
-        this.requestPromoUpsert({ placeInFront: true, preserveExistingStyle: true });
+        this.openPlacementSelector();
       });
     }
+    this.placementSelectorEl?.addEventListener("pointerdown", (event) => {
+      if (event.target === this.placementSelectorEl) {
+        this.setPlacementSelectorOpen(false, { syncUi: true });
+      }
+    });
+    this.placementSelectorCloseBtnEl?.addEventListener("click", () => {
+      this.setPlacementSelectorOpen(false, { syncUi: true });
+    });
+    this.placementSelectorPromoBtnEl?.addEventListener("click", () => {
+      this.openPlacementPanelForMode("promo");
+    });
+    this.placementSelectorMobBtnEl?.addEventListener("click", () => {
+      this.openPlacementPanelForMode("mob");
+    });
     if (this.promoScaleInputEl) {
       this.promoScaleInputEl.addEventListener("input", () => {
         const value = Number(this.promoScaleInputEl?.value);
@@ -20356,6 +22468,12 @@ void main() {
     });
     this.promoRemoveBtnEl?.addEventListener("click", () => {
       this.requestPromoRemove({ startPlacementPreviewOnSuccess: false });
+    });
+    this.mobPodPlaceBtnEl?.addEventListener("click", () => {
+      this.requestMobPodUpsert();
+    });
+    this.mobPodRemoveBtnEl?.addEventListener("click", () => {
+      this.requestMobPodRemove();
     });
     if (this.promoLinkInputEl) {
       this.promoLinkInputEl.addEventListener("keydown", (event) => {
@@ -20805,6 +22923,23 @@ void main() {
     this.surfacePainterSaveBtnEl?.addEventListener("click", () => {
       void this.saveSurfacePainter();
     });
+    this.surfacePainterSpawnMobBtnEl?.addEventListener("click", () => {
+      void this.spawnDrawingEntityFromSurfacePainter();
+    });
+    this.surfacePainterRemoveMobBtnEl?.addEventListener("click", () => {
+      void this.removeDrawingEntityFromSurfacePainter();
+    });
+    this.surfacePainterMobNameInputEl?.addEventListener("input", () => {
+      this.setSurfacePainterMobDraftName(this.surfacePainterTargetId, this.getSurfacePainterMobNameValue());
+      this.syncSurfacePainterMobPanel();
+    });
+    this.surfacePainterMobRadiusInputEl?.addEventListener("input", () => {
+      this.setSurfacePainterMobDraftRadius(
+        this.surfacePainterTargetId,
+        this.getSurfacePainterMobRadiusValue()
+      );
+      this.syncSurfacePainterMobPanel();
+    });
     this.surfacePainterExportBtnEl?.addEventListener("click", () => {
       this.exportSurfacePainterAsPng();
     });
@@ -20962,9 +23097,10 @@ void main() {
     this.hostGrayObjectWidthInputEl?.addEventListener("keydown", handleHostGraySizeEnter);
     this.hostGrayObjectHeightInputEl?.addEventListener("keydown", handleHostGraySizeEnter);
     this.hostGrayObjectDepthInputEl?.addEventListener("keydown", handleHostGraySizeEnter);
-    this.hostGrayObjectWidthInputEl?.addEventListener("input", handleHostGraySizeInput);
-    this.hostGrayObjectHeightInputEl?.addEventListener("input", handleHostGraySizeInput);
-    this.hostGrayObjectDepthInputEl?.addEventListener("input", handleHostGraySizeInput);
+      this.hostGrayObjectWidthInputEl?.addEventListener("input", handleHostGraySizeInput);
+      this.hostGrayObjectHeightInputEl?.addEventListener("input", handleHostGraySizeInput);
+      this.hostGrayObjectDepthInputEl?.addEventListener("input", handleHostGraySizeInput);
+    });
   }
 
   resolveUiElements() {
@@ -21061,6 +23197,15 @@ void main() {
     if (!this.surfacePainterBgColorInputEl) {
       this.surfacePainterBgColorInputEl = document.getElementById("surface-painter-bg");
     }
+    if (!this.surfacePainterColorGroupEl) {
+      this.surfacePainterColorGroupEl = document.getElementById("surface-painter-color-group");
+    }
+    if (!this.surfacePainterSizeGroupEl) {
+      this.surfacePainterSizeGroupEl = document.getElementById("surface-painter-size-group");
+    }
+    if (!this.surfacePainterBgGroupEl) {
+      this.surfacePainterBgGroupEl = document.getElementById("surface-painter-bg-group");
+    }
     if (!this.surfacePainterSizeInputEl) {
       this.surfacePainterSizeInputEl = document.getElementById("surface-painter-size");
     }
@@ -21081,6 +23226,33 @@ void main() {
     }
     if (!this.surfacePainterSaveBtnEl) {
       this.surfacePainterSaveBtnEl = document.getElementById("surface-painter-save");
+    }
+    if (!this.surfacePainterSpawnMobBtnEl) {
+      this.surfacePainterSpawnMobBtnEl = document.getElementById("surface-painter-spawn-mob");
+    }
+    if (!this.surfacePainterRemoveMobBtnEl) {
+      this.surfacePainterRemoveMobBtnEl = document.getElementById("surface-painter-remove-mob");
+    }
+    if (!this.surfacePainterMobSidebarEl) {
+      this.surfacePainterMobSidebarEl = document.getElementById("surface-painter-mob-sidebar");
+    }
+    if (!this.surfacePainterMobPreviewEl) {
+      this.surfacePainterMobPreviewEl = document.getElementById("surface-painter-mob-preview");
+    }
+    if (!this.surfacePainterMobNameInputEl) {
+      this.surfacePainterMobNameInputEl = document.getElementById("surface-painter-mob-name");
+    }
+    if (!this.surfacePainterMobRadiusInputEl) {
+      this.surfacePainterMobRadiusInputEl = document.getElementById("surface-painter-mob-radius");
+    }
+    if (!this.surfacePainterMobRadiusValueEl) {
+      this.surfacePainterMobRadiusValueEl = document.getElementById("surface-painter-mob-radius-value");
+    }
+    if (!this.surfacePainterMobStatusEl) {
+      this.surfacePainterMobStatusEl = document.getElementById("surface-painter-mob-status");
+    }
+    if (!this.surfacePainterMobListEl) {
+      this.surfacePainterMobListEl = document.getElementById("surface-painter-mob-list");
     }
     if (!this.surfacePainterPromoRepositionBtnEl) {
       this.surfacePainterPromoRepositionBtnEl = document.getElementById(
@@ -21369,11 +23541,29 @@ void main() {
     if (!this.objEditorInfoEl) {
       this.objEditorInfoEl = document.getElementById("obj-editor-info");
     }
+    if (!this.placementSelectorEl) {
+      this.placementSelectorEl = document.getElementById("placement-selector");
+    }
+    if (!this.placementSelectorCloseBtnEl) {
+      this.placementSelectorCloseBtnEl = document.getElementById("placement-selector-close");
+    }
+    if (!this.placementSelectorPromoBtnEl) {
+      this.placementSelectorPromoBtnEl = document.getElementById("placement-selector-promo");
+    }
+    if (!this.placementSelectorMobBtnEl) {
+      this.placementSelectorMobBtnEl = document.getElementById("placement-selector-mob");
+    }
     if (!this.promoPanelEl) {
       this.promoPanelEl = document.getElementById("promo-panel");
     }
     if (!this.promoPanelCloseBtnEl) {
       this.promoPanelCloseBtnEl = document.getElementById("promo-panel-close");
+    }
+    if (!this.promoPlacementSectionEl) {
+      this.promoPlacementSectionEl = document.getElementById("promo-placement-section");
+    }
+    if (!this.mobPodPlacementSectionEl) {
+      this.mobPodPlacementSectionEl = document.getElementById("mob-pod-placement-section");
     }
     if (!this.promoScaleInputEl) {
       this.promoScaleInputEl = document.getElementById("promo-scale");
@@ -21464,6 +23654,15 @@ void main() {
     }
     if (!this.promoRemoveBtnEl) {
       this.promoRemoveBtnEl = document.getElementById("promo-remove-btn");
+    }
+    if (!this.mobPodPlaceBtnEl) {
+      this.mobPodPlaceBtnEl = document.getElementById("mob-pod-place-btn");
+    }
+    if (!this.mobPodRemoveBtnEl) {
+      this.mobPodRemoveBtnEl = document.getElementById("mob-pod-remove-btn");
+    }
+    if (!this.mobPodStatusEl) {
+      this.mobPodStatusEl = document.getElementById("mob-pod-status");
     }
     if (!this.promoStatusEl) {
       this.promoStatusEl = document.getElementById("promo-panel-status");
@@ -21674,6 +23873,9 @@ void main() {
     }
 
     this.chatOpen = Boolean(open);
+    if (this.chatOpen && this.placementSelectorOpen) {
+      this.placementSelectorOpen = false;
+    }
     if (!this.chatOpen) {
       this.chatHistoryExpanded = false;
     }
@@ -21724,6 +23926,7 @@ void main() {
       this.scrollChatLogToLatest({ defer: true });
     }
     this.syncMobileUiState();
+    this.syncPromoPanelUi();
     this.syncChatLiveUi();
   }
 
@@ -21949,6 +24152,16 @@ void main() {
   connectNetwork() {
     const endpoint = this.resolveSocketEndpoint();
     this.socketEndpoint = endpoint;
+    this.stopNetworkPing();
+    if (this.socket) {
+      this.detachManagedSocketListeners(this.socket);
+      try {
+        this.socket.disconnect();
+      } catch {
+        // ignore stale socket teardown failures
+      }
+      this.socket = null;
+    }
     if (!endpoint) {
       this.networkConnected = false;
       this.localPlayerId = null;
@@ -21980,12 +24193,21 @@ void main() {
       this.portalDisplaySetInFlight.hall = false;
       this.mainPortalAdSetInFlight = false;
       this.hostMusicSetInFlight = false;
+      this.drawingEntitySpawnInFlight = false;
+      this.drawingEntityRemoveInFlight = false;
+      this.mobPodSetInFlight = false;
+      this.mobPodRemoveInFlight = false;
       this.applySharedMusicState({ mode: "idle" }, { announce: false });
       this.portalForceOpenInFlight = false;
       this.clearRemotePlayers();
+      this.clearDrawingEntityVisuals();
+      this.drawingEntities.clear();
+      this.clearMobPodVisuals();
+      this.mobPodObjects.clear();
       this.clearPromoObjectVisuals();
       this.promoObjects.clear();
       this.clearPromoPlacementPreview({ syncUi: false });
+      this.clearMobPodPlacementPreview({ syncUi: false });
       this.clearHostCustomBlockPlacementPreview({ syncUi: false });
       this.nearestPromoLinkObject = null;
       this.updateRoomPlayerSnapshot([]);
@@ -22015,7 +24237,8 @@ void main() {
 
     this.socket = socket;
 
-    socket.on("connect", () => {
+    this.captureManagedSocketListeners(socket, () => {
+      socket.on("connect", () => {
       this.networkConnected = true;
       this.localPlayerId = socket.id;
       this.roomHostId = null;
@@ -22057,6 +24280,10 @@ void main() {
       this.portalDisplaySetInFlight.hall = false;
       this.mainPortalAdSetInFlight = false;
       this.hostMusicSetInFlight = false;
+      this.drawingEntitySpawnInFlight = false;
+      this.drawingEntityRemoveInFlight = false;
+      this.mobPodSetInFlight = false;
+      this.mobPodRemoveInFlight = false;
       this.remoteSyncClock = 0;
       this.remoteUpdateClock = 0;
       this.lastSentInput = null;
@@ -22072,6 +24299,10 @@ void main() {
       this.pendingAuthoritativeStateSync = true;
       this.authoritativeSyncGraceUntil = performance.now() + 2200;
       this.updateRoomPlayerSnapshot([]);
+      this.clearDrawingEntityVisuals();
+      this.drawingEntities.clear();
+      this.clearMobPodVisuals();
+      this.mobPodObjects.clear();
       this.clearPromoObjectVisuals();
       this.promoObjects.clear();
       this.runtimePolicyState = {
@@ -22083,6 +24314,7 @@ void main() {
         surfacePaintCoreMemory: null
       };
       this.clearPromoPlacementPreview({ syncUi: false });
+      this.clearMobPodPlacementPreview({ syncUi: false });
       this.clearHostCustomBlockPlacementPreview({ syncUi: false });
       this.nearestPromoLinkObject = null;
       this.syncHostControls();
@@ -22095,9 +24327,11 @@ void main() {
         }
       });
       this.requestSurfacePaintSnapshot();
+      this.requestDrawingEntityState();
       this.socket.emit("player:key:set", { key: this.promoOwnerKey }, (response = {}) => {
         if (response?.ok) {
           this.requestPromoState();
+          this.requestMobPodState();
           return;
         }
         if (String(response?.error ?? "").trim().toLowerCase() === "duplicate session") {
@@ -22180,6 +24414,10 @@ void main() {
       this.portalDisplaySetInFlight.hall = false;
       this.mainPortalAdSetInFlight = false;
       this.hostMusicSetInFlight = false;
+      this.drawingEntitySpawnInFlight = false;
+      this.drawingEntityRemoveInFlight = false;
+      this.mobPodSetInFlight = false;
+      this.mobPodRemoveInFlight = false;
       this.securityTestSetInFlight = false;
       this.authoritativeStateSyncInFlight = false;
       this.remoteSyncClock = 0;
@@ -22194,6 +24432,10 @@ void main() {
       this.stopNetworkPing();
       this.authoritativeSyncGraceUntil = 0;
       this.clearRemotePlayers();
+      this.clearDrawingEntityVisuals();
+      this.drawingEntities.clear();
+      this.clearMobPodVisuals();
+      this.mobPodObjects.clear();
       this.clearPromoObjectVisuals();
       this.promoObjects.clear();
       this.runtimePolicyState = {
@@ -22205,6 +24447,7 @@ void main() {
         surfacePaintCoreMemory: null
       };
       this.clearPromoPlacementPreview({ syncUi: false });
+      this.clearMobPodPlacementPreview({ syncUi: false });
       this.clearHostCustomBlockPlacementPreview({ syncUi: false });
       this.nearestPromoLinkObject = null;
       this.updateRoomPlayerSnapshot([]);
@@ -22261,6 +24504,8 @@ void main() {
       this.billboardVideoSetInFlight = false;
       this.mainPortalAdSetInFlight = false;
       this.hostMusicSetInFlight = false;
+      this.drawingEntitySpawnInFlight = false;
+      this.drawingEntityRemoveInFlight = false;
       this.securityTestSetInFlight = false;
       this.authoritativeStateSyncInFlight = false;
       this.remoteSyncClock = 0;
@@ -22273,6 +24518,10 @@ void main() {
       this.authoritativeSyncGraceUntil = 0;
       this.resetLocalChatSendLimiter();
       this.clearRemotePlayers();
+      this.clearDrawingEntityVisuals();
+      this.drawingEntities.clear();
+      this.clearMobPodVisuals();
+      this.mobPodObjects.clear();
       this.clearPromoObjectVisuals();
       this.promoObjects.clear();
       this.runtimePolicyState = {
@@ -22284,6 +24533,7 @@ void main() {
         surfacePaintCoreMemory: null
       };
       this.clearPromoPlacementPreview({ syncUi: false });
+      this.clearMobPodPlacementPreview({ syncUi: false });
       this.clearHostCustomBlockPlacementPreview({ syncUi: false });
       this.nearestPromoLinkObject = null;
       this.updateRoomPlayerSnapshot([]);
@@ -22422,15 +24672,24 @@ void main() {
       this.applyPromoState(payload?.objects ?? payload?.promoObjects ?? []);
     });
 
+    socket.on("mobpod:state", (payload = {}) => {
+      this.applyMobPodState(payload?.objects ?? payload?.mobPods ?? []);
+    });
+
+    socket.on("drawing:entity:state", (payload = {}) => {
+      this.applyDrawingEntityState(payload?.entities ?? payload?.drawingEntities ?? []);
+    });
+
     socket.on("platform:state", (payload = {}) => {
       this.applyPlatformState(payload?.platforms ?? [], { revision: payload?.revision });
     });
     socket.on("rope:state", (payload = {}) => {
       this.applyRopeState(payload?.ropes ?? [], { revision: payload?.revision });
     });
-    socket.on("object:state", (payload = {}) => {
-      this.applyObjectPositionsState(payload?.positions ?? payload?.objectPositions ?? {}, {
-        revision: payload?.revision
+      socket.on("object:state", (payload = {}) => {
+        this.applyObjectPositionsState(payload?.positions ?? payload?.objectPositions ?? {}, {
+          revision: payload?.revision
+        });
       });
     });
   }
@@ -22646,6 +24905,12 @@ void main() {
     }
     if (Array.isArray(room?.promoObjects)) {
       this.applyPromoState(room.promoObjects);
+    }
+    if (Array.isArray(room?.mobPods)) {
+      this.applyMobPodState(room.mobPods);
+    }
+    if (Array.isArray(room?.drawingEntities)) {
+      this.applyDrawingEntityState(room.drawingEntities);
     }
 
     const players = Array.isArray(room?.players) ? room.players : [];
@@ -23116,6 +25381,7 @@ void main() {
       this.oceanUpdateClock = 0;
     }
     this.updateRemotePlayers(safeDelta);
+    this.updateDrawingEntities(safeDelta);
     this.updateLocalChatBubble();
     this.emitLocalSync(safeDelta);
     if (this.spatialAudioMixClock >= this.spatialAudioMixInterval) {
@@ -23130,6 +25396,7 @@ void main() {
     this.updateObjectStateAutosave(safeDelta);
     this.updateRopeProximity(safeDelta);
     this.updatePromoPlacementPreview();
+    this.updateMobPodPlacementPreview();
     this.updateHostCustomBlockPlacementPreview();
     this.updatePromoLinkPrompt(safeDelta);
     if (this.securityTestState?.enabled) {
@@ -24391,6 +26658,10 @@ void main() {
   }
 
   loop() {
+    if (this._destroyed) {
+      this.loopRafId = 0;
+      return;
+    }
     // Keep a tighter cap to avoid one-frame movement jumps during frame drops.
     const delta = Math.min(this.clock.getDelta(), this.mobileEnabled ? 0.09 : 0.1);
     this.tick(delta);
@@ -24399,7 +26670,7 @@ void main() {
     } else {
       this.renderer.render(this.scene, this.camera);
     }
-    requestAnimationFrame(this.loopRafCallback);
+    this.loopRafId = requestAnimationFrame(this.loopRafCallback);
   }
 
   updateDynamicResolution(delta) {
@@ -25819,6 +28090,9 @@ void main() {
     }
     if (this.promoPlacementPreviewActive) {
       this.clearPromoPlacementPreview({ syncUi: true });
+    }
+    if (this.mobPodPlacementPreviewActive) {
+      this.clearMobPodPlacementPreview({ syncUi: false });
     }
     this.hostCustomBlockPlacementPreviewActive = true;
     this.hostCustomBlockPlacementPreviewTargetId = String(targetEntry.id ?? "");
