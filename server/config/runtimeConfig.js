@@ -1,17 +1,20 @@
+import {
+  DEFAULT_A_ZONE_PORTAL_TARGET_URL as SHARED_DEFAULT_A_ZONE_PORTAL_TARGET_URL,
+  DEFAULT_PORTAL_TARGET_URL as SHARED_DEFAULT_PORTAL_TARGET_URL
+} from "../../shared/portalConfig.js";
+
 export const SERVICE_NAME = "reclaim-fps-chat";
 export const DEFAULT_ROOM_CODE = "GLOBAL";
-export const DEFAULT_PORTAL_TARGET_URL =
-  "https://singularity-ox.onrender.com/?v=0.2";
-export const DEFAULT_A_ZONE_PORTAL_TARGET_URL =
-  "https://reclaim-fps.onrender.com/";
+export const DEFAULT_PORTAL_TARGET_URL = SHARED_DEFAULT_PORTAL_TARGET_URL;
+export const DEFAULT_A_ZONE_PORTAL_TARGET_URL = SHARED_DEFAULT_A_ZONE_PORTAL_TARGET_URL;
 export const DEFAULT_SURFACE_PAINT_STORE_PATH = "server/data/surface-paint.json";
 export const DEFAULT_RENDER_SURFACE_PAINT_STORE_PATH = "/var/data/surface-paint.json";
 export const DEFAULT_SURFACE_PAINT_SAVE_DEBOUNCE_MS = 300;
 export const DEFAULT_MAX_SOCKET_PAYLOAD_BYTES = 35_000_000;
 export const DEFAULT_STATIC_CLIENT_DIR = "dist";
 export const DEFAULT_MAP_LAYOUT_VERSION = "2026-03-06-layout-v3";
-export const DEFAULT_SURFACE_PAINT_MODE = "host";
-export const DEFAULT_PROMO_MODE = "host";
+export const DEFAULT_SURFACE_PAINT_MODE = "public";
+export const DEFAULT_PROMO_MODE = "public";
 export const DEFAULT_ANTI_ABUSE_CONFIG = Object.freeze({
   maxConnectionsPerIp: 3,
   connectionWindowMs: 60_000,

@@ -72,13 +72,17 @@ const MAX_PROMO_MEDIA_DATA_URL_CHARS = 9_000_000;
 const DRAWING_ENTITY_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,128}$/;
 const MAX_DRAWING_ENTITY_IMAGE_CHARS = 4_200_000;
 const MAX_DRAWING_ENTITIES = 72;
+const MAX_DRAWING_ENTITY_FRAMES = 4;
+const DRAWING_ENTITY_FRAME_DURATION_MIN_MS = 80;
+const DRAWING_ENTITY_FRAME_DURATION_DEFAULT_MS = 220;
+const DRAWING_ENTITY_FRAME_DURATION_MAX_MS = 1200;
 const DRAWING_ENTITY_MIN_SCALE = 0.55;
 const DRAWING_ENTITY_MAX_SCALE = 2.8;
 const DRAWING_ENTITY_MIN_Y = -2;
 const DRAWING_ENTITY_MAX_Y = 12;
 const DRAWING_ENTITY_MIN_MOTION_RADIUS = 0.18;
 const DRAWING_ENTITY_DEFAULT_MOTION_RADIUS = 1.4;
-const DRAWING_ENTITY_MAX_MOTION_RADIUS = 3.6;
+const DRAWING_ENTITY_MAX_MOTION_RADIUS = 40;
 const MOB_POD_SURFACE_PREFIX = "mp_";
 const MOB_POD_FRONT_SPAWN_DISTANCE = 1.55;
 const PROMO_MIN_SCALE = 0.35;
@@ -1086,6 +1090,59 @@ function normalizeDrawingEntityImageDataUrl(rawValue) {
   return value;
 }
 
+function normalizeDrawingEntityFrameImageDataUrls(rawValue, fallbackImageDataUrl = "") {
+  const source = Array.isArray(rawValue) ? rawValue : [];
+  const normalized = [];
+  for (const item of source) {
+    const nextValue = normalizeDrawingEntityImageDataUrl(item);
+    if (!nextValue) {
+      continue;
+    }
+    normalized.push(nextValue);
+    if (normalized.length >= MAX_DRAWING_ENTITY_FRAMES) {
+      break;
+    }
+  }
+  const fallback = normalizeDrawingEntityImageDataUrl(fallbackImageDataUrl);
+  if (fallback) {
+    if (normalized.length <= 0) {
+      normalized.push(fallback);
+    } else if (!normalized.includes(fallback)) {
+      normalized.unshift(fallback);
+    }
+  }
+  return normalized.slice(0, MAX_DRAWING_ENTITY_FRAMES);
+}
+
+function normalizeDrawingEntityFrameDurationMs(rawValue, fallbackValue = DRAWING_ENTITY_FRAME_DURATION_DEFAULT_MS) {
+  const fallback = Number(fallbackValue);
+  const nextValue = Number(rawValue);
+  const safeValue =
+    Number.isFinite(nextValue) && nextValue > 0
+      ? nextValue
+      : Number.isFinite(fallback) && fallback > 0
+        ? fallback
+        : DRAWING_ENTITY_FRAME_DURATION_DEFAULT_MS;
+  return Math.max(
+    DRAWING_ENTITY_FRAME_DURATION_MIN_MS,
+    Math.min(DRAWING_ENTITY_FRAME_DURATION_MAX_MS, Math.trunc(safeValue))
+  );
+}
+
+function normalizeDrawingEntityFrameDurationsMs(
+  rawValue,
+  frameCount = 0,
+  fallbackValue = DRAWING_ENTITY_FRAME_DURATION_DEFAULT_MS
+) {
+  const source = Array.isArray(rawValue) ? rawValue : [];
+  const safeFrameCount = Math.max(0, Math.trunc(Number(frameCount) || 0));
+  const normalized = [];
+  for (let index = 0; index < safeFrameCount; index += 1) {
+    normalized.push(normalizeDrawingEntityFrameDurationMs(source[index], fallbackValue));
+  }
+  return normalized;
+}
+
 function normalizeDrawingEntityScale(rawValue, fallback = 1) {
   const parsed = Number(rawValue);
   const safe = Number.isFinite(parsed) ? parsed : Number(fallback) || 1;
@@ -1111,6 +1168,14 @@ function normalizeDrawingEntityEntry(rawValue, fallback = null) {
   if (!entityId || !imageDataUrl || !ownerKey) {
     return null;
   }
+  const frameImageDataUrls = normalizeDrawingEntityFrameImageDataUrls(
+    rawValue.frameImageDataUrls ?? rawValue.frames ?? base.frameImageDataUrls ?? [],
+    imageDataUrl
+  );
+  const frameDurationsMs = normalizeDrawingEntityFrameDurationsMs(
+    rawValue.frameDurationsMs ?? rawValue.frameDurations ?? base.frameDurationsMs ?? [],
+    frameImageDataUrls.length
+  );
 
   const pixelWidth = Math.max(
     1,
@@ -1142,6 +1207,8 @@ function normalizeDrawingEntityEntry(rawValue, fallback = null) {
     ).trim().replace(/\s+/g, " ").slice(0, MAX_PROMO_NAME_CHARS),
     sourceSurfaceId: normalizeSurfaceId(rawValue.sourceSurfaceId ?? base.sourceSurfaceId ?? ""),
     imageDataUrl,
+    frameImageDataUrls,
+    frameDurationsMs,
     x: normalizePromoAxis(rawValue.x, base.x ?? 0),
     y: normalizePromoAxis(rawValue.y, base.y ?? 0, DRAWING_ENTITY_MIN_Y, DRAWING_ENTITY_MAX_Y),
     z: normalizePromoAxis(rawValue.z, base.z ?? 0),
@@ -1161,6 +1228,7 @@ function normalizeDrawingEntityEntry(rawValue, fallback = null) {
         Number(rawValue.motionRadius) || Number(base.motionRadius) || DRAWING_ENTITY_DEFAULT_MOTION_RADIUS
       )
     ),
+    followOwner: Boolean(rawValue.followOwner ?? base.followOwner),
     motionStretch: Math.max(
       0.35,
       Math.min(1.2, Number(rawValue.motionStretch) || Number(base.motionStretch) || 0.65)
@@ -1849,6 +1917,7 @@ export class RoomService {
       players: Array.from(room.players.values()).map((player) => ({
         id: player.id,
         name: player.name,
+        ownerKey: normalizePromoOwnerKey(player?.ownerKey ?? ""),
         state: player.state ?? null,
         zone: normalizeRoomZone(player?.zone ?? "lobby", "lobby")
       }))
@@ -2096,7 +2165,8 @@ export class RoomService {
 
   emitDrawingEntitiesUpdate(room) {
     this.io.to(room.code).emit("drawing:entity:state", {
-      entities: this.serializeDrawingEntities(room)
+      entities: this.serializeDrawingEntities(room),
+      serverNowMs: Date.now()
     });
   }
 
@@ -2196,6 +2266,14 @@ export class RoomService {
 
     const map = this.getDrawingEntitiesMap(room);
     const previous = this.findDrawingEntityForOwnerSurface(room, ownerKey, sourceSurfaceId);
+    const frameImageDataUrls = normalizeDrawingEntityFrameImageDataUrls(
+      rawPayload?.frameImageDataUrls ?? rawPayload?.frames ?? previous?.frameImageDataUrls ?? [],
+      imageDataUrl
+    );
+    const frameDurationsMs = normalizeDrawingEntityFrameDurationsMs(
+      rawPayload?.frameDurationsMs ?? rawPayload?.frameDurations ?? previous?.frameDurationsMs ?? [],
+      frameImageDataUrls.length
+    );
     const createdAt = previous?.createdAt ?? Date.now();
     const entityId = previous?.entityId ?? createDrawingEntityId(ownerKey, createdAt);
     if (!entityId) {
@@ -2220,6 +2298,8 @@ export class RoomService {
       displayName: rawPayload?.displayName ?? rawPayload?.mobName ?? "",
       sourceSurfaceId,
       imageDataUrl,
+      frameImageDataUrls,
+      frameDurationsMs,
       x: spawnX,
       y: normalizePromoAxis(0, 0, DRAWING_ENTITY_MIN_Y, DRAWING_ENTITY_MAX_Y),
       z: spawnZ,
@@ -2233,6 +2313,7 @@ export class RoomService {
       pixelHeight: rawPayload?.pixelHeight,
       motionSeed,
       motionRadius: requestedMotionRadius,
+      followOwner: Boolean(rawPayload?.followOwner ?? previous?.followOwner),
       motionStretch: 0.44 + ((motionSeed >>> 9) % 1000) / 1000 * 0.4,
       motionSpeed: 0.46 + ((motionSeed >>> 15) % 1000) / 1000 * 0.84,
       bobAmplitude: 0.06 + ((motionSeed >>> 21) % 1000) / 1000 * 0.18,
@@ -3884,6 +3965,7 @@ export class RoomService {
     if (socket.data.roomCode === room.code && room.players.has(socket.id)) {
       const existing = room.players.get(socket.id);
       existing.name = name;
+      existing.ownerKey = normalizePromoOwnerKey(socket.data.playerKey ?? existing?.ownerKey ?? "");
       existing.zone = normalizeRoomZone(existing?.zone ?? "lobby", "lobby");
       this.emitRoomUpdate(room);
       return { ok: true, room: this.serializeRoom(room) };
@@ -3903,6 +3985,7 @@ export class RoomService {
     room.players.set(socket.id, {
       id: socket.id,
       name,
+      ownerKey: normalizePromoOwnerKey(socket.data.playerKey ?? ""),
       zone: "lobby",
       state: initialState,
       mode: "authoritative",

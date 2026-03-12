@@ -1,4 +1,8 @@
 import { GAME_CONSTANTS } from "../../../config/gameConstants.js";
+import {
+  DEFAULT_A_ZONE_PORTAL_TARGET_URL,
+  DEFAULT_HALL_PORTAL_TARGET_URL
+} from "../../../../../shared/portalConfig.js";
 
 export const BASE_VOID_PACK = {
   id: "base-void",
@@ -215,13 +219,12 @@ export const BASE_VOID_PACK = {
         warningSeconds: 16,
         openSeconds: 24,
         targetUrl: "",
-        aZoneTargetUrl: "https://reclaim-fps.onrender.com/",
+        aZoneTargetUrl: DEFAULT_A_ZONE_PORTAL_TARGET_URL,
         // FPS portal defaults to the middle lane so all three portals are visible from spawn.
         aZonePosition: [0, 0.08, -4],
         // Move the live/performance portal to the left side pad so the center lane stays open.
         hallPosition: [-60, 0.08, -4],
-        hallTargetUrl:
-          "https://performance-i3w5.onrender.com/performance/?host=0&room=event01&from=emptines"
+        hallTargetUrl: DEFAULT_HALL_PORTAL_TARGET_URL
       }
     },
     postProcessing: {

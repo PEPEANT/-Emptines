@@ -1296,15 +1296,15 @@ canvas {
 }
 
 #surface-painter-panel {
-  width: min(96vw, 980px);
+  width: min(96vw, 1120px);
   display: grid;
-  gap: 8px;
-  padding: 12px;
+  gap: 12px;
+  padding: 14px;
   max-height: calc(100dvh - 32px);
   overflow-y: auto;
   overscroll-behavior: contain;
   border: 1px solid rgba(154, 198, 232, 0.76);
-  border-radius: 12px;
+  border-radius: 16px;
   background: rgba(8, 21, 34, 0.95);
   box-shadow: 0 18px 42px rgba(2, 8, 13, 0.56);
 }
@@ -1313,30 +1313,165 @@ canvas {
   display: block;
   margin: 0;
   color: #d8efff;
-  font: 700 0.7rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
-  letter-spacing: 0.07em;
+  font: 700 0.82rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.08em;
 }
 
 #surface-painter-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 280px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
   align-items: start;
+}
+
+#surface-painter-panel.has-mob-sidebar #surface-painter-layout {
+  grid-template-columns: minmax(0, 1fr) 280px;
 }
 
 #surface-painter-main {
   display: grid;
   gap: 8px;
+  justify-items: center;
+}
+
+#surface-painter-mob-frame-strip {
+  width: min(100%, 760px);
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(147, 198, 236, 0.34);
+  border-radius: 12px;
+  background: rgba(10, 24, 38, 0.82);
+}
+
+.surface-painter-mob-frame-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.surface-painter-mob-frame-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+#surface-painter-mob-prev-frame-toggle {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid rgba(168, 205, 234, 0.48);
+  border-radius: 999px;
+  background: rgba(8, 20, 34, 0.78);
+  color: #deeeff;
+  font: 700 0.54rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+#surface-painter-mob-prev-frame-toggle.active {
+  border-color: rgba(255, 214, 138, 0.88);
+  background: rgba(71, 44, 14, 0.92);
+  color: #fff2d4;
+}
+
+#surface-painter-mob-prev-frame-toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+#surface-painter-mob-frame-status {
+  color: #dcefff;
+  font: 700 0.58rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.04em;
+}
+
+#surface-painter-mob-frame-buttons {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+#surface-painter-mob-frame-buttons button {
+  min-height: 32px;
+  border: 1px solid rgba(169, 205, 236, 0.58);
+  border-radius: 8px;
+  background: rgba(10, 24, 39, 0.88);
+  color: #e2f3ff;
+  font: 700 0.56rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+#surface-painter-mob-frame-buttons button.active {
+  border-color: rgba(255, 213, 136, 0.88);
+  background: rgba(67, 40, 12, 0.92);
+  box-shadow: 0 0 0 1px rgba(255, 194, 104, 0.16);
+}
+
+#surface-painter-mob-frame-duration-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+#surface-painter-mob-frame-duration-row label,
+#surface-painter-mob-frame-duration-value {
+  color: #dcefff;
+  font: 700 0.56rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.04em;
+}
+
+#surface-painter-mob-frame-duration {
+  width: 100%;
 }
 
 #surface-painter-canvas {
-  width: 100%;
+  width: min(100%, 760px);
   aspect-ratio: 1 / 1;
   max-height: min(76vh, 620px);
   border: 1px solid rgba(162, 205, 238, 0.66);
   border-radius: 10px;
   background: #ffffff;
   touch-action: none;
+}
+
+#surface-painter-bottom {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(300px, 0.9fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.surface-painter-dock {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(147, 198, 236, 0.34);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(12, 27, 42, 0.94), rgba(7, 18, 30, 0.98));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.surface-painter-dock-head {
+  display: grid;
+  gap: 4px;
+}
+
+.surface-painter-dock-title {
+  color: #e7f5ff;
+  font: 700 0.68rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.08em;
+}
+
+.surface-painter-dock-copy {
+  color: #a9cdea;
+  font: 600 0.56rem/1.4 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.04em;
 }
 
 #surface-painter-mob-sidebar {
@@ -1362,18 +1497,19 @@ canvas {
 
 .placement-panel-section {
   display: grid;
-  gap: 6px;
-  padding: 8px;
-  border: 1px solid transparent;
-  border-radius: 12px;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   scroll-margin-top: 10px;
-  transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
 }
 
 .placement-panel-section.is-focus-target {
-  border-color: rgba(255, 210, 140, 0.84);
-  background: rgba(61, 39, 12, 0.34);
-  box-shadow: inset 0 0 0 1px rgba(255, 196, 116, 0.14);
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 #surface-painter-mob-preview-wrap {
@@ -1391,6 +1527,17 @@ canvas {
   max-width: 100%;
   max-height: 156px;
   object-fit: contain;
+}
+
+#surface-painter-open-mob-settings {
+  min-height: 32px;
+  border: 1px solid rgba(169, 205, 236, 0.58);
+  border-radius: 8px;
+  background: rgba(10, 24, 39, 0.88);
+  color: #e2f3ff;
+  font: 700 0.6rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.04em;
+  cursor: pointer;
 }
 
 .surface-painter-mob-label {
@@ -1500,6 +1647,147 @@ canvas {
   cursor: pointer;
 }
 
+#surface-painter-mob-settings {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(4, 10, 18, 0.68);
+  backdrop-filter: blur(12px);
+  z-index: 4;
+}
+
+#surface-painter-mob-settings-card {
+  width: min(100%, 420px);
+  max-height: 100%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid rgba(126, 187, 233, 0.42);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 50% 12%, rgba(111, 180, 255, 0.12), transparent 44%),
+    linear-gradient(180deg, rgba(8, 22, 36, 0.97), rgba(5, 14, 24, 0.99));
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.34);
+}
+
+.surface-painter-mob-settings-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.surface-painter-mob-settings-eyebrow {
+  margin: 0 0 4px;
+  color: rgba(175, 216, 249, 0.78);
+  font: 700 0.54rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.18em;
+}
+
+.surface-painter-mob-settings-title {
+  margin: 0;
+  color: #eff8ff;
+  font: 700 0.96rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.04em;
+}
+
+#surface-painter-mob-settings-close {
+  min-width: 72px;
+  min-height: 32px;
+  border: 1px solid rgba(166, 205, 236, 0.58);
+  border-radius: 9px;
+  background: rgba(10, 24, 39, 0.88);
+  color: #e4f4ff;
+  font: 700 0.6rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.surface-painter-mob-settings-body {
+  min-height: 0;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.surface-painter-mob-settings-preview-wrap {
+  display: grid;
+  place-items: center;
+  min-height: 196px;
+  border: 1px solid rgba(157, 205, 241, 0.42);
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 50% 22%, rgba(202, 234, 255, 0.16), transparent 46%),
+    linear-gradient(180deg, rgba(13, 30, 47, 0.92), rgba(7, 18, 28, 0.98));
+}
+
+#surface-painter-mob-settings-preview {
+  max-width: 100%;
+  max-height: 196px;
+  object-fit: contain;
+}
+
+#surface-painter-mob-settings-status {
+  margin: 0;
+  color: #dcefff;
+  font: 600 0.62rem/1.45 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.03em;
+}
+
+.surface-painter-mob-settings-field {
+  display: grid;
+  gap: 6px;
+}
+
+.surface-painter-mob-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: #ecf7ff;
+  font: 700 0.68rem/1.2 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.04em;
+}
+
+.surface-painter-mob-toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: #6dc7ff;
+}
+
+.surface-painter-mob-settings-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.surface-painter-mob-settings-actions button {
+  min-width: 0;
+  min-height: 38px;
+  border: 1px solid rgba(166, 205, 236, 0.58);
+  border-radius: 10px;
+  background: rgba(10, 24, 39, 0.92);
+  color: #e2f3ff;
+  font: 700 0.62rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+#surface-painter-mob-settings-apply {
+  background: rgba(14, 42, 66, 0.95);
+  border-color: rgba(100, 184, 255, 0.72);
+  color: #c5e7ff;
+}
+
+#surface-painter-mob-settings-remove-pod {
+  border-color: rgba(255, 183, 183, 0.56);
+  color: #ffdede;
+}
+
 #surface-painter-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -1607,23 +1895,36 @@ canvas {
 }
 
 #surface-painter-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
 #surface-painter-actions button {
-  flex: 0 0 auto;
-  min-width: 86px;
-  height: 34px;
+  min-width: 0;
+  width: 100%;
+  height: 38px;
   border: 1px solid rgba(169, 205, 236, 0.64);
-  border-radius: 8px;
+  border-radius: 10px;
   background: rgba(10, 24, 39, 0.88);
   color: #e2f3ff;
   font: 700 0.68rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
   letter-spacing: 0.06em;
   cursor: pointer;
+}
+
+#surface-painter-promo-share-toggle,
+#surface-painter-spawn-mob,
+#surface-painter-save,
+#surface-painter-cancel {
+  grid-column: span 2;
+}
+
+#surface-painter-save,
+#surface-painter-spawn-mob {
+  background: rgba(14, 42, 66, 0.95);
+  border-color: rgba(100, 184, 255, 0.72);
+  color: #c5e7ff;
 }
 
 #surface-painter-actions button:hover {
@@ -1877,23 +2178,25 @@ canvas {
   letter-spacing: 0.03em;
 }
 
-#promo-panel {
+#placement-panel {
   position: fixed;
-  left: 14px;
-  top: 82px;
-  bottom: 14px;
-  z-index: 34;
+  left: 50%;
+  top: 50%;
+  bottom: auto;
+  z-index: 41;
+  transform: translate(-50%, -50%);
   display: grid;
   align-content: start;
   gap: 6px;
-  width: min(66vw, 420px);
-  max-height: calc(100vh - 82px - 14px);
+  width: min(92vw, 440px);
+  max-height: min(calc(100vh - 32px), 760px);
   overflow-y: auto;
   padding: 10px;
   border: 1px solid rgba(179, 208, 236, 0.62);
   border-radius: 10px;
   background: rgba(10, 21, 34, 0.82);
   backdrop-filter: blur(5px);
+  pointer-events: auto;
 }
 
 body.placement-selector-open {
@@ -1995,14 +2298,13 @@ body.placement-selector-open {
   outline: none;
 }
 
-body:not(.is-mobile-ui) #promo-place-btn {
-  display: none;
-}
-
-#promo-panel.mobile-fullscreen {
+#placement-panel.mobile-fullscreen {
   inset: 0;
+  left: 0;
+  top: 0;
   width: auto;
   max-height: none;
+  transform: none;
   border: none;
   border-radius: 0;
   padding: calc(env(safe-area-inset-top, 0px) + 10px) 10px
@@ -2052,6 +2354,50 @@ body:not(.is-mobile-ui) #promo-place-btn {
 #promo-scale,
 #promo-scale-y {
   width: 100%;
+}
+
+#promo-shape-preview {
+  display: grid;
+  gap: 8px;
+}
+
+#promo-shape-preview-stage {
+  display: grid;
+  place-items: center;
+  min-height: 150px;
+  border: 1px solid rgba(175, 208, 238, 0.62);
+  border-radius: 10px;
+  background:
+    radial-gradient(circle at 50% 20%, rgba(117, 180, 227, 0.14), transparent 48%),
+    linear-gradient(180deg, rgba(10, 24, 39, 0.92), rgba(6, 14, 24, 0.98));
+  overflow: hidden;
+}
+
+#promo-shape-preview-object {
+  width: var(--promo-shape-preview-width, 88px);
+  height: var(--promo-shape-preview-height, 88px);
+  max-width: 88%;
+  max-height: 88%;
+  border-radius: 12px;
+  border: 1px solid rgba(205, 228, 248, 0.7);
+  background:
+    linear-gradient(180deg, rgba(235, 242, 248, 0.96), rgba(152, 165, 179, 0.88)),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.08));
+  box-shadow:
+    0 16px 30px rgba(0, 0, 0, 0.26),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+#promo-shape-preview-copy {
+  margin: 0;
+  color: #dcefff;
+  font: 600 0.58rem/1.35 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.03em;
+}
+
+#promo-editor-section {
+  display: grid;
+  gap: 10px;
 }
 
 #promo-draw-wrap {
@@ -2190,6 +2536,13 @@ body:not(.is-mobile-ui) #promo-place-btn {
   letter-spacing: 0.04em;
   justify-self: end;
   text-align: right;
+}
+
+.placement-panel-copy {
+  margin: 0;
+  color: #dcefff;
+  font: 600 0.58rem/1.4 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.03em;
 }
 
 .promo-panel-actions {
@@ -2697,11 +3050,11 @@ body.is-mobile-ui #chat-live-log .chat-line {
   color: #e8f5ff;
 }
 
-body.is-mobile-ui #promo-panel {
+body.is-mobile-ui #placement-panel {
   z-index: 120;
 }
 
-body.is-mobile-ui #promo-panel.mobile-fullscreen {
+body.is-mobile-ui #placement-panel.mobile-fullscreen {
   inset: 0;
   width: auto;
   max-height: none;
@@ -2710,8 +3063,21 @@ body.is-mobile-ui #promo-panel.mobile-fullscreen {
   gap: 8px;
 }
 
-body.is-mobile-ui #promo-panel.mobile-fullscreen #promo-draw-wrap {
+body.is-mobile-ui #placement-panel.mobile-fullscreen #promo-draw-wrap {
   min-height: min(44vh, 420px);
+}
+
+body.is-mobile-ui #promo-shape-preview-stage {
+  min-height: 132px;
+}
+
+body.is-mobile-ui #promo-shape-preview-object {
+  max-width: 82%;
+  max-height: 82%;
+}
+
+body.is-mobile-ui #promo-shape-preview-copy {
+  font-size: 0.66rem;
 }
 
 body.is-mobile-ui #promo-link-prompt {
@@ -2766,14 +3132,18 @@ body.is-mobile-ui #mobile-move-stick {
     align-items: center;
   }
 
-  body.is-mobile-ui #promo-panel.mobile-fullscreen {
+  body.is-mobile-ui #placement-panel.mobile-fullscreen {
     padding: calc(env(safe-area-inset-top, 0px) + 8px) 8px
       calc(env(safe-area-inset-bottom, 0px) + 10px);
     gap: 6px;
   }
 
-  body.is-mobile-ui #promo-panel.mobile-fullscreen #promo-draw-wrap {
+  body.is-mobile-ui #placement-panel.mobile-fullscreen #promo-draw-wrap {
     min-height: min(48vh, 430px);
+  }
+
+  body.is-mobile-ui #promo-shape-preview-stage {
+    min-height: 118px;
   }
 
   body.is-mobile-ui #promo-link-prompt {
@@ -3267,6 +3637,12 @@ body.is-mobile-ui #mobile-move-stick {
 }
 
 /* ─── Mobile surface painter: maximised canvas + compact toolbar ─────────── */
+@media (max-width: 1100px) {
+  #surface-painter-bottom {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 body.is-mobile-ui #surface-painter {
   place-items: stretch;
   padding: 0;
@@ -3293,6 +3669,23 @@ body.is-mobile-ui #surface-painter-panel {
 body.is-mobile-ui #surface-painter-title {
   display: block;
   font-size: 0.56rem;
+}
+
+body.is-mobile-ui #surface-painter-bottom {
+  display: grid;
+  gap: 6px;
+}
+
+body.is-mobile-ui .surface-painter-dock {
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+
+body.is-mobile-ui .surface-painter-dock-head {
+  display: none;
 }
 
 /* ② toolbar row — single horizontal flex line, NO scroll */
@@ -3404,7 +3797,7 @@ body.is-mobile-ui #surface-painter-panel.actions-collapsed {
   grid-template-rows: auto minmax(0, 1fr);
 }
 
-body.is-mobile-ui #surface-painter-panel.actions-collapsed #surface-painter-actions {
+body.is-mobile-ui #surface-painter-panel.actions-collapsed .surface-painter-actions-dock {
   display: none;
 }
 
@@ -3414,6 +3807,13 @@ body.is-mobile-ui #surface-painter-actions button {
   height: 40px;
   font-size: 0.6rem;
   letter-spacing: 0.04em;
+}
+
+body.is-mobile-ui #surface-painter-promo-share-toggle,
+body.is-mobile-ui #surface-painter-spawn-mob,
+body.is-mobile-ui #surface-painter-save,
+body.is-mobile-ui #surface-painter-cancel {
+  grid-column: auto;
 }
 
 body.is-mobile-ui .surface-painter-mob-card {
@@ -3426,6 +3826,57 @@ body.is-mobile-ui #surface-painter-mob-preview-wrap {
 
 body.is-mobile-ui #surface-painter-mob-preview {
   max-height: 104px;
+}
+
+body.is-mobile-ui #surface-painter-open-mob-settings {
+  min-height: 36px;
+  font-size: 0.64rem;
+}
+
+body.is-mobile-ui #surface-painter-mob-settings {
+  padding: 0;
+}
+
+body.is-mobile-ui #surface-painter-mob-settings-card {
+  width: 100vw;
+  height: 100dvh;
+  max-height: 100dvh;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: calc(env(safe-area-inset-top, 0px) + 10px) 12px
+    calc(env(safe-area-inset-bottom, 0px) + 12px);
+  gap: 10px;
+}
+
+body.is-mobile-ui .surface-painter-mob-settings-body {
+  gap: 10px;
+}
+
+body.is-mobile-ui .surface-painter-mob-settings-preview-wrap {
+  min-height: 148px;
+}
+
+body.is-mobile-ui #surface-painter-mob-settings-preview {
+  max-height: 148px;
+}
+
+body.is-mobile-ui #surface-painter-mob-settings-status {
+  font-size: 0.68rem;
+}
+
+body.is-mobile-ui .surface-painter-mob-toggle {
+  font-size: 0.76rem;
+}
+
+body.is-mobile-ui .surface-painter-mob-settings-actions {
+  grid-template-columns: 1fr;
+}
+
+body.is-mobile-ui .surface-painter-mob-settings-actions button,
+body.is-mobile-ui #surface-painter-mob-settings-close {
+  min-height: 42px;
+  font-size: 0.7rem;
 }
 
 /* Save button: most prominent */
@@ -3454,7 +3905,7 @@ body.mobile-portrait-lock #tool-ui,
 body.mobile-portrait-lock #mobile-ui,
 body.mobile-portrait-lock #chat-ui,
 body.mobile-portrait-lock #chat-live-feed,
-body.mobile-portrait-lock #promo-panel,
+body.mobile-portrait-lock #placement-panel,
 body.mobile-portrait-lock #promo-link-prompt,
 body.mobile-portrait-lock #player-roster,
 body.mobile-portrait-lock #hub-flow-ui,
@@ -3563,5 +4014,1188 @@ body.mobile-portrait-lock #host-chat-toggle {
 
   #surface-painter-panel.actions-collapsed #surface-painter-actions {
     display: none;
+  }
+}
+
+/* UI refresh: placement panel + surface painter */
+#placement-panel {
+  width: min(94vw, 520px);
+  gap: 10px;
+  padding: 16px;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at top, rgba(96, 156, 206, 0.14), transparent 56%),
+    rgba(8, 19, 31, 0.96);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.28);
+  scrollbar-width: thin;
+}
+
+.placement-panel-stage {
+  margin: 0;
+  color: #a9cdea;
+  font: 600 0.62rem/1.45 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.04em;
+}
+
+.placement-panel-body {
+  display: grid;
+  gap: 10px;
+}
+
+.promo-panel-head {
+  align-items: flex-start;
+}
+
+#promo-panel-title {
+  color: #edf7ff;
+  font: 700 0.82rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.08em;
+}
+
+.promo-panel-row {
+  gap: 10px;
+}
+
+.promo-panel-row label,
+.promo-panel-label {
+  color: #d7edff;
+  font: 700 0.64rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.06em;
+}
+
+#promo-scale-value,
+#promo-scale-y-value {
+  min-width: 48px;
+  color: #e8f6ff;
+  font-size: 0.62rem;
+}
+
+#promo-shape-preview-stage {
+  min-height: 176px;
+  border-radius: 14px;
+}
+
+#promo-shape-preview-copy,
+.placement-panel-copy,
+#mob-pod-help,
+#mob-pod-status,
+#promo-panel-status {
+  font-size: 0.62rem;
+  line-height: 1.5;
+}
+
+.promo-panel-actions {
+  gap: 8px;
+}
+
+.promo-panel-actions button {
+  min-height: 38px;
+  border-radius: 10px;
+  font-size: 0.64rem;
+}
+
+#surface-painter-panel {
+  width: min(98vw, 1160px);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 14px;
+  padding: 18px;
+  max-height: calc(100dvh - 24px);
+  overflow: hidden;
+  border-radius: 20px;
+}
+
+#surface-painter-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+#surface-painter-kicker {
+  margin: 0 0 5px;
+  color: rgba(173, 217, 248, 0.78);
+  font: 700 0.54rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.18em;
+}
+
+#surface-painter-title {
+  font-size: 0.9rem;
+  letter-spacing: 0.08em;
+}
+
+#surface-painter-layout {
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+  align-content: start;
+}
+
+#surface-painter-panel.has-mob-sidebar #surface-painter-layout {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
+  align-items: start;
+}
+
+#surface-painter-main {
+  min-height: 0;
+  gap: 12px;
+  align-content: start;
+}
+
+#surface-painter-canvas-wrap {
+  width: min(100%, 760px);
+  position: relative;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  border: 1px solid rgba(147, 198, 236, 0.34);
+  border-radius: 16px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 14%, rgba(114, 175, 223, 0.14), transparent 42%),
+    linear-gradient(180deg, rgba(9, 22, 36, 0.94), rgba(5, 14, 24, 0.98));
+}
+
+#surface-painter-mob-prev-frame-overlay {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(100%, 680px);
+  aspect-ratio: 1 / 1;
+  max-height: min(64vh, 620px);
+  border-radius: 14px;
+  object-fit: contain;
+  opacity: 0.22;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+}
+
+#surface-painter-canvas {
+  width: min(100%, 680px);
+  max-height: min(64vh, 620px);
+  border-radius: 14px;
+  position: relative;
+  z-index: 1;
+}
+
+#surface-painter-mob-frame-strip,
+#surface-painter-canvas-wrap,
+#surface-painter-mob-sidebar {
+  justify-self: center;
+}
+
+#surface-painter-mob-sidebar {
+  width: 100%;
+  align-self: start;
+}
+
+.surface-painter-mob-card {
+  gap: 12px;
+  padding: 14px;
+  border-radius: 14px;
+}
+
+.surface-painter-mob-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.surface-painter-mob-subhead {
+  color: #e0f2ff;
+  font: 700 0.58rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.07em;
+}
+
+#surface-painter-open-mob-settings {
+  min-width: 96px;
+  min-height: 36px;
+  border-radius: 10px;
+  background: rgba(14, 42, 66, 0.95);
+  border-color: rgba(100, 184, 255, 0.72);
+  color: #c5e7ff;
+}
+
+#surface-painter-mob-preview-wrap {
+  min-height: 180px;
+}
+
+#surface-painter-mob-preview {
+  max-height: 180px;
+}
+
+#surface-painter-mob-status {
+  margin: 0;
+}
+
+#surface-painter-mob-list {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  display: grid;
+  gap: 10px;
+}
+
+.surface-painter-mob-list-item {
+  grid-template-columns: 60px minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px;
+}
+
+.surface-painter-mob-thumb {
+  width: 60px;
+  height: 60px;
+}
+
+.surface-painter-mob-actions button {
+  min-height: 32px;
+}
+
+#surface-painter-bottom {
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.9fr);
+  gap: 14px;
+}
+
+.surface-painter-dock {
+  gap: 12px;
+  padding: 14px;
+  border-radius: 16px;
+}
+
+.surface-painter-dock-title {
+  font-size: 0.72rem;
+}
+
+.surface-painter-dock-copy {
+  font-size: 0.6rem;
+}
+
+#surface-painter-toolbar {
+  gap: 10px 12px;
+}
+
+#surface-painter-toolbar .surface-painter-tool-group-size {
+  flex: 1 1 240px;
+  min-width: 240px;
+}
+
+#surface-painter-fill,
+#surface-painter-eraser,
+#surface-painter-actions-toggle {
+  min-height: 34px;
+  border-radius: 9px;
+}
+
+#surface-painter-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  align-content: start;
+}
+
+#surface-painter-actions button {
+  height: 42px;
+  border-radius: 11px;
+  font-size: 0.68rem;
+}
+
+#surface-painter-save,
+#surface-painter-spawn-mob {
+  grid-column: span 2;
+}
+
+body.is-mobile-ui #placement-selector-card {
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+}
+
+body.is-mobile-ui #placement-panel.mobile-fullscreen {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  padding: calc(env(safe-area-inset-top, 0px) + 12px) 12px
+    calc(env(safe-area-inset-bottom, 0px) + 14px);
+}
+
+body.is-mobile-ui #placement-panel.mobile-fullscreen .placement-panel-body {
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+body.is-mobile-ui #promo-shape-preview-stage {
+  min-height: 148px;
+}
+
+body.is-mobile-ui #surface-painter {
+  place-items: stretch;
+  padding: 0;
+  overflow: hidden;
+}
+
+body.is-mobile-ui #surface-painter-panel {
+  width: 100vw;
+  height: 100dvh;
+  max-height: 100dvh;
+  padding: calc(env(safe-area-inset-top, 0px) + 10px) 10px
+    calc(env(safe-area-inset-bottom, 0px) + 10px);
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  gap: 10px;
+}
+
+body.is-mobile-ui #surface-painter-head {
+  gap: 10px;
+}
+
+body.is-mobile-ui #surface-painter-kicker {
+  font-size: 0.48rem;
+}
+
+body.is-mobile-ui #surface-painter-title {
+  font-size: 0.72rem;
+}
+
+body.is-mobile-ui #surface-painter-layout {
+  min-height: 0;
+  overflow: auto;
+  gap: 10px;
+  padding-right: 0;
+}
+
+body.is-mobile-ui #surface-painter-main {
+  gap: 10px;
+  justify-items: stretch;
+}
+
+body.is-mobile-ui #surface-painter-mob-frame-strip,
+body.is-mobile-ui #surface-painter-canvas-wrap,
+body.is-mobile-ui #surface-painter-mob-sidebar {
+  width: 100%;
+}
+
+body.is-mobile-ui #surface-painter-canvas-wrap {
+  padding: 8px;
+  min-height: 0;
+}
+
+body.is-mobile-ui #surface-painter-mob-prev-frame-overlay {
+  width: 100%;
+  max-height: none;
+}
+
+body.is-mobile-ui #surface-painter-mob-frame-duration-row {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+body.is-mobile-ui #surface-painter-canvas {
+  width: 100%;
+  max-height: none;
+}
+
+body.is-mobile-ui #surface-painter-bottom {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+body.is-mobile-ui .surface-painter-dock {
+  padding: 10px;
+  border-radius: 14px;
+}
+
+body.is-mobile-ui #surface-painter-toolbar {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+body.is-mobile-ui #surface-painter-toolbar .surface-painter-tool-group,
+body.is-mobile-ui #surface-painter-toolbar .surface-painter-tool-group-size {
+  min-width: 0;
+}
+
+body.is-mobile-ui #surface-painter-toolbar .surface-painter-tool-group-size {
+  grid-column: span 2;
+}
+
+body.is-mobile-ui #surface-painter-fill,
+body.is-mobile-ui #surface-painter-eraser,
+body.is-mobile-ui #surface-painter-actions-toggle {
+  min-width: 0;
+  width: 100%;
+  height: 38px;
+}
+
+body.is-mobile-ui #surface-painter-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+body.is-mobile-ui #surface-painter-actions button {
+  height: 42px;
+  font-size: 0.66rem;
+}
+
+body.is-mobile-ui #surface-painter-save,
+body.is-mobile-ui #surface-painter-spawn-mob {
+  grid-column: span 2;
+}
+
+body.is-mobile-ui .surface-painter-mob-card-head {
+  grid-template-columns: minmax(0, 1fr);
+  display: grid;
+}
+
+body.is-mobile-ui #surface-painter-open-mob-settings {
+  width: 100%;
+}
+
+body.is-mobile-ui #surface-painter-mob-preview-wrap {
+  min-height: 132px;
+}
+
+body.is-mobile-ui #surface-painter-mob-preview {
+  max-height: 132px;
+}
+
+body.is-mobile-ui #surface-painter-mob-list {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (max-width: 1280px) {
+  #surface-painter-panel.has-mob-sidebar #surface-painter-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #surface-painter-mob-sidebar {
+    width: min(100%, 760px);
+  }
+}
+
+@media (hover: none) and (pointer: coarse), (max-width: 900px) {
+  #placement-selector-card {
+    max-height: calc(100dvh - 24px);
+    overflow: auto;
+  }
+
+  #placement-panel.mobile-fullscreen {
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    overflow: hidden;
+  }
+
+  #placement-panel.mobile-fullscreen .placement-panel-body {
+    min-height: 0;
+    overflow: auto;
+  }
+
+  #surface-painter-panel {
+    width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+    padding: calc(env(safe-area-inset-top, 0px) + 10px) 10px
+      calc(env(safe-area-inset-bottom, 0px) + 10px);
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    gap: 10px;
+  }
+
+  #surface-painter-layout {
+    min-height: 0;
+    overflow: auto;
+    gap: 10px;
+    padding-right: 0;
+  }
+
+  #surface-painter-main {
+    gap: 10px;
+    justify-items: stretch;
+  }
+
+  #surface-painter-mob-frame-strip,
+  #surface-painter-canvas-wrap,
+  #surface-painter-mob-sidebar {
+    width: 100%;
+  }
+
+  #surface-painter-canvas-wrap {
+    padding: 8px;
+  }
+
+  #surface-painter-mob-prev-frame-overlay {
+    width: 100%;
+    max-height: none;
+  }
+
+  #surface-painter-mob-frame-duration-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #surface-painter-canvas {
+    width: 100%;
+    max-height: none;
+  }
+
+  #surface-painter-bottom {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  #surface-painter-toolbar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  #surface-painter-toolbar .surface-painter-tool-group-size {
+    grid-column: span 2;
+    min-width: 0;
+  }
+
+  #surface-painter-fill,
+  #surface-painter-eraser,
+  #surface-painter-actions-toggle {
+    width: 100%;
+    min-width: 0;
+    height: 38px;
+  }
+
+  #surface-painter-actions {
+    position: static;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    padding: 0;
+    border: 0;
+    background: none;
+    backdrop-filter: none;
+  }
+
+  #surface-painter-actions button {
+    height: 42px;
+    font-size: 0.66rem;
+  }
+
+  #surface-painter-save,
+  #surface-painter-spawn-mob {
+    grid-column: span 2;
+  }
+
+  #surface-painter-mob-card-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #surface-painter-open-mob-settings {
+    width: 100%;
+  }
+
+  #surface-painter-mob-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Button flow refresh */
+#surface-painter-toolbar {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+#surface-painter-toolbar .surface-painter-tool-group {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+}
+
+#surface-painter-toolbar .surface-painter-tool-group-size {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+#surface-painter-size {
+  width: 100%;
+  min-width: 0;
+}
+
+#surface-painter-color-group {
+  order: 2;
+}
+
+#surface-painter-bg-group {
+  order: 3;
+}
+
+#surface-painter-size-group {
+  order: 1;
+}
+
+#surface-painter-fill {
+  order: 4;
+}
+
+#surface-painter-eraser {
+  order: 5;
+}
+
+#surface-painter-actions-toggle {
+  order: 6;
+}
+
+#surface-painter-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+#surface-painter-spawn-mob,
+#surface-painter-save {
+  order: 1;
+  grid-column: auto;
+}
+
+#surface-painter-cancel {
+  order: 2;
+  grid-column: auto;
+}
+
+#surface-painter-export {
+  order: 3;
+}
+
+#surface-painter-import {
+  order: 4;
+}
+
+#surface-painter-promo-share-toggle {
+  order: 5;
+  grid-column: 1 / -1;
+}
+
+#surface-painter-clear {
+  order: 6;
+  grid-column: 1 / -1;
+  border-color: rgba(255, 187, 187, 0.56);
+  color: #ffdede;
+}
+
+#surface-painter-remove-mob {
+  order: 7;
+  grid-column: 1 / -1;
+  border-color: rgba(255, 187, 187, 0.56);
+  color: #ffdede;
+}
+
+#surface-painter-panel.mob-pod-surface #surface-painter-toolbar {
+  grid-template-columns: minmax(0, 1fr) minmax(112px, 148px) minmax(112px, 148px);
+}
+
+#surface-painter-panel.mob-pod-surface #surface-painter-size-group {
+  grid-column: 1 / -1;
+}
+
+#surface-painter-panel.mob-pod-surface #surface-painter-color-group {
+  grid-column: 1 / 2;
+}
+
+#surface-painter-panel.mob-pod-surface #surface-painter-fill {
+  grid-column: 2 / 3;
+}
+
+#surface-painter-panel.mob-pod-surface #surface-painter-actions-toggle {
+  grid-column: 3 / 4;
+}
+
+#surface-painter-panel.mob-pod-surface #surface-painter-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+body.is-mobile-ui #surface-painter-toolbar {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+body.is-mobile-ui #surface-painter-toolbar .surface-painter-tool-group-size {
+  grid-column: 1 / -1;
+}
+
+body.is-mobile-ui #surface-painter-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+body.is-mobile-ui #surface-painter-clear,
+body.is-mobile-ui #surface-painter-remove-mob,
+body.is-mobile-ui #surface-painter-promo-share-toggle {
+  grid-column: 1 / -1;
+}
+
+@media (hover: none) and (pointer: coarse), (max-width: 900px) {
+  #surface-painter-toolbar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  #surface-painter-toolbar .surface-painter-tool-group-size {
+    grid-column: 1 / -1;
+  }
+
+  #surface-painter-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  #surface-painter-clear,
+  #surface-painter-remove-mob,
+  #surface-painter-promo-share-toggle {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Surface painter tool mode */
+#surface-painter-panel {
+  position: relative;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+#surface-painter-body {
+  position: relative;
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr);
+  gap: 14px;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+#surface-painter-stage {
+  min-height: 0;
+}
+
+#surface-painter-layout {
+  min-height: 0;
+  height: 100%;
+  overflow: auto;
+}
+
+#surface-painter-tool-dock {
+  position: relative;
+  z-index: 20;
+  display: grid;
+  grid-auto-rows: minmax(0, auto);
+  gap: 10px;
+  align-content: start;
+}
+
+#surface-painter-tool-dock button {
+  min-height: 58px;
+  padding: 10px 8px;
+  border: 1px solid rgba(144, 194, 232, 0.34);
+  border-radius: 14px;
+  background: rgba(8, 18, 31, 0.88);
+  color: #dfefff;
+  font: 700 0.6rem/1.15 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+
+#surface-painter-tool-dock button.active {
+  border-color: rgba(255, 206, 128, 0.86);
+  background: rgba(64, 39, 12, 0.94);
+  color: #fff0cf;
+}
+
+.surface-painter-tool-label {
+  display: block;
+}
+
+#surface-painter-tool-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+  display: grid;
+  place-items: center;
+  padding: 8px;
+  background: rgba(4, 12, 20, 0.62);
+  backdrop-filter: blur(10px);
+}
+
+.surface-painter-tool-panel {
+  width: min(100%, 560px);
+  min-height: min(100%, 420px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid rgba(146, 198, 233, 0.34);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(87, 145, 191, 0.14), transparent 38%),
+    linear-gradient(180deg, rgba(8, 21, 36, 0.98), rgba(4, 12, 22, 0.98));
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.34);
+}
+
+.surface-painter-tool-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.surface-painter-tool-panel-head button {
+  min-width: 72px;
+}
+
+.surface-painter-tool-panel-kicker {
+  color: rgba(177, 211, 240, 0.78);
+  font: 700 0.52rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.surface-painter-tool-panel-title {
+  margin-top: 4px;
+  color: #f1f8ff;
+  font: 700 0.92rem/1.1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.06em;
+}
+
+.surface-painter-tool-panel-body {
+  min-height: 0;
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+#surface-painter-tool-panel-color #surface-painter-toolbar,
+#surface-painter-tool-panel-actions #surface-painter-actions {
+  width: 100%;
+}
+
+#surface-painter-tool-panel-animation #surface-painter-mob-frame-strip {
+  width: 100%;
+  justify-self: stretch;
+}
+
+#surface-painter-tool-panel-actions #surface-painter-actions {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+#surface-painter-tool-panel-actions #surface-painter-actions button,
+#surface-painter-tool-panel-color #surface-painter-toolbar button {
+  min-height: 44px;
+}
+
+#surface-painter-tool-panel-actions #surface-painter-save,
+#surface-painter-tool-panel-actions #surface-painter-spawn-mob,
+#surface-painter-tool-panel-actions #surface-painter-export,
+#surface-painter-tool-panel-actions #surface-painter-import,
+#surface-painter-tool-panel-actions #surface-painter-clear,
+#surface-painter-tool-panel-actions #surface-painter-remove-mob,
+#surface-painter-tool-panel-actions #surface-painter-cancel,
+#surface-painter-tool-panel-actions #surface-painter-promo-share-toggle {
+  grid-column: auto;
+}
+
+body.is-mobile-ui #surface-painter-body {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+}
+
+body.is-mobile-ui #surface-painter-tool-dock {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-rows: auto;
+}
+
+body.is-mobile-ui #surface-painter-tool-dock button {
+  min-height: 42px;
+  border-radius: 12px;
+  font-size: 0.58rem;
+}
+
+body.is-mobile-ui #surface-painter-tool-overlay {
+  padding: 0;
+}
+
+body.is-mobile-ui .surface-painter-tool-panel {
+  width: 100%;
+  min-height: 100%;
+  border: 0;
+  border-radius: 0;
+  padding: calc(env(safe-area-inset-top, 0px) + 14px) 14px
+    calc(env(safe-area-inset-bottom, 0px) + 14px);
+}
+
+body.is-mobile-ui .surface-painter-tool-panel-body {
+  overflow: auto;
+  padding-right: 2px;
+}
+
+@media (hover: none) and (pointer: coarse), (max-width: 900px) {
+  #surface-painter-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  #surface-painter-tool-dock {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-auto-rows: auto;
+  }
+
+  #surface-painter-tool-dock button {
+    min-height: 42px;
+    border-radius: 12px;
+    font-size: 0.58rem;
+  }
+
+  #surface-painter-tool-overlay {
+    padding: 0;
+  }
+
+  .surface-painter-tool-panel {
+    width: 100%;
+    min-height: 100%;
+    border: 0;
+    border-radius: 0;
+    padding: calc(env(safe-area-inset-top, 0px) + 14px) 14px
+      calc(env(safe-area-inset-bottom, 0px) + 14px);
+  }
+
+  .surface-painter-tool-panel-body {
+    overflow: auto;
+    padding-right: 2px;
+  }
+}
+
+/* Surface painter workspace final layout */
+#surface-painter {
+  overflow: hidden;
+}
+
+#surface-painter-panel {
+  width: min(96vw, 1380px);
+  height: min(92dvh, 920px);
+  max-height: none;
+  overflow: hidden;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+#surface-painter-head,
+#surface-painter-body,
+#surface-painter-workspace,
+#surface-painter-stage,
+#surface-painter-main,
+#surface-painter-canvas-wrap {
+  min-height: 0;
+  min-width: 0;
+}
+
+#surface-painter-body {
+  grid-template-columns: 86px minmax(0, 1fr);
+  align-items: stretch;
+}
+
+#surface-painter-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  gap: 18px;
+  min-height: 0;
+  align-items: stretch;
+}
+
+#surface-painter-stage {
+  display: grid;
+  min-height: 0;
+}
+
+#surface-painter-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  overflow: hidden;
+  align-items: stretch;
+}
+
+#surface-painter-panel.has-mob-sidebar #surface-painter-layout {
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+}
+
+#surface-painter-main {
+  display: grid;
+  place-items: center;
+  align-content: stretch;
+}
+
+#surface-painter-canvas-wrap {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+}
+
+#surface-painter-canvas {
+  width: min(100%, min(72vh, 720px));
+  max-width: 100%;
+  max-height: calc(100dvh - 176px);
+  height: auto;
+}
+
+#surface-painter-tool-overlay {
+  position: relative;
+  inset: auto;
+  z-index: 1;
+  min-height: 0;
+  padding: 0;
+  display: grid;
+  align-items: stretch;
+  background: transparent;
+  backdrop-filter: none;
+}
+
+#surface-painter-tool-overlay.hidden {
+  display: none;
+}
+
+.surface-painter-tool-panel {
+  width: 100%;
+  min-height: 0;
+  height: 100%;
+  border-radius: 22px;
+}
+
+.surface-painter-tool-panel-body {
+  overflow: auto;
+}
+
+#surface-painter-draw-mode-group {
+  grid-column: 1 / -1;
+}
+
+#surface-painter-draw-mode-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.surface-painter-draw-tool {
+  min-height: 42px;
+  border: 1px solid rgba(149, 197, 231, 0.34);
+  border-radius: 12px;
+  background: rgba(11, 26, 40, 0.9);
+  color: #deefff;
+  font: 700 0.62rem/1 "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+  letter-spacing: 0.05em;
+}
+
+.surface-painter-draw-tool.active {
+  border-color: rgba(255, 207, 128, 0.88);
+  background: rgba(67, 41, 12, 0.94);
+  color: #fff1d1;
+}
+
+#surface-painter-tool-panel-color #surface-painter-toolbar {
+  align-content: start;
+}
+
+body.is-mobile-ui #surface-painter {
+  padding: 0;
+}
+
+body.is-mobile-ui #surface-painter-panel {
+  width: 100vw;
+  height: 100dvh;
+  border: 0;
+  border-radius: 0;
+}
+
+body.is-mobile-ui #surface-painter-body {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+}
+
+body.is-mobile-ui #surface-painter-workspace {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+
+body.is-mobile-ui #surface-painter-stage {
+  min-height: 0;
+}
+
+body.is-mobile-ui #surface-painter-layout {
+  overflow: hidden;
+}
+
+body.is-mobile-ui #surface-painter-main {
+  place-items: center;
+}
+
+body.is-mobile-ui #surface-painter-canvas {
+  width: min(100%, calc(100dvh - 220px));
+  max-height: calc(100dvh - 220px);
+}
+
+body.is-mobile-ui #surface-painter-mob-sidebar {
+  display: none;
+}
+
+body.is-mobile-ui #surface-painter-tool-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  padding: 0;
+  background: rgba(4, 12, 20, 0.7);
+  backdrop-filter: blur(12px);
+}
+
+body.is-mobile-ui .surface-painter-tool-panel {
+  min-height: 100dvh;
+  height: 100dvh;
+}
+
+@media (hover: none) and (pointer: coarse), (max-width: 900px) {
+  #surface-painter {
+    padding: 0;
+  }
+
+  #surface-painter-panel {
+    width: 100vw;
+    height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+
+  #surface-painter-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  #surface-painter-layout {
+    overflow: hidden;
+  }
+
+  #surface-painter-canvas {
+    width: min(100%, calc(100dvh - 220px));
+    max-height: calc(100dvh - 220px);
+  }
+
+  #surface-painter-mob-sidebar {
+    display: none;
+  }
+
+  #surface-painter-tool-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    padding: 0;
+    background: rgba(4, 12, 20, 0.7);
+    backdrop-filter: blur(12px);
   }
 }

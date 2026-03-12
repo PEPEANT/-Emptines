@@ -662,7 +662,8 @@ export function registerSocketHandlers({
       const room = roomService.getRoomBySocket(socket);
       if (!room) return;
       socket.emit("drawing:entity:state", {
-        entities: roomService.serializeDrawingEntities(room)
+        entities: roomService.serializeDrawingEntities(room),
+        serverNowMs: Date.now()
       });
     };
 
@@ -849,6 +850,13 @@ export function registerSocketHandlers({
         return;
       }
       socket.data.playerKey = nextKey;
+      if (room?.players?.has?.(socket.id)) {
+        const player = room.players.get(socket.id);
+        if (player) {
+          player.ownerKey = nextKey;
+          roomService.emitRoomUpdate(room);
+        }
+      }
       ack(ackFn, { ok: true, key: nextKey });
     });
 
@@ -2120,11 +2128,6 @@ export function registerSocketHandlers({
         ack(ackFn, { ok: false, error: persistenceError });
         return;
       }
-      const promoModeError = getFeatureModeBlockReason(config?.promoMode, "mob pod", isHost);
-      if (promoModeError) {
-        ack(ackFn, { ok: false, error: promoModeError });
-        return;
-      }
       const promoGuard = consumePromoOperationBudget({
         socketState: socketPromoRateState,
         ipStateMap: promoOpRateStateByIp,
@@ -2174,11 +2177,6 @@ export function registerSocketHandlers({
       const persistenceError = getPersistentStateBlockReason(config, "mob pod");
       if (persistenceError) {
         ack(ackFn, { ok: false, error: persistenceError });
-        return;
-      }
-      const promoModeError = getFeatureModeBlockReason(config?.promoMode, "mob pod", isHost);
-      if (promoModeError) {
-        ack(ackFn, { ok: false, error: promoModeError });
         return;
       }
       const promoGuard = consumePromoOperationBudget({

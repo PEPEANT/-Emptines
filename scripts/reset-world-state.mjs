@@ -1,6 +1,10 @@
 import { access, copyFile, readFile, writeFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { loadRuntimeConfig } from "../server/config/runtimeConfig.js";
+import {
+  PORTAL_DISPLAY_KEYS,
+  getPortalDisplayDefaults
+} from "../shared/portalConfig.js";
 
 const SURFACE_PAINT_CORE_PAYLOAD_VERSION = 1;
 
@@ -52,6 +56,18 @@ function normalizeSurfacePaintCore(rawValue, fallback = []) {
 
 function normalizeObject(rawValue, fallback = {}) {
   return rawValue && typeof rawValue === "object" ? rawValue : fallback;
+}
+
+function createResetPortalDisplaysState(now) {
+  const next = {};
+  for (const portalKey of PORTAL_DISPLAY_KEYS) {
+    next[portalKey] = {
+      ...getPortalDisplayDefaults(portalKey),
+      imageDataUrl: "",
+      updatedAt: now
+    };
+  }
+  return next;
 }
 
 async function main() {
@@ -145,18 +161,7 @@ async function main() {
   }
 
   if (clearMedia) {
-    next.portalDisplays = {
-      portal1: {
-        title: "OX 퀴즈 대회",
-        imageDataUrl: "",
-        updatedAt: now
-      },
-      portal2: {
-        title: "포탈 2",
-        imageDataUrl: "",
-        updatedAt: now
-      }
-    };
+    next.portalDisplays = createResetPortalDisplaysState(now);
     next.mainPortalAd = {
       mode: "ad",
       imageDataUrl: "",
